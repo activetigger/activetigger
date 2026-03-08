@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <link rel="shortcut icon" href="../img/favicon.ico" />
+    <title>Use Cases - ActiveTigger Documentation</title>
+    <link rel="stylesheet" href="../css/theme.css" />
+    <link rel="stylesheet" href="../css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "Use Cases";
+        var mkdocs_page_input_path = "usecases.md";
+        var mkdocs_page_url = null;
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="../js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href=".." class="icon icon-home"> ActiveTigger Documentation
+        </a><div role="search">
+  <form id ="rtd-search-form" class="wy-form" action="../search.html" method="get">
+      <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" title="Type search term here" />
+  </form>
+</div>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="..">Home</a>
+                </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../quickstart/">Quickstart</a>
+                </li>
+              </ul>
+              <ul class="current">
+                <li class="toctree-l1 current"><a class="reference internal current" href="#">Use Cases</a>
+    <ul class="current">
+    <li class="toctree-l2"><a class="reference internal" href="#jules-brion-research">Jules Brion research</a>
+    </li>
+    </ul>
+                </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../documentation/">User Guide</a>
+                </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../access/">Get Access</a>
+                </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../software/">Software</a>
+                </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../environment/">Environment</a>
+                </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../faq/">FAQ</a>
+                </li>
+              </ul>
+              <ul>
+                <li class="toctree-l1"><a class="reference internal" href="../contributors/">Contributors</a>
+                </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="..">ActiveTigger Documentation</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href=".." class="icon icon-home" aria-label="Docs"></a></li>
+      <li class="breadcrumb-item active">Use Cases</li>
+    <li class="wy-breadcrumbs-aside">
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="use-cases">Use cases</h1>
+<h2 id="jules-brion-research">Jules Brion research</h2>
+<p><strong>Study Objective</strong>: To build a corpus of newspapers articles related to the environment and the ecological transition. </p>
+<p><strong>Corpus</strong>: Articles are first extracted from Europresse with a list of keywords related to the planet boundaries. The problem is that many of these words ("climate", "environment"...) are polysemic. With a traditional approach, the corpus should then be built up manually, separating relevant articles from those not related to the environment. The problem is that this severely limits the number of articles you can add to your corpus, which can be a problem when analyzing media content on issues as broad as the environment. With active Tigger, it was possible to skip the initial corpus and sort through it.</p>
+<p><strong>Codebook</strong>: Binary classification – environment / not environment.</p>
+<p><strong>Goal</strong>: Develop a classifier with high performance (F1 score &gt; 0.95) capable of identifying environmental journalism segments.</p>
+<p><strong>Recomandations</strong> : Active Tigger sets a limit of 512 tokens (around 1300 characters), so it's not possible to analyze an entire article. Generally speaking, it is sometimes easier to classify a 300-character text than a 1300-character text. The decision was therefore taken to keep texts of less than 500 characters intact and to cut out other texts between 300 and 700 characters, with priority given to the end of a sentence (period, question mark, etc.).</p>
+<p>If the components of your corpus are not homogeneous (there are many more articles from one newspaper than another, for example), it can sometimes be useful to <strong>create an additional homogeneous corpus to train the model</strong>. In general, it's best if the training corpus reflects as closely as possible the diversity of cases that will be encountered by the classifier. For example, don't annotate only one year if you are then submitting a corpus from ten years ago. Once the model has been trained and stabilized, you can apply it to your "heterogeneous corpus".</p>
+<p>When training your model, it is a good practice to examine the cases where the model's predictions differ from your manual annotations. This can help you spot potential annotation mistakes due to inattention. However, <strong>be careful to code according to your codebook and not according to the model's predictions to avoid overfitting</strong>.</p>
+<p>Once your model has been trained and stabilized, you can apply it to corpora of any size. What is particularly useful about this approach is that, should your study corpus change (you want to add a year of study or add a newspaper, for example) you can still classify it (by going to Predict, then choose your model and go to <em>Import external texts to predict</em>).</p>
+<p><strong>Post-ActiveTigger Analysis</strong>: Once the annotations has been extended to the entire corpus, the article paragraphs are grouped together. A score is calculated, relating the number of environment-related paragraphs to the total number of paragraphs for each article. </p>
+<p>Depending on the needs of your search, it is possible to go a little further in post active-tigger processing. For example, to minimize the number of false positives (paragraphs considered to be related to the environment when they are not), it is possible to remove from the calculation paragraphs where the model is not sure of its prediction (refer to the enthropy score).</p>
+<p>In addition, we decided not to keep articles with three paragraphs and only one related to the environment (the score of 0.33 is high, but adding them runs the risk of false positives because it is only based on one classification).</p>
+<p><strong>Key Takeaways / Lessons Learned</strong>:</p>
+<ul>
+<li>Learning ActiveTigger: It took a few weeks to get comfortable with the interface, stabilize the corpus structure (e.g., paragraph length), and define the coding scheme.</li>
+<li>Use of Visualization: Visualization tools helped identify ambiguous categories, leading to annotation improvements.</li>
+<li>Model Training Insights:</li>
+<li><strong>Understanding how BERT-based models learn is essential for improving performance metrics</strong>. Initially, models were trained without a clear grasp of how they function or which parameters influence outcomes, which lead to common pitfalls such as overfitting. Taking the time to understand the fundamentals — like the distinction between evaluation loss and validation loss — helps in effectively avoiding these issues.</li>
+</ul>
+              
+            </div>
+          </div><footer>
+    <div class="rst-footer-buttons" role="navigation" aria-label="Footer Navigation">
+        <a href="../quickstart/" class="btn btn-neutral float-left" title="Quickstart"><span class="icon icon-circle-arrow-left"></span> Previous</a>
+        <a href="../documentation/" class="btn btn-neutral float-right" title="User Guide">Next <span class="icon icon-circle-arrow-right"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+    
+      <span><a href="../quickstart/" style="color: #fcfcfc">&laquo; Previous</a></span>
+    
+    
+      <span><a href="../documentation/" style="color: #fcfcfc">Next &raquo;</a></span>
+    
+  </span>
+</div>
+    <script src="../js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = "..";</script>
+    <script src="../js/theme_extra.js"></script>
+    <script src="../js/theme.js"></script>
+      <script src="../search/main.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>
