@@ -7,8 +7,6 @@
 import asyncio
 import datetime
 import multiprocessing
-import os
-import tempfile
 import uuid
 
 # manage the executor
@@ -18,34 +16,6 @@ from activetigger.datamodels import QueueStateTaskModel, QueueTaskModel
 from activetigger.tasks.base_task import BaseTask
 
 multiprocessing.set_start_method("spawn", force=True)
-
-
-class CancelEvent:
-    """File-based event for cross-process cancellation signaling.
-
-    Replaces multiprocessing.Manager().Event() which proxies every is_set()
-    call through IPC sockets (expensive on every training step).
-    This uses a temp file: set() creates the file, is_set() calls os.path.exists()
-    (a single syscall, ~1µs). Trivially picklable (just a path string).
-    """
-
-    def __init__(self) -> None:
-        self._path = os.path.join(tempfile.gettempdir(), f"activetigger_cancel_{uuid.uuid4().hex}")
-
-    def set(self) -> None:
-        """Signal cancellation by creating the sentinel file."""
-        open(self._path, "w").close()
-
-    def is_set(self) -> bool:
-        """Check if cancellation was signaled."""
-        return os.path.exists(self._path)
-
-    def cleanup(self) -> None:
-        """Remove the sentinel file if it exists."""
-        try:
-            os.unlink(self._path)
-        except FileNotFoundError:
-            pass
 
 
 class Queue:
@@ -77,6 +47,9 @@ class Queue:
         self.nb_workers = nb_workers_cpu + nb_workers_gpu
         self.current = []
 
+        # manager for cross-process event signaling
+        self.manager = multiprocessing.Manager()
+
         # create the executor
         self.executor = get_reusable_executor(
             max_workers=self.nb_workers, timeout=14400
@@ -91,6 +64,8 @@ class Queue:
         """
         if hasattr(self, "task"):
             self.task.cancel()
+        if hasattr(self, "manager"):
+            self.manager.shutdown()
 
     def _dispatch_pending_tasks(self) -> None:
         """
@@ -167,7 +142,7 @@ class Queue:
         task.unique_id = unique_id
 
         # set an event to inform the end of the process
-        event = CancelEvent()
+        event = self.manager.Event()
         task.event = event
 
         # add it in the current processes
@@ -215,7 +190,6 @@ class Queue:
         for i in [t for t in self.current if t.unique_id in ids]:
             if i.future is None or not i.future.done():
                 print("Deleting a unfinished process")
-            i.event.cleanup()
             self.current.remove(i)
 
     def state(self) -> list[QueueStateTaskModel]:

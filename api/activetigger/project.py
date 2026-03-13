@@ -221,7 +221,7 @@ class Project:
             self.queue,
             self.computing,
             self.db_manager,
-            config.file_models,
+            config.file_bert_models,
         )
         self.quickmodels = QuickModels(
             project_slug, self.params.dir, self.queue, self.computing, self.db_manager

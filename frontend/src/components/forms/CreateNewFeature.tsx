@@ -8,7 +8,7 @@ import { getRandomName } from '../../core/utils';
 import { FeatureModelExtended } from '../../types';
 
 interface Options {
-  models?: string[];
+  models?: Record<string, unknown> | string[];
 }
 
 interface FeaturesOptions {
@@ -94,10 +94,9 @@ export const CreateNewFeature: FC<CreateNewFeatureProps> = ({
             <option key={null} value="generic">
               Default model
             </option>
-            {(
-              (featuresOption['sentence-embeddings']
-                ? (featuresOption['sentence-embeddings']['models'] as string[])
-                : []) || []
+            {(featuresOption['sentence-embeddings']?.models
+              ? Object.keys(featuresOption['sentence-embeddings']['models'])
+              : []
             ).map((element) => (
               <option key={element as string} value={element as string}>
                 {element as string}
@@ -122,7 +121,10 @@ export const CreateNewFeature: FC<CreateNewFeatureProps> = ({
               Default model
             </option>
 
-            {(featuresOption.fasttext?.models || []).map((element) => (
+            {(featuresOption.fasttext?.models
+              ? Object.keys(featuresOption.fasttext.models)
+              : []
+            ).map((element) => (
               <option key={element as string} value={element as string}>
                 {element as string}
               </option>

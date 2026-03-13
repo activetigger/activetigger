@@ -7,7 +7,6 @@ from typing import Any
 
 import pandas as pd  # type: ignore[import]
 import pyarrow.parquet as pq  # type: ignore[import]
-import yaml  # type: ignore[import]
 from pandas import DataFrame, Series
 
 from activetigger.config import config
@@ -75,30 +74,13 @@ class Features:
         # load possible embeddings models
         fasttext_models = [f for f in os.listdir(self.path_models) if f.endswith(".bin")]
         # possibility to create a embeddings.yaml file to add models
-        embeddings_models = [
-            "jinaai/jina-embeddings-v3",
-            "Alibaba-NLP/gte-multilingual-base",
-            "all-mpnet-base-v2",
-        ]
-        if Path(config.data_path).joinpath("projects/embeddings.yaml").exists():
-            content = yaml.safe_load(
-                open(
-                    str(Path(config.data_path).joinpath("projects/embeddings.yaml")),
-                    "r",
-                )
-            )
-            embeddings_models = content.get("models", embeddings_models)
-        else:
-            # create the file
-            with open(
-                str(Path(config.data_path).joinpath("projects/embeddings.yaml")),
-                "w",
-            ) as f:
-                yaml.dump({"models": embeddings_models}, f)
 
         # options
         self.options: dict = {
-            "sentence-embeddings": {"models": embeddings_models},
+            "sentence-embeddings": {
+                "models": config.models_embeddings,
+                "default": "jinaai/jina-embeddings-v5-text-small",
+            },
             "fasttext": {"models": fasttext_models},
             "dfm": {
                 "tfidf": False,
@@ -420,8 +402,9 @@ class Features:
                     raise Exception("The column can't be transform into numerical feature")
             else:
                 column = column.apply(str)
-                column = pd.get_dummies(column, prefix=parameters["dataset_col"], drop_first=True)
-                assert all(dtype != "object" for dtype in column.dtypes)
+                column_encoded = pd.get_dummies(
+                    column, prefix=parameters["dataset_col"], drop_first=True
+                )  # type: ignore[misc]
 
             # add the feature to the project
             parameters = {
@@ -431,7 +414,7 @@ class Features:
                 "dataset_type": parameters["dataset_type"],
                 "username": username,
             }
-            self.add(name, kind, username, parameters, column)
+            self.add(name, kind, username, parameters, column_encoded)
             return None
 
         # features with queue
@@ -443,7 +426,7 @@ class Features:
                 or parameters["model"] is None
                 or parameters["model"] == "generic"
             ):
-                model = self.options["sentence-embeddings"]["models"][0]
+                model = self.options["sentence-embeddings"]["default"]
             else:
                 model = parameters["model"]
             if "max_length_tokens" not in parameters:

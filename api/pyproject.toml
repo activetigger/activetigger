@@ -27,7 +27,7 @@ dependencies = [
 		"pyarrow",
 		"torch>=2.6.0",
 		"transformers[torch]>=4.51.0",
-		"sentence-transformers<=5.1.0", # Temporary, there is a bug
+		"sentence-transformers",
 		"typing-inspect",
 		"typing-extensions",
 		"spacy>=3.8",
@@ -69,6 +69,7 @@ dependencies = [
 		"en-core-web-sm",
 		"setuptools",
 		"nltk",
+		"peft>=0.18.1",
 ]
 
 [tool.ruff]

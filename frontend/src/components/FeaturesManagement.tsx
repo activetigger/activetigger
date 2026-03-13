@@ -9,6 +9,7 @@ import { FeatureDescriptionModelOut } from '../types';
 import { ButtonNewFeature } from './ButtonNewFeature';
 import { ModelParametersTab } from './ModelParametersTab';
 import { ModelsPillDisplay } from './ModelsPillDisplay';
+import { StopProcessButton } from './StopProcessButton';
 
 export default function SimpleTable(data: FeatureDescriptionModelOut) {
   return (
@@ -65,9 +66,12 @@ export const FeaturesManagement: FC = () => {
       {/* Display computing features */}
       {Object.entries(project?.features.training).map(([key, element]) => (
         <div className="card text-bg-light m-3 bg-warning w-75" key={key}>
-          <div className="d-flex m-2 align-items-center">
-            Currently computing {element ? element.name : ''}
-            {element?.progress ? ` (${element.progress}%)` : ''}
+          <div className="d-flex m-2 align-items-center justify-content-between">
+            <span>
+              Currently computing {element ? element.name : ''}
+              {element?.progress ? ` (${element.progress}%)` : ''}
+            </span>
+            <StopProcessButton projectSlug={projectName || null} kind="feature" />
           </div>
         </div>
       ))}

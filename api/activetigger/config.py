@@ -1,8 +1,10 @@
 import os
 from collections.abc import Callable
 from enum import StrEnum
+from pathlib import Path
 
 import pytz  # type: ignore
+import yaml
 from dotenv import load_dotenv
 
 
@@ -40,6 +42,15 @@ def parse_environ(key: str, parse_method: Callable[[str], int | float], default:
         return default
 
 
+DEFAULT_EMBEDDINGS_MODELS = {
+    "jinaai/jina-embeddings-v5-text-small": {
+        "task": "retrieval",
+    },
+    "all-mpnet-base-v2": {},
+    "Qwen/Qwen3-Embedding-0.6B": {},
+}
+
+
 class Config(metaclass=_Singleton):
     # type sage configuration specification with default values coming from env variables or defaults
     data_path: str = os.environ.get("DATA_PATH", ".")
@@ -66,7 +77,8 @@ class Config(metaclass=_Singleton):
     valid_file: str = "valid.parquet"
     features_file: str = "features.parquet"
     data_all: str = "data_all.parquet"
-    file_models: str = "bert_models.csv"
+    file_bert_models: str = "bert_models.csv"
+    file_embeddings_models: str = "embeddings.yaml"
     default_scheme: str = "default"
     mail_server: str | None = os.environ.get("MAIL_SERVER", None)
     mail_account: str | None = os.environ.get("MAIL_ACCOUNT", None)
@@ -94,6 +106,33 @@ class Config(metaclass=_Singleton):
         if self.mail_server and self.mail_account and self.mail_password:
             self.mail_available = True
         self.mail_server_port = parse_environ("MAIL_SERVER_PORT", int, 465)
+        self.models_embeddings = self._load_models_embeddings()
+
+    def _get_embeddings_path(self) -> Path:
+        return Path(self.data_path) / self.file_embeddings_models
+
+    def _load_models_embeddings(self) -> dict:
+        """
+        Load available sentence-transformers models
+        (or create the file)
+        """
+        embeddings_path = self._get_embeddings_path()
+        if embeddings_path.exists():
+            with open(embeddings_path, "r") as f:
+                content = yaml.safe_load(f)
+            if not isinstance(content, dict) or "models" not in content:
+                raise ValueError(
+                    f"Invalid embeddings config {embeddings_path}: expected a 'models' key"
+                )
+            return content["models"]
+        else:
+            with open(embeddings_path, "w") as f:
+                yaml.dump({"models": DEFAULT_EMBEDDINGS_MODELS}, f)
+            return dict(DEFAULT_EMBEDDINGS_MODELS)
+
+    def reload_embeddings(self) -> None:
+        """Reload embeddings models from the YAML file without restarting."""
+        self.models_embeddings = self._load_models_embeddings()
 
 
 # the configuration is safe to share as it's a singleton (initialized only once)

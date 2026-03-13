@@ -6,7 +6,7 @@ from pathlib import Path
 from string import punctuation
 
 import hdbscan  # type: ignore[import]
-import nltk  # type: ignore
+import nltk  # type: ignore[import]
 import numpy as np
 import pandas as pd  # type: ignore[import]
 import plotly.graph_objects as go  # type: ignore[import]
@@ -15,10 +15,10 @@ import umap  # type: ignore[import]
 from bertopic import BERTopic  # type: ignore[import]
 from great_tables import GT, loc, style
 from jinja2 import Template
-from nltk.corpus import stopwords as nltk_stopwords  # type: ignore
+from nltk.corpus import stopwords as nltk_stopwords  # type: ignore[import]
 from simplemma import lemmatize  # type: ignore[import]
 from sklearn.feature_extraction.text import CountVectorizer  # type: ignore[import]
-from slugify import slugify  # type: ignore
+from slugify import slugify  # type: ignore[import]
 
 from activetigger.config import config
 from activetigger.datamodels import BertopicParamsModel, EventsModel
@@ -337,6 +337,8 @@ class ComputeBertopic(BaseTask):
         if path_embeddings.exists():
             path_embeddings.unlink()
 
+        if self.parameters.embedding_model not in config.models_embeddings:
+            raise ValueError(f"Model {self.parameters.embedding_model} not supported.")
         self.update_progress(f"Computing embeddings with {self.parameters.embedding_model}")
         embeddings = ComputeSbert(
             texts=df[self.col_text],
@@ -661,18 +663,23 @@ class ComputeBertopic(BaseTask):
                 task_timer.stop("generate-embeddings")
 
             df_embeddings = self.__load_embeddings(path_embeddings)
-            df_embeddings = self.__check_embeddings(df_embeddings, df)
+            df_embeddings_t = self.__check_embeddings(df_embeddings, df)
 
-            if df_embeddings is None:
+            if df_embeddings_t is None:
                 # If issue when checking the embeddings, force compute the embeddings
                 task_timer.start("generate-embeddings")
                 self.__compute_embeddings(df, path_embeddings)
                 task_timer.stop("generate-embeddings")
                 df_embeddings = self.__load_embeddings(path_embeddings)
-                df_embeddings = self.__check_embeddings(df_embeddings, df)
+                df_embeddings_t = self.__check_embeddings(df_embeddings, df)
 
-            embeddings: np.ndarray = df_embeddings.values
-            self.__create_projection(df_embeddings, path_projection)
+            if df_embeddings_t is None:
+                raise Exception(
+                    "Something went wrong when checking the embeddings. Please check the logs."
+                )
+
+            embeddings: np.ndarray = df_embeddings_t.values
+            self.__create_projection(df_embeddings_t, path_projection)
 
             self.__stop_process_opportunity()
 

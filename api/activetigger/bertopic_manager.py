@@ -6,7 +6,7 @@ from typing import Callable, Optional
 
 import pandas as pd  # type: ignore[import]
 from fastapi.responses import FileResponse
-from slugify import slugify  # type: ignore
+from slugify import slugify  # type: ignore[import]
 
 from activetigger.config import config
 from activetigger.datamodels import (
@@ -56,15 +56,6 @@ class Bertopic:
             self.path.joinpath("runs").mkdir(parents=True, exist_ok=True)
         self.features = features
         self.models_service = db_manager.language_models_service
-        self.available_models = [
-            "jinaai/jina-embeddings-v3",
-            "Qwen/Qwen3-Embedding-0.6B",
-            "sentence-transformers/multi-qa-mpnet-base-dot-v1",
-            "Alibaba-NLP/gte-multilingual-base",
-            "sentence-transformers/all-mpnet-base-v2",
-            "sentence-transformers/all-MiniLM-L6-v2",
-            "sentence-transformers/paraphrase-multilingual-mpnet-base-v2",
-        ]
 
     @staticmethod
     def get_params(folder_path):
@@ -180,7 +171,7 @@ class Bertopic:
         return BertopicProjectStateModel(
             available=self.available(),
             training=self.training(),
-            models=self.available_models,
+            models=list(config.models_embeddings),
         )
 
     def current_user_processes(self, user: str) -> list:
@@ -234,7 +225,7 @@ class Bertopic:
             df = pd.read_csv(path_model.joinpath("bertopic_topics.csv"), index_col=0)
             df.columns = df.columns.astype(str)
             df_list = df.reset_index().to_dict(orient="records")
-            return [TopicsOutModel(**item) for item in df_list]  # type: ignore
+            return [TopicsOutModel(**item) for item in df_list]  # type: ignore[misc]
         else:
             raise FileNotFoundError(f"Model {name} does not exist.")
 
@@ -267,7 +258,7 @@ class Bertopic:
             r = json.load(f)
             return BertopicOutModelParameters(**r)
 
-    def get_projection(self, name: str) -> dict[str, list | dict]:
+    def get_projection(self, name: str) -> BertopicProjectionData:
         """
         Open the project and the cluster
         """
