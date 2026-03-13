@@ -14,15 +14,15 @@ import { BertopicVizSigma } from '../components/ProjectionVizSigma/BertopicVizSi
 import {
   useDeleteBertopic,
   useDownloadBertopicClusters,
-  useDownloadBertopicReport,
   useDownloadBertopicEmbeddings,
+  useDownloadBertopicReport,
   useDownloadBertopicTopics,
   useExportTopicsToScheme,
   useGetBertopicProjection,
   useGetBertopicTopics,
   useGetElementById,
 } from '../core/api';
-import { useAppContext } from '../core/context';
+import { useAppContext } from '../core/useAppContext';
 import { sortDatesAsStrings } from '../core/utils';
 
 export const BertopicPage: FC = () => {

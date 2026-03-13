@@ -18,8 +18,8 @@ import {
   useGetAvailableDatasets,
   useProjectNameAvailable,
 } from '../../core/api';
-import { useAppContext } from '../../core/context';
 import { useNotifications } from '../../core/notifications';
+import { useAppContext } from '../../core/useAppContext';
 import { getRandomName, loadFile } from '../../core/utils';
 import { ProjectModel } from '../../types';
 

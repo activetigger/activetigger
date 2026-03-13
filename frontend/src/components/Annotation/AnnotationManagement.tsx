@@ -8,7 +8,7 @@ import {
   useGetNextElementId,
   useStatistics,
 } from '../../core/api';
-import { useAppContext } from '../../core/context';
+import { useAppContext } from '../../core/useAppContext';
 import { ElementOutModel } from '../../types';
 
 import classNames from 'classnames';

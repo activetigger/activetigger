@@ -6,7 +6,7 @@ import { HiOutlineQuestionMarkCircle } from 'react-icons/hi';
 import { useNavigate } from 'react-router-dom';
 import { Tooltip } from 'react-tooltip';
 import { useGetElementById } from '../core/api';
-import { useAppContext } from '../core/context';
+import { useAppContext } from '../core/useAppContext';
 import { ElementOutModel, ProjectionOutModel } from '../types';
 import { ProjectionVizSigma } from './ProjectionVizSigma';
 import { MarqueBoundingBox } from './ProjectionVizSigma/MarqueeController';

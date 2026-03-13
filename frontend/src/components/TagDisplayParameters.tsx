@@ -1,5 +1,5 @@
 import { FC } from 'react';
-import { useAppContext } from '../core/context';
+import { useAppContext } from '../core/useAppContext';
 
 export const TagDisplayParameters: FC = () => {
   const {

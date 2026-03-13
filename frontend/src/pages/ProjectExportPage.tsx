@@ -13,9 +13,9 @@ import {
   useGetRawDataFile,
   useGetStaticUrls,
 } from '../core/api';
-import { useAuth } from '../core/auth';
 import config from '../core/config';
-import { useAppContext } from '../core/context';
+import { useAppContext } from '../core/useAppContext';
+import { useAuth } from '../core/useAuth';
 
 /**
  * Component to display the export page

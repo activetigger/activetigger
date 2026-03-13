@@ -8,7 +8,7 @@ import { FeaturesManagement } from '../components/FeaturesManagement';
 import { EvalSetsManagement } from '../components/forms/EvalSetsManagement';
 import { ImportAnnotations } from '../components/forms/ImportAnnotations';
 import { ProjectPageLayout } from '../components/layout/ProjectPageLayout';
-import { useAppContext } from '../core/context';
+import { useAppContext } from '../core/useAppContext';
 
 import { ProjectHistory } from '../components/ProjectHistory';
 import { ProjectParameters } from '../components/ProjectParameters';

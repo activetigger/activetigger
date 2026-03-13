@@ -3,11 +3,11 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
 import { LabelsManagement } from '../components/LabelsManagement';
 import { ProjectPageLayout } from '../components/layout/ProjectPageLayout';
-import { useAppContext } from '../core/context';
+import { useAppContext } from '../core/useAppContext';
 
 import { CodebookDisplay } from '../components/CodeBookDisplay';
 import { SchemesManagement } from '../components/SchemesManagement';
-import { useAuth } from '../core/auth';
+import { useAuth } from '../core/useAuth';
 import { reorderLabels } from '../core/utils';
 
 /**

@@ -1,12 +1,4 @@
-import {
-  FC,
-  PropsWithChildren,
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useState,
-} from 'react';
+import { FC, PropsWithChildren, createContext, useCallback, useEffect, useState } from 'react';
 
 import {
   ActiveModel,
@@ -18,6 +10,7 @@ import {
   ProjectionOutModel,
   SelectionConfig,
 } from '../types';
+import { DEFAULT_CONTEXT } from './useAppContext';
 
 // Context content
 export type AppContextValue = {
@@ -41,38 +34,6 @@ export type AppContextValue = {
 
 export const CONTEXT_LOCAL_STORAGE_KEY = 'activeTigger.context';
 
-export const DEFAULT_CONTEXT: AppContextValue = {
-  currentScheme: undefined,
-  notifications: [],
-  displayConfig: {
-    interfaceType: 'default',
-    displayAnnotation: true,
-    displayContext: true,
-    displayPrediction: true,
-    displayPredictionStat: true,
-    displayHistory: true,
-    displayElementHistory: false,
-    textFrameHeight: 50,
-    textFrameWidth: 40,
-    highlightText: '',
-    numberOfTokens: 512,
-    forceOneColumnLayout: false,
-    displayFormat: 'cards',
-  },
-  selectionConfig: {
-    mode: 'fixed',
-    sample: 'all',
-    frameSelection: false,
-    frame: [],
-  },
-  generateConfig: { n_batch: 1, selectionMode: 'all' },
-  history: [],
-  selectionHistory: {},
-  freqRefreshQuickModel: 0,
-  phase: 'train',
-  isComputing: false,
-  developmentMode: false,
-};
 const storedContext = localStorage.getItem(CONTEXT_LOCAL_STORAGE_KEY);
 
 // type of the context
@@ -108,10 +69,6 @@ const _useAppContext = () => {
     resetContext,
   };
 };
-
-export function useAppContext() {
-  return useContext(AppContext);
-}
 
 export const AppContextProvider: FC<PropsWithChildren> = ({ children }) => {
   const context = _useAppContext();

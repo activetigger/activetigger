@@ -3,8 +3,8 @@ import { FC, PropsWithChildren, useCallback, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 import { api } from '../../core/api';
-import { useAuth } from '../../core/auth';
 import { useNotifications } from '../../core/notifications';
+import { useAuth } from '../../core/useAuth';
 
 /**
  * AuthRequired

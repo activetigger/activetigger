@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import { ElementHistoryPoint } from '../types';
-import { useAppContext } from './context';
+import { useAppContext } from './useAppContext';
 
 export function useAnnotationSessionHistory() {
   const {

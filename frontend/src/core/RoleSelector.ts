@@ -1,6 +1,6 @@
 import { FC } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useAuth } from './auth';
+import { useAuth } from './useAuth';
 
 export interface RoleSelectorProps {
   allowedRoles: string[];

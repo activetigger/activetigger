@@ -4,8 +4,8 @@ import Select from 'react-select';
 
 import { useParams } from 'react-router-dom';
 import { useUpdateProject } from '../../core/api';
-import { useAppContext } from '../../core/context';
 import { useNotifications } from '../../core/notifications';
+import { useAppContext } from '../../core/useAppContext';
 import { ProjectUpdateModel } from '../../types';
 
 export const ProjectUpdateForm: FC<{ closeModal: () => void }> = ({ closeModal }) => {

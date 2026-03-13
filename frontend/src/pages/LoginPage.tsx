@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom';
 
 import { LoginForm } from '../components/forms/LoginForm';
 import { PageLayout } from '../components/layout/PageLayout';
-import { useAuth } from '../core/auth';
+import { useAuth } from '../core/useAuth';
 
 export const LoginPage: FC = () => {
   const { authenticatedUser } = useAuth();

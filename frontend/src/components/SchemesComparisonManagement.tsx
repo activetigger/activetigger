@@ -2,7 +2,7 @@ import { FC, useEffect, useMemo, useState } from 'react';
 import Select from 'react-select';
 
 import { useGetCompareSchemes } from '../core/api';
-import { useAppContext } from '../core/context';
+import { useAppContext } from '../core/useAppContext';
 import { ModelParametersTab } from './ModelParametersTab';
 
 /*

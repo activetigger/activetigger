@@ -1,7 +1,7 @@
 import { FC, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useDeleteBertModel, useDeleteQuickModel, useModelInformations } from '../core/api';
-import { useAppContext } from '../core/context';
+import { useAppContext } from '../core/useAppContext';
 import { sortDatesAsStrings } from '../core/utils';
 import { MLStatisticsModel } from '../types';
 import { DisplayScoresMenu } from './DisplayScoresMenu';

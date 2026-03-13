@@ -23,9 +23,9 @@ import {
   useSavePrompts,
   useStopProcesses,
 } from '../core/api';
-import { useAuth } from '../core/auth';
-import { useAppContext } from '../core/context';
 import { useNotifications } from '../core/notifications';
+import { useAppContext } from '../core/useAppContext';
+import { useAuth } from '../core/useAuth';
 import { GenModel, SupportedAPI } from '../types';
 
 interface Row {

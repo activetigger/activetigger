@@ -118,7 +118,7 @@ export const BertopicVizSigma: FC<Props> = ({
 
       return res;
     },
-    [clusterIdColorMapping],
+    [clusterHighlight, clusterIdColorMapping, selectedId],
   );
   const settings: Partial<Settings<NodeGraphAttributesType>> = useMemo(
     () => ({

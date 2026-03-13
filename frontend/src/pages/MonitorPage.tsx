@@ -16,7 +16,7 @@ import {
   useStopProcesses,
   useUsers,
 } from '../core/api';
-import { useAuth } from '../core/auth';
+import { useAuth } from '../core/useAuth';
 
 interface Computation {
   unique_id: string;

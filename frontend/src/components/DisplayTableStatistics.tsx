@@ -1,7 +1,7 @@
 import cx from 'classnames';
 import { FC, useMemo } from 'react';
 import { useWindowSize } from 'usehooks-ts';
-import { useAppContext } from '../core/context';
+import { useAppContext } from '../core/useAppContext';
 import { reorderLabels } from '../core/utils';
 import { MLStatisticsModel } from '../types';
 

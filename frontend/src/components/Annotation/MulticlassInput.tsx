@@ -2,7 +2,7 @@ import cx from 'classnames';
 import { FC, useCallback, useEffect, useMemo, useState } from 'react';
 import { IoIosRadioButtonOff, IoIosRadioButtonOn } from 'react-icons/io';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useAppContext } from '../../core/context';
+import { useAppContext } from '../../core/useAppContext';
 import { useAnnotationSessionHistory } from '../../core/useHistory';
 import { reorderLabels } from '../../core/utils';
 import { ElementOutModel } from '../../types';

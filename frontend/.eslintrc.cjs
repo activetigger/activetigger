@@ -19,6 +19,7 @@ module.exports = {
     'react/react-in-jsx-scope': 'off',
     'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
     '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+    'react-hooks/exhaustive-deps': 'error',
   },
   settings: {
     react: {

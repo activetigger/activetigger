@@ -9,7 +9,7 @@ import {
 } from 'react-icons/bs';
 
 import config from '../../core/config';
-import { useAppContext } from '../../core/context';
+import { useAppContext } from '../../core/useAppContext';
 import { useTimeout } from '../../core/useTimeout';
 import { dateToFromAgo } from '../../core/utils';
 import { NotificationData, NotificationType } from '../../types';

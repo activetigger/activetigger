@@ -3,7 +3,7 @@ import { SubmitHandler, useForm } from 'react-hook-form';
 import { HiOutlineQuestionMarkCircle } from 'react-icons/hi';
 import { Tooltip } from 'react-tooltip';
 import { useComputeBertopic, useStopProcesses } from '../../core/api';
-import { useAppContext } from '../../core/context';
+import { useAppContext } from '../../core/useAppContext';
 import { getRandomName } from '../../core/utils';
 import { ComputeBertopicModel } from '../../types';
 

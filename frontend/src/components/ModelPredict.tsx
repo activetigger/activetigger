@@ -2,7 +2,7 @@ import { FC, useState } from 'react';
 import { useParams } from 'react-router-dom';
 
 import { useComputeModelPrediction, useModelInformations } from '../core/api';
-import { useAppContext } from '../core/context';
+import { useAppContext } from '../core/useAppContext';
 import { DisplayTrainingProcesses } from './DisplayTrainingProcesses';
 import { ImportPredictionDataset } from './forms/ImportPredictionDataset';
 

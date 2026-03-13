@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 
 import { NotificationData } from '../types';
-import { useAppContext } from './context';
+import { useAppContext } from './useAppContext';
 
 let INCREMENTAL_ID = 1;
 const TIME_NOTIFICATION = 10;

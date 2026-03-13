@@ -16,9 +16,9 @@ import {
   useRenameQuickModel,
   useRetrainQuickModel,
 } from '../core/api';
-import { useAuth } from '../core/auth';
-import { useAppContext } from '../core/context';
 import { useNotifications } from '../core/notifications';
+import { useAppContext } from '../core/useAppContext';
+import { useAuth } from '../core/useAuth';
 import { sortDatesAsStrings } from '../core/utils';
 import { MLStatisticsModel } from '../types';
 import { DisplayScores } from './DisplayScores';
@@ -129,7 +129,7 @@ export const ModelManagement: FC = () => {
     if (currentQuickModelInformations) {
       reFetchQuickModel();
     }
-  }, [isComputing]);
+  }, [currentQuickModelInformations, isComputing, reFetchQuickModel]);
 
   // delete quickmodel
   const { deleteQuickModel } = useDeleteQuickModel(projectSlug || null);

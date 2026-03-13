@@ -1,7 +1,7 @@
 import { FC, useState } from 'react';
 import { Modal } from 'react-bootstrap';
 import { FaPlusCircle } from 'react-icons/fa';
-import { useAppContext } from '../core/context';
+import { useAppContext } from '../core/useAppContext';
 import { CreateNewFeature } from './forms/CreateNewFeature';
 export interface ButtonNewFeatureProps {
   projectSlug: string;

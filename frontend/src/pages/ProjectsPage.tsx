@@ -6,7 +6,7 @@ import { PageLayout } from '../components/layout/PageLayout';
 import { useUserProjects } from '../core/api';
 
 import { FaPlusCircle } from 'react-icons/fa';
-import { useAppContext } from '../core/context';
+import { useAppContext } from '../core/useAppContext';
 import { AvailableProjectsModel } from '../types';
 
 export const ProjectsPage: FC = () => {

@@ -25,12 +25,12 @@ import {
   TextDatasetModel,
   newBertModel,
 } from '../types';
-import { HttpError } from './HTTPError';
-import { getAuthHeaders, useAuth } from './auth';
 import config from './config';
-import { useAppContext } from './context';
+import { HttpError } from './HTTPError';
 import { useNotifications } from './notifications';
+import { useAppContext } from './useAppContext';
 import { getAsyncMemoData, useAsyncMemo } from './useAsyncMemo';
+import { getAuthHeaders, useAuth } from './useAuth';
 
 /**
  * API methods

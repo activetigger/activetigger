@@ -15,8 +15,8 @@ import {
   useUsers,
   useUsersAuth,
 } from '../core/api';
-import { useAuth } from '../core/auth';
 import { useNotifications } from '../core/notifications';
+import { useAuth } from '../core/useAuth';
 
 interface newUser {
   username: string;

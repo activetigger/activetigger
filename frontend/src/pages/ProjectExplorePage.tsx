@@ -7,7 +7,7 @@ import { BertopicPage } from '../pages/BertopicPage';
 import { DataTabular } from '../components/DataTabular';
 import { ProjectPageLayout } from '../components/layout/ProjectPageLayout';
 import { ProjectionManagement } from '../components/ProjectionManagement';
-import { useAppContext } from '../core/context';
+import { useAppContext } from '../core/useAppContext';
 
 /**
  * Component to display the export page

@@ -1,10 +1,11 @@
-import { FC, PropsWithChildren, createContext, useCallback, useContext, useState } from 'react';
+import { FC, PropsWithChildren, useCallback, useState } from 'react';
 
 import { LoginParams, UserModel } from '../types';
 import { HttpError } from './HTTPError';
 import { login, logout, me } from './api';
-import { DEFAULT_CONTEXT, useAppContext } from './context';
 import { useNotifications } from './notifications';
+import { DEFAULT_CONTEXT, useAppContext } from './useAppContext';
+import { authContext } from './useAuth';
 
 // Information about the current authenticated user
 export type AuthenticatedUser = UserModel & {
@@ -17,20 +18,13 @@ export type AuthContext = {
   logout: () => Promise<boolean>;
 };
 
-// create a react context to centralize and share auth state and mechanism with the whole application
-const authContext = createContext<AuthContext>({
-  authenticatedUser: undefined,
-  login: async (_: LoginParams) => {},
-  logout: async () => false,
-});
-
 // internal hook which must not be used outside the context
 const _useAuth = (): AuthContext => {
   // we use localstorage to persist session
   const storedAuth = localStorage.getItem('activeTigger.auth');
   // TODO check for session deprecation
 
-  const { appContext, setAppContext } = useAppContext();
+  const { setAppContext } = useAppContext();
 
   // internal state to store the current authenticated user
   const [authenticatedUser, setAuthenticatedUser] = useState<AuthenticatedUser | undefined>(
@@ -63,14 +57,13 @@ const _useAuth = (): AuthContext => {
                 setAppContext(DEFAULT_CONTEXT);
               }
               // force the type of interface
-              console.log('User status:', user.status);
-              if (user.status === 'annotator') {
-                appContext.displayConfig.interfaceType = 'annotator';
-              } else {
-                appContext.displayConfig.interfaceType = 'default';
-              }
-              console.log(appContext);
-              setAppContext(appContext);
+              setAppContext((appContext) => {
+                const interfaceType = user.status === 'annotator' ? 'annotator' : 'default';
+                return {
+                  ...appContext,
+                  displayConfig: { ...appContext.displayConfig, interfaceType },
+                };
+              });
 
               return authUser;
             });
@@ -134,30 +127,3 @@ export const AuthProvider: FC<PropsWithChildren> = ({ children }) => {
   const auth = _useAuth();
   return <authContext.Provider value={auth}>{children}</authContext.Provider>;
 };
-
-/**
- * useAuth
- * the main auth hook which provides the auth context current value
- * @returns
- */
-export function useAuth() {
-  // we could use useContext(authContext) in our components but we reright a more elegant useAuth for clarity
-  return useContext(authContext);
-}
-/**
- * getAuthHeaders
- * utility functions which provides the HTTP headers to be included in API calls
- * we write this code here to centralize auth logics
- * @param user a Authenticated user
- * @returns Authorization and username HTTP headers to be included in API calls
- */
-export function getAuthHeaders(user?: AuthenticatedUser) {
-  return user
-    ? {
-        headers: {
-          Authorization: `Bearer ${user.access_token}`,
-          username: user.username,
-        },
-      }
-    : undefined;
-}

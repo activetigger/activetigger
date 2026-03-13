@@ -43,7 +43,12 @@ const GraphEvents: React.FC<{
         setClusterHighlightAfterDoubleClick(undefined);
       },
     });
-  }, [registerEvents, setSelectedIdAfterClick, setSigmaCursor]);
+  }, [
+    registerEvents,
+    setClusterHighlightAfterDoubleClick,
+    setSelectedIdAfterClick,
+    setSigmaCursor,
+  ]);
 
   return null;
 };

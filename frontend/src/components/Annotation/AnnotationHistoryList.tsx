@@ -6,7 +6,7 @@ import { HiOutlineEye, HiOutlineViewGrid } from 'react-icons/hi';
 import { HiOutlineTableCells } from 'react-icons/hi2';
 import { Link, useParams } from 'react-router-dom';
 import { Tooltip } from 'react-tooltip';
-import { useAppContext } from '../../core/context';
+import { useAppContext } from '../../core/useAppContext';
 import { useAnnotationSessionHistory } from '../../core/useHistory';
 import { displayTime } from '../../core/utils';
 import { ElementHistoryPoint } from '../../types';

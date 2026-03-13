@@ -1,8 +1,8 @@
 import { FC, useEffect, useMemo } from 'react';
 
 import { useGetProjectionData } from '../../core/api';
-import { useAuth } from '../../core/auth';
-import { useAppContext } from '../../core/context';
+import { useAppContext } from '../../core/useAppContext';
+import { useAuth } from '../../core/useAuth';
 import { ElementOutModel } from '../../types';
 import { ProjectionExplorer } from '../ProjectionExplorer';
 

@@ -5,7 +5,7 @@ import { GrValidate } from 'react-icons/gr';
 import { useParams } from 'react-router-dom';
 import { CSSProperties } from 'styled-components';
 import { useComputeModelPrediction } from '../core/api';
-import { useAppContext } from '../core/context';
+import { useAppContext } from '../core/useAppContext';
 
 interface validateButtonsProps {
   modelName: string | null;

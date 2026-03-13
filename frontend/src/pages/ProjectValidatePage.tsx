@@ -7,8 +7,8 @@ import { ProjectPageLayout } from '../components/layout/ProjectPageLayout';
 import { ModelsPillDisplay } from '../components/ModelsPillDisplay';
 import { ValidateButtons } from '../components/ValidateButton';
 import { useDeleteBertModel, useDeleteQuickModel, useModelInformations } from '../core/api';
-import { useAppContext } from '../core/context';
 import { useNotifications } from '../core/notifications';
+import { useAppContext } from '../core/useAppContext';
 import { sortDatesAsStrings } from '../core/utils';
 import { MLStatisticsModel, ModelDescriptionModel } from '../types';
 

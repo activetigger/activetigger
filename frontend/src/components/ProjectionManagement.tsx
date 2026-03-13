@@ -9,9 +9,9 @@ import { FaPlusCircle } from 'react-icons/fa';
 import { FaGear } from 'react-icons/fa6';
 import { ModelParametersTab } from '../components/ModelParametersTab';
 import { useAddAnnotation, useGetProjectionData, useUpdateProjection } from '../core/api';
-import { useAuth } from '../core/auth';
-import { useAppContext } from '../core/context';
 import { useNotifications } from '../core/notifications';
+import { useAppContext } from '../core/useAppContext';
+import { useAuth } from '../core/useAuth';
 import { ProjectionParametersModel } from '../types';
 import { MulticlassInput } from './Annotation/MulticlassInput';
 import { MultilabelInput } from './Annotation/MultilabelInput';
@@ -62,7 +62,10 @@ export const ProjectionManagement: FC<ProjectionManagementProps> = ({
   const [showParameters, setShowParameters] = useState<boolean>(false);
 
   // unique labels
-  const uniqueLabels = projectionData ? [...new Set(projectionData.nodes.map((o) => o.label))] : [];
+  const uniqueLabels = useMemo(
+    () => (projectionData ? [...new Set(projectionData.nodes.map((o) => o.label))] : []),
+    [projectionData],
+  );
   const colormap = chroma.scale('Paired').colors(uniqueLabels.length);
 
   // form management
@@ -127,7 +130,7 @@ export const ProjectionManagement: FC<ProjectionManagementProps> = ({
       );
       setAppContext((prev) => ({ ...prev, labelColorMapping: labeledColors }));
     }
-  }, [projectionData]);
+  }, [colormap, projectionData, setAppContext, uniqueLabels]);
 
   // manage projection refresh (could be AMELIORATED)
   useEffect(() => {
@@ -165,6 +168,7 @@ export const ProjectionManagement: FC<ProjectionManagementProps> = ({
     projectionData,
     setAppContext,
     setForceRefresh,
+    forceRefresh,
   ]);
 
   type Feature = {

@@ -4,8 +4,8 @@ import { IoMdLogIn, IoMdLogOut } from 'react-icons/io';
 import { Link, useNavigate } from 'react-router-dom';
 import { Tooltip } from 'react-tooltip';
 import logo from '../../assets/at.png';
-import { useAuth } from '../../core/auth';
-import { useAppContext } from '../../core/context';
+import { useAppContext } from '../../core/useAppContext';
+import { useAuth } from '../../core/useAuth';
 
 const DOCUMENTATION_LINK = 'https://activetigger.github.io/documentation';
 

@@ -3,8 +3,8 @@ import { useParams } from 'react-router-dom';
 
 import { isEqual } from 'lodash';
 import { useProject } from '../core/api';
-import { useAuth } from '../core/auth';
-import { useAppContext } from '../core/context';
+import { useAppContext } from '../core/useAppContext';
+import { useAuth } from '../core/useAuth';
 
 /**
  * Component to actualise project state in the context, called every N seconds.

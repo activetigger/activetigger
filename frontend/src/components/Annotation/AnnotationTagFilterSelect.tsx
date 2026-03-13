@@ -2,7 +2,7 @@ import { FC, useCallback, useMemo } from 'react';
 import Select, { MultiValueGenericProps, OptionProps, components } from 'react-select';
 
 import { omit, sortBy, uniq } from 'lodash';
-import { useAppContext } from '../../core/context';
+import { useAppContext } from '../../core/useAppContext';
 import { truncateInMiddle } from '../../core/utils';
 import { SelectionConfig } from '../../types';
 import { AnnotationIcon, NoAnnotationIcon, UserIcon } from '../Icons';

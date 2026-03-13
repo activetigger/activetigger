@@ -3,8 +3,8 @@ import { SubmitHandler, useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
 
 import { useGetServer, useSendResetMail } from '../../core/api';
-import { useAuth } from '../../core/auth';
 import { useNotifications } from '../../core/notifications';
+import { useAuth } from '../../core/useAuth';
 import { LoginParams } from '../../types';
 
 /**

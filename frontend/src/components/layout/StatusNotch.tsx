@@ -2,13 +2,13 @@ import { FC } from 'react';
 import { FaStopCircle } from 'react-icons/fa';
 import { Tooltip } from 'react-tooltip';
 import { useGetServer, useStopProcesses } from '../../core/api';
-import { useAuth } from '../../core/auth';
 import { useNotifications } from '../../core/notifications';
+import { useAuth } from '../../core/useAuth';
 import { ProjectStateModel } from '../../types';
 import { ModalErrors } from '../ModalError';
 import { PossibleProjectActions } from './ProjectPageLayout';
 
-import { useAppContext } from '../../core/context';
+import { useAppContext } from '../../core/useAppContext';
 
 /* define a component for project action bar 
 with the project & the current action*/

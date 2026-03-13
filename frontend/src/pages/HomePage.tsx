@@ -7,7 +7,7 @@ import logo from '../assets/at.png';
 import { LoginForm } from '../components/forms/LoginForm';
 import Notifications from '../components/layout/Notifications';
 import { useGetActiveUsers, useGetServer } from '../core/api';
-import { useAuth } from '../core/auth';
+import { useAuth } from '../core/useAuth';
 import { LoginParams } from '../types';
 
 export const HomePage: FC = () => {

@@ -1,7 +1,7 @@
 import { FC, PropsWithChildren } from 'react';
 
-import { useAuth } from '../../core/auth';
-import { useAppContext } from '../../core/context';
+import { useAppContext } from '../../core/useAppContext';
+import { useAuth } from '../../core/useAuth';
 import { PageLayout } from './PageLayout';
 import { ProjectActionsSidebar } from './ProjectActionsSideBar';
 import { StatusNotch } from './StatusNotch';
