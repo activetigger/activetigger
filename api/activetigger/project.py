@@ -50,9 +50,17 @@ from activetigger.datamodels import (
     QuickModelInModel,
     StaticFileModel,
     UpdateComputing,
+    AddingEvalsetModel,
 )
 from activetigger.db.manager import DatabaseManager
 from activetigger.features import Features
+from activetigger.functions import (
+    clean_regex,
+    get_dir_size,
+    regex_contains,
+    sanitize_query_expression,
+    slugify,
+)
 from activetigger.functions import (
     clean_regex,
     get_dir_size,
@@ -69,6 +77,7 @@ from activetigger.queue_manager import Queue
 from activetigger.quickmodels import QuickModels
 from activetigger.schemes import Schemes
 from activetigger.tasks.create_project import CreateProject
+from activetigger.tasks.add_evalset import AddEvalsets
 from activetigger.tasks.generate_call import GenerateCall
 from activetigger.tasks.update_datasets import UpdateDatasets
 from activetigger.users import Users
@@ -280,6 +289,7 @@ class Project:
 
         # Update the register
         self.computing.append(
+            
             ProjectCreatingModel(
                 username=username,
                 project_slug=self.project_slug,
@@ -433,122 +443,245 @@ class Project:
         self.features.reset_features_file()
         self.quickmodels.drop_models(which="all")
 
-    def add_evalset(
-        self, dataset, evalset: EvalSetDataModel, username: str, project_slug: str
-    ) -> None:
-        """
-        Add a eval dataset (test or valid)
+    # def add_evalset(
+    #     self, dataset, evalset: EvalSetDataModel, username: str, project_slug: str
+    # ) -> None:
+    #     """
+    #     Add a eval dataset (test or valid)
 
-        The eval dataset should :
-        - not contains NA
-        - have a unique id different from the complete dataset
+    #     The eval dataset should :
+    #     - not contains NA
+    #     - have a unique id different from the complete dataset
+    #     - No overlap with trainset
 
-        The id will be modified to indicate imported
+    #     The id will be modified to indicate imported
 
-        TODO : put this task in the queue
+    #     TODO : put this task in the queue
+        
+    #     """
+    #     #### Addition :
+    #     # 1- add overlap verification 
+    #     # 3- ID columns is valid/unique
+    #     # 4- No duplicate IDs within the eval set
+    #     ###################
+        
+    #     if len(evalset.cols_text) == 0:
+    #         raise Exception("No text column selected for the evalset")
+    #     if self.params.dir is None:
+    #         raise Exception("Cannot add eval data without a valid dir")
+    #     if evalset.col_label == "":
+    #         evalset.col_label = None
+    #     if dataset not in ["test", "valid"]:
+    #         raise Exception("Dataset should be test or valid")
+    #     if dataset == "test" and self.params.test:
+    #         raise Exception("There is already a test dataset")     
+    #     if dataset == "valid" and self.params.valid:
+    #         raise Exception("There is already a valid dataset")
+    #     ###--------Importing the CSV File
+    #     csv_buffer = io.StringIO(evalset.csv)
+    #     try:
+    #         df = pd.read_csv(
+    #             csv_buffer,
+    #             dtype={evalset.col_id: str, **{col: str for col in evalset.cols_text}},
+    #             nrows=evalset.n_eval,
+    #         )
+    #     #the CSV file parsing error is now caught
+    #     except Exception as e:
+    #         raise Exception(f"Can't Parse the CSV File :{e}")
+    #     #Suppose the  File is empty 
+    #     if len(df) == 0:
+    #         raise Exception("The Chosen Evaluation Set is Empty")
+    #     if len(df) > 10000:
+    #         raise Exception(f"The Evaluation set is too large : {len(df)} rows > 10^4 ")
+    #     #======UniqueId=====
+    #     if df[evalset.col_id].isnull().any():
+    #         raise Exception("The Column of ID contains Null values")
+    #     n_dup=df[evalset.col_id].duplicated()
+    #     if n_dup.any():
+    #         raise Exception (f"Columns ID has {n_dup.sum()} duplicates")   
+    #     # create text column
+    #     df["text"] = df[evalset.cols_text].apply(
+    #         lambda x: "\n\n".join([str(i) for i in x if pd.notnull(i)]), axis=1
+    #     )
+    #     #So Before changin the Name we will check for overlaps:
+    #     try :
+    #         train_ids=set(
+    #             self.data.get_dataset("train").index.astype(str)
+    #             .map(slugify)
+    #             )
+    #         eval_id=set(df[evalset.col_id].astype(str).map(slugify))
+    #         ovelaps=train_ids.intersection(eval_id)
+    #         if ovelaps:
+    #             raise Exception(f"{len(ovelaps)} evalID(s) already existi in the trainset"
+    #                             f"Please ensure they re disjoint")
+    #     except Exception as e:
+    #         #The overlap error is hard failure since both the new eval set and train set
+    #         #both contains any|all same values 
+    #         if "evalID(s) already existi in the trainset" in str(e):#the sentence use in the error of overlap
+    #             raise
+    #         print(f"can't run ovelap check : {e}") 
+    #     # Between raising Error Or warning : If Error -> would create a design default , if warning this will keeep the app working 
+    #     # So in this case we will either drop overlps or give user chance to change eval set
+    #     # Now change names
+    #     if not evalset.col_label:
+    #         df = df.rename(columns={evalset.col_id: "id"})
+    #     else:
+    #         df = df.rename(
+    #             columns={
+    #                 evalset.col_id: "id",
+    #                 evalset.col_label: "label",
+    #             }
+    #         )
+    #         df["label"] = df["label"].apply(lambda x: str(x) if pd.notna(x) else None)
+    #     # deal with non-unique id
+    #     # compare with the general dataset
+    #     # check overlpas between Train and evaluation set is done before Renaming
+    #     df["id_external"] = df["id"].apply(str)
+    #     if not ((df["id"].astype(str).apply(slugify)).nunique() == len(df)):
+    #         df["id"] = [str(i) for i in range(len(df))]
+    #         print("ID not unique, changed to default id")
+    #     # identify the dataset as imported and set the id
+    #     df["id"] = df["id"].apply(lambda x: f"imported-{str(x)}")
+    #     df = df.set_index("id")
 
-        """
-        if len(evalset.cols_text) == 0:
-            raise Exception("No text column selected for the evalset")
+    #     # import labels if specified + scheme // check if the labels are in the scheme
+    #     if evalset.col_label and evalset.scheme:
+    #         # Check the label columns if they match the scheme or raise error
+    #         scheme = self.schemes.available()[evalset.scheme].labels
+    #         for label in df["label"].dropna().unique():
+    #             if label not in scheme:
+    #                 raise Exception(f"Label {label} not in the scheme {evalset.scheme}")
 
-        if self.params.dir is None:
-            raise Exception("Cannot add eval data without a valid dir")
+    #         elements = [
+    #             {"element_id": element_id, "annotation": label, "comment": ""}
+    #             for element_id, label in df["label"].dropna().items()
+    #         ]
+    #         self.db_manager.projects_service.add_annotations(
+    #             dataset=dataset,
+    #             user_name=username,
+    #             project_slug=project_slug,
+    #             scheme=evalset.scheme,
+    #             elements=elements,
+    #         )
+    #         print("Valid labels imported")
 
-        if evalset.col_label == "":
-            evalset.col_label = None
+    #     # write the dataset
+    #     if dataset == "test":
+    #         df[["id_external", "text"]].to_parquet(self.params.dir.joinpath(config.test_file))
+    #         self.params.test = True
+    #         self.data.load_dataset("test")
+    #         self.params.n_test=len(df)
+    #     elif dataset == "valid":
+    #         df[["id_external", "text"]].to_parquet(self.params.dir.joinpath(config.valid_file))
+    #         self.params.valid = True
+    #         self.data.load_dataset("valid")
+    #         self.params.n_valid=len(df)
+    #     # else:
+    #     #     raise Exception("Dataset should be test or valid")
+    #     # Lines[460-467] already dealt with it 
 
-        if dataset not in ["test", "valid"]:
-            raise Exception("Dataset should be test or valid")
+    #     # update the database
+    #     self.db_manager.projects_service.update_project(
+    #         self.params.project_slug, jsonable_encoder(self.params)
+    #     )
 
-        if dataset == "test" and self.params.test:
-            raise Exception("There is already a test dataset")
-
-        if dataset == "valid" and self.params.valid:
-            raise Exception("There is already a valid dataset")
-
-        csv_buffer = io.StringIO(evalset.csv)
-        df = pd.read_csv(
-            csv_buffer,
-            dtype={evalset.col_id: str, **{col: str for col in evalset.cols_text}},
-            nrows=evalset.n_eval,
-        )
-
-        if len(df) > 10000:
-            raise Exception("You valid set is too large")
-
-        # create text column
-        df["text"] = df[evalset.cols_text].apply(
-            lambda x: "\n\n".join([str(i) for i in x if pd.notnull(i)]), axis=1
-        )
-
-        # change names
-        if not evalset.col_label:
-            df = df.rename(columns={evalset.col_id: "id"})
-        else:
-            df = df.rename(
-                columns={
-                    evalset.col_id: "id",
-                    evalset.col_label: "label",
-                }
-            )
-            df["label"] = df["label"].apply(lambda x: str(x) if pd.notna(x) else None)
-
-        # deal with non-unique id
-        # TODO : compare with the general dataset
-        df["id_external"] = df["id"].apply(str)
-        if not ((df["id"].astype(str).apply(slugify)).nunique() == len(df)):
-            df["id"] = [str(i) for i in range(len(df))]
-            print("ID not unique, changed to default id")
-
-        # identify the dataset as imported and set the id
-        df["id"] = df["id"].apply(lambda x: f"imported-{str(x)}")
-        df = df.set_index("id")
-
-        # import labels if specified + scheme // check if the labels are in the scheme
-        if evalset.col_label and evalset.scheme:
-            # Check the label columns if they match the scheme or raise error
-            scheme = self.schemes.available()[evalset.scheme].labels
-            for label in df["label"].dropna().unique():
-                if label not in scheme:
-                    raise Exception(f"Label {label} not in the scheme {evalset.scheme}")
-
-            elements = [
-                {"element_id": element_id, "annotation": label, "comment": ""}
-                for element_id, label in df["label"].dropna().items()
-            ]
-            self.db_manager.projects_service.add_annotations(
-                dataset=dataset,
-                user_name=username,
-                project_slug=project_slug,
-                scheme=evalset.scheme,
-                elements=elements,
-            )
-            print("Valid labels imported")
-
-        # write the dataset
-        if dataset == "test":
-            df[["id_external", "text"]].to_parquet(self.params.dir.joinpath(config.test_file))
-            self.params.test = True
-            self.data.load_dataset("test")
-        elif dataset == "valid":
-            df[["id_external", "text"]].to_parquet(self.params.dir.joinpath(config.valid_file))
-            self.params.valid = True
-            self.data.load_dataset("valid")
-        else:
-            raise Exception("Dataset should be test or valid")
-
-        # update the database
-        self.db_manager.projects_service.update_project(
-            self.params.project_slug, jsonable_encoder(self.params)
-        )
-
-        # reset the features file
-        self.features.reset_features_file()
-        self.quickmodels.drop_models(which="all")
+    #     # reset the features file
+    #     self.features.reset_features_file()
+    #     self.quickmodels.drop_models(which="all")
 
         # reload the data
-        self.data.load_dataset(dataset)
-
+        #self.data.load_dataset(dataset)
+    def adding_evalset(self,
+                       dataset:str,
+                       evalset:EvalSetDataModel,
+                       username:str,
+                       project_slug:str,
+                       )->str:
+        # train_indexes=list(
+        #     self.data.train.index.astype(str)
+        # ) if self.data.train is not None else []
+        if self.data.train is None:
+            raise Exception("No train data available") # -> although this scenario is out of reach but why not 
+        train_indexes=list(
+            self.data.train.index.astype(str)
+        )
+        scheme=self.schemes.available()[evalset.scheme].labels
+        unique_id=self.queue._add_task(
+            "add_eval_set",
+            self.project_slug,
+            AddEvalsets(
+                project=self.params,
+                dataset=dataset,
+                evalset=evalset,
+                username=username,
+                project_slug=project_slug,
+                train_index=train_indexes,
+                scheme=scheme,
+            ),
+            queue="cpu",
+        )
+        print(f"unique_di is {unique_id}")
+        try:
+            self.computing.append(
+                AddingEvalsetModel(
+                    user=username,
+                    project_slug=self.project_slug,
+                    unique_id=unique_id,
+                    time=datetime.now(timezone.utc),
+                    kind="add_eval_set",
+                    status="adding",   
+                )
+            )
+            #print(f"Added task {unique_id} to computing listnow, {len(self.computing)} tasks")
+        except Exception as e:
+            raise Exception(f"Errror {e}")
+            
+        return unique_id
+    
+    def finish_adding_evalset(self,un_id:str)->None:
+        """
+        This Func called once the evaleset starts adding  
+        """
+        task=self.queue.get(un_id)
+        if task is None:
+            raise Exception (f"Task {un_id} is not Found in the queue")
+        if task.future is None:
+            raise Exception (f"Task {un_id} has no Future")
+        entry=next((c for c in self.computing if c.unique_id==un_id),None)
+        exce=task.future.exception()
+        if exce is not None:
+            if entry:
+                entry.status="error"
+            raise Exception(f"evaluation set import has failed :( :{exce})")
+        res=task.future.result()
+        # in case user cancelled the adding of the file
+        if entry.status=="cancel":
+            print("it is cancelled")
+            self.clean_process(entry)
+            return
+        #--
+        self.params=res["project_params"]
+        self.db_manager.projects_service.update_project(
+            self.project_slug,jsonable_encoder(self.params)
+        )
+        if res["elements"] and res["scheme"]:
+            self.db_manager.projects_service.add_annotation(
+                dataset=res["dataset"],
+                user_name=res["username"],
+                project_slug=res["project_slug"],
+                scheme=res["scheme"],
+                elements=res["elements"],
+            )
+        #print(entry.status)      
+        self.features.reset_features_file()
+        self.quickmodels.drop_models(which="all")    
+        if entry:
+            entry.warnings = res.get("warnings", [])
+            #print("warnings",entry.warnings)
+            entry.status="added"
+            #self.queue.delete(un_id)
+                     
+        
     def train_quickmodel(
         self,
         quickmodel: QuickModelInModel,
@@ -629,6 +762,7 @@ class Project:
             balance_classes=quickmodel.balance_classes or False,
             exclude_labels=quickmodel.exclude_labels,
             test_size=quickmodel.test_size,
+            test_size=quickmodel.test_size,
             retrain=retrain,
             texts=self.data.train["text"] if self.data.train is not None else None,
         )
@@ -657,7 +791,7 @@ class Project:
             cv10=model.cv10,
             balance_classes=model.balance_classes,
             exclude_labels=model.exclude_labels,
-            test_size=model.test_size,
+            test_size=model.test_size
         )
         self.train_quickmodel(quickmodel, username, retrain=True)
 
@@ -707,6 +841,7 @@ class Project:
         - fixed
         - random
         - active (entropy or active LABEL)
+        - active (entropy or active LABEL)
         - maxprob
         - test
 
@@ -736,6 +871,7 @@ class Project:
         predict = PredictedLabel(label=None, proba=None, entropy=None)
         if next.model_active is not None:
             prediction = self.get_model_prediction(next.model_active.type, next.model_active.value)
+            proba = prediction.reindex(df.index)
             proba = prediction.reindex(df.index)
 
         # filter based on the labels
@@ -783,8 +919,8 @@ class Project:
             df["ID"] = df.index  # duplicate the id column
             filter_san = clean_regex(next.filter)
             if "CONTEXT=" in filter_san:  # case to search in the context
-                f_regex = regex_contains(
-                    df[existing_cols_contexts + ["ID"]].apply(
+              f_regex = regex_contains(
+                  df[existing_cols_contexts + ["ID"]].apply(
                         lambda row: " ".join(row.values.astype(str)), axis=1
                     ),
                     filter_san.replace("CONTEXT=", ""),
@@ -793,13 +929,14 @@ class Project:
                 )
             elif "QUERY=" in filter_san:  # case to use a query
                 query_expr = sanitize_query_expression(
-                    filter_san.replace("QUERY=", ""),
-                    allowed_columns=existing_cols_contexts,
+                filter_san.replace("QUERY=", ""),
+                allowed_columns=existing_cols_contexts,
                 )
                 f_regex = cast(
-                    pd.Series, df[existing_cols_contexts].eval(query_expr)
-                )
+                    pd.Series, df[existing_cols_contexts].eval(query_expr))
+                
             else:
+                f_regex = regex_contains(df["text"], filter_san, case=True, na=False)
                 f_regex = regex_contains(df["text"], filter_san, case=True, na=False)
             f = f & f_regex
 
@@ -832,7 +969,6 @@ class Project:
             )
         indicator = None
         n_sample = f.sum()  # use len(ss) for adding history
-
         # validate selection method
         valid_selections = {"fixed", "random", "maxprob", "active"}
         if next.selection not in valid_selections:
@@ -840,7 +976,7 @@ class Project:
 
         # select an element based on the method
 
-        if next.selection == "fixed":  # next row
+        elif next.selection == "fixed":  # next row
             element_id = ss.index[0]
 
         elif next.selection == "random":  # random row
@@ -853,18 +989,45 @@ class Project:
         # maxprob: highest probability for a specific label
         if next.selection == "maxprob" and proba is not None:
             if next.label_prob is None:
-                raise Exception("Label is required for maxprob selection")
+                raise Exception("Label for maxprob is required")
             ss = (
                 proba[f][next.label_prob]
                 .drop(next.history, errors="ignore")
                 .sort_values(ascending=False)
-            )
+            ) 
             element_id = ss.index[0]
             n_sample = f.sum()
             indicator = f"probability: {round(proba.loc[element_id, next.label_prob], 2)}"
 
         # active: two modes depending on whether label_prob is set
+        # active: two modes depending on whether label_prob is set
         if next.selection == "active" and proba is not None:
+            if next.label_prob is not None:
+                # active LABEL: filter to texts predicted as label, sort by ascending prob
+                f_predicted = proba["prediction"] == next.label_prob
+                f_active = f & f_predicted
+                if f_active.sum() == 0:
+                    raise ValueError(
+                        f"No element predicted as '{next.label_prob}' available."
+                    )
+                ss_active = (
+                    proba[f_active][next.label_prob]
+                    .drop(next.history, errors="ignore")
+                    .sort_values(ascending=True)
+                )
+                element_id = ss_active.index[0]
+                n_sample = f_active.sum()
+                indicator = f"probability: {round(proba.loc[element_id, next.label_prob], 2)}"
+            else:
+                # active (no label): higher entropy (uncertainty sampling)
+                ss_active = (
+                    proba[f]["entropy"]
+                    .drop(next.history, errors="ignore")
+                    .sort_values(ascending=False)
+                )
+                element_id = ss_active.index[0]
+                n_sample = f.sum()
+                indicator = f"entropy: {round(proba.loc[element_id, 'entropy'], 2)}"
             if next.label_prob is not None:
                 # active LABEL: filter to texts predicted as label, sort by ascending prob
                 f_predicted = proba["prediction"] == next.label_prob
@@ -1189,6 +1352,8 @@ class Project:
                 methods_min=["fixed", "random"],
                 methods=["fixed", "random", "maxprob", "active"],
                 sample=["untagged", "all", "tagged", "not_by_me", "commented"],
+                methods=["fixed", "random", "maxprob", "active"],
+                sample=["untagged", "all", "tagged", "not_by_me", "commented"],
             ),
             schemes=self.schemes.state(),
             features=self.features.state(),
@@ -1295,7 +1460,6 @@ class Project:
             data = data.dropna(subset=["labels"])
 
         # select columns + order
-        # drop dataset_annotation (redundant with dataset)
         cols_to_drop = [col for col in data.columns if col.endswith("dataset_annotation")]
         data = data.drop(columns=cols_to_drop, errors="ignore")
 
@@ -1391,6 +1555,7 @@ class Project:
             self.params.language = update.language
 
         # for other updates, add task to the queue
+        #change :add_task----> _add_task
         unique_id = self.queue.add_task(
             kind="update_datasets",
             project_slug=self.name,
@@ -1461,6 +1626,7 @@ class Project:
             auto_max_length=bert.auto_max_length,
             class_balance=bert.class_balance,
             class_min_freq=bert.class_min_freq,
+            class_min_freq=bert.class_min_freq,
         )
         self.monitoring.register_process(
             process_name=process_id,
@@ -1511,9 +1677,11 @@ class Project:
         """
         Clean a process from computing and queue
         """
-        self.computing.remove(e)
-        self.queue.delete(e.unique_id)
-
+        #added a safety check HERE
+        if e in self.computing:
+            self.computing.remove(e)
+            self.queue.delete(e.unique_id)
+            
     def update_processes(self) -> None:
         """
         Update completed processes and do specific operations regarding their kind
@@ -1522,7 +1690,7 @@ class Project:
         - manage error if needed
         """
         add_predictions = {}
-
+        delayed_clean=False
         # loop on the current process
         for e in self.computing.copy():
             # get the process
@@ -1649,6 +1817,13 @@ class Project:
                         events = cast(EventsModel, results)
                         self.bertopic.add(bertopic_model)
                         self.monitoring.close_process(bertopic_model.unique_id, events)
+                    case "add_eval_set":
+                        import threading
+                        e=cast(AddingEvalsetModel,e)
+                        self.finish_adding_evalset(e.unique_id)
+                        delayed_clean=True
+                        threading.Timer(10, self.clean_process, args=[e]).start()
+                        
             except Exception as ex:
                 print(f"Error in {e.kind} : {ex}")
                 self.errors.add(f"Error in {e.kind} : {str(ex)}")
@@ -1662,13 +1837,38 @@ class Project:
                         )
             # clean the process from the list and the queue
             finally:
-                self.clean_process(e)
+                if not delayed_clean:
+                    self.clean_process(e)
 
         # if there are predictions, add them
         if len(add_predictions) > 0:
             errors = self.features.add_predictions(add_predictions)
             for err in errors:
                 self.errors.add(err)
+
+    def get_data_s_current_status(self,scheme,dataset):
+        """
+        This Function will enable us to get labled and unlabled data from the corpus
+        one of the uses is to compute the Wasserstein disnatnce using WaX -> U-WaX will be fully 
+        implemented later
+        """
+        availabe_schemes = self.schemes.available()
+        df_scheme=self.schemes.get_scheme(scheme,complete=False,datasets=[dataset])
+        labeled_data=df_scheme[df_scheme['labels'].notna()]#This will serve as source
+        unlabeled_data=df_scheme[df_scheme["labels"].isna()]#this will serve as target
+        if labeled_data.empty or unlabeled_data.empty:
+            return []
+        data_df = getattr(self.data, dataset, None)
+        if data_df is None:
+            raise ValueError(f"No {dataset} dataset available")
+        def to_list(df):
+            if df.empty:
+                return []
+            merged = df.join(data_df[['text']], how='inner')
+            return [{"id": idx, "text": row['text']} for idx, row in merged.iterrows()]
+        return to_list(labeled_data), to_list(unlabeled_data)
+    
+        
 
     # def dump(self, with_files=True) -> None:
     #     """

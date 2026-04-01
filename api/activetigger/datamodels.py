@@ -1,7 +1,7 @@
 import datetime
 from enum import Enum, StrEnum
 from pathlib import Path
-from typing import Any, Callable, Literal, Optional
+from typing import Any, Callable, Literal, Optional,List
 
 from pandas import DataFrame  # type: ignore[import]
 from pydantic import BaseModel, ConfigDict  # for dataframe
@@ -79,13 +79,21 @@ class ProjectBaseModel(BaseModel):
     n_total: int | None = None
     clear_test: bool = False
     clear_valid: bool = False
-    random_selection: bool = False
+    #random_selection: bool = False
+    train_selection: Literal['random', 'stratify', 'sequential', 'force_label'] = 'random'
+    holdout_selection: Optional[Literal['random', 'stratify']] = None
     cols_stratify: list[str] = []
-    stratify_train: bool = False
-    stratify_test: bool = False
-    force_label: bool = False
+    #stratify_train: bool = False
+    #stratify_test: bool = False
+    #force_label: bool = False
     force_computation: bool = False
+    #detect_candidates_col:bool =False
+    start_index_val: int | None = None
+    start_index_test: int | None = None
+    num_rows_val:int|None=None
+    num_rows_test:int|None=None
     seed: int = 42
+
 
 
 class ProjectModel(ProjectBaseModel):
@@ -1127,6 +1135,7 @@ class ProjectCreatingModel(BaseModel):
     status: str
 
 
+
 class TopicsOutModel(BaseModel):
     Topic: int
     Name: str
@@ -1219,3 +1228,32 @@ class BertopicProjectionData(BaseModel):
 
     nodes: list[BertopicProjectionNode]
     cluster_id_label_mapper: dict
+
+class compute_waxModel(BaseModel):
+    """
+    The returned data after Wasserstein distance computaion using source and target datasets
+    """
+    source_texts: List[str]
+    target_texts: List[str]
+    model: str = "all-MiniLM-L6-v2"
+    p: int = 2
+    q: int = 2
+    alpha: int = 2
+    beta: int = 2
+    n: int = 100
+    reg: float = 0.01
+    r: int = 4
+    C: int = 3
+    lr: float = 0.01
+    n_iter: int = 200
+
+#class Wax_computeProjectStateModel:
+
+class AddingEvalsetModel(BaseModel):
+    project_slug: str
+    user: str
+    unique_id: str
+    time: datetime.datetime
+    kind: str
+    status: str
+    warnings: list[str] = []

@@ -213,15 +213,57 @@ def add_testdata(
     try:
         if evalset is None:
             raise Exception("No evalset sent")
-        project.add_evalset(dataset, evalset, current_user.username, project.project_slug)
+        #project.add_evalset(dataset, evalset, current_user.username, project.project_slug)
+        existing=next((t for t in project.computing if t.kind == "add_eval_set" and t.status=="adding"),None)
+        if existing:
+            return {
+                "status": "adding",
+                "task_id": existing.unique_id,
+                "message": "An evaluation set is already being imported for this project"
+            }
+        task_id=project.adding_evalset(dataset,evalset,current_user.username,project.project_slug)
         orchestrator.log_action(
             current_user.username, f"ADD EVALSET {dataset}", project.project_slug
         )
-        return None
+        return task_id
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
-
-
+    
+@router.get("/projects/evalset/task/{task_id}", dependencies=[Depends(verified_user)])
+async def get_evalset_status(
+    project: Annotated[Project, Depends(get_project)], 
+    task_id: str
+) -> dict:
+    """
+    Get the status of an evaluation set import task
+    """
+    #print('task_id',task_id)
+    task=next((t for t in project.computing if t.kind == "add_eval_set" and t.unique_id==task_id), None)
+    #print("task is ",task)
+    if task is None:
+        return {"status": "not_found", "message": "Task not found in queue"}
+    if task.status=="error":
+        if task.future.exception():
+            return {"status":"error","message":f"Failed{str(task.future.exception())}"}
+        else:
+            try:
+                results=task.future.result()
+                Warnings=results.get("warnings", [])
+                print(Warnings)
+                return {"status":"added","message":"Done","warning":Warnings}
+            except Exception as e:
+                return {"status": "error", "message": f"failed: {str(e)}"}
+    if task.status == "added":
+        warnings = getattr(task, 'warnings', [])
+        return {"status": "added","message": "Done","warning": warnings}
+    return {"status": "adding","message": "Uploading The new Evaluation set ..."}    
+@router.delete("/projects/evalset/task/{task_id}", dependencies=[Depends(verified_user)])
+def cancel_evalset_task(project: Annotated[Project, Depends(get_project)],task_id: str,) -> dict:
+    entry = next((t for t in project.computing if t.unique_id == task_id and t.kind=="add_eval_set"), None)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    entry.status = "cancel"
+    return {"status": "cancel", "task_id": task_id}  
 @router.get("/projects")
 def get_projects(
     current_user: Annotated[UserInDBModel, Depends(verified_user)],

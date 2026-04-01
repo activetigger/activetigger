@@ -24,6 +24,7 @@ import {
   SupportedAPI,
   TextDatasetModel,
   newBertModel,
+  WaxParams,
 } from '../types';
 import config from './config';
 import { formatApiError, HttpError } from './HTTPError';
@@ -190,6 +191,7 @@ export function useUserProjects() {
       };
     else {
       notify({ type: 'error', message: formatApiError(res.error) });
+      notify({ type: 'error', message: formatApiError(res.error) });
       throw new HttpError(res.response.status, '');
     }
   }, [fetchTrigger]);
@@ -253,18 +255,116 @@ export function useCreateProject() {
 export function useCreateValidSet() {
   const { notify } = useNotifications();
   const createTestSet = useCallback(
-    async (projectSlug: string, dataset: string, testset: EvalSetDataModel) => {
+    async (projectSlug: string, dataset: string, testset: EvalSetDataModel): Promise<string | null> => {
       const res = await api.POST('/projects/evalset/add', {
         params: {
           query: { project_slug: projectSlug, dataset: dataset },
         },
         body: testset,
       });
-      if (!res.error) notify({ type: 'success', message: 'Test data set uploaded!' });
+      //console.log('resdata',res.data)
+      if (res.error) {
+        notify({ type: 'error', message: 'Failed to import the dataset'});
+        return null;
+      }
+      const TaskId=res.data
+      if (!TaskId){
+        notify({
+          type:'error',
+          message:'No id for this task is received from server'
+
+        })
+      }
+      return res.data as string;
     },
-    [notify],
+    [notify]
   );
   return createTestSet;
+}
+
+/**
+ * get "Adding evalset" task status
+ */
+export function useEvalSetStatus() {
+  const { notify } = useNotifications();
+  const pollStatus = useCallback((projectSlug: string,task_id: string,onComplete?: (result: any) => void) => {
+      if (!projectSlug || !task_id) {
+        return;
+      }
+      const interval = setInterval(async () => {
+        try {
+          const res = await api.GET('/projects/evalset/task/{task_id}', {
+            params: {path: { task_id: task_id },
+            query: { project_slug: projectSlug }},
+          });
+          //console.log('get res data:',res.data)
+          if (res.error) {
+            //console.error('Status check failed:', res.error);
+            clearInterval(interval);
+            notify({
+              type: 'error',
+              message: 'Failed to check import status',
+            });
+            return;
+          }
+
+          const status = res.data as any;
+          //console.log(`Evalset status [${task_id}]:`, status.status);
+          if (status.status === 'added') {
+            clearInterval(interval);
+            notify({
+              type: 'success',
+              message: 'Evalset imported successfully!',
+            });
+            if (status.warning.length > 0){
+            status.warning.forEach((element: string) => {
+              notify({
+              type:"warning",
+              message:element,
+            });
+            });
+          }
+            onComplete?.(status);
+          } 
+          else if (status.status === 'error') {
+            clearInterval(interval);
+            notify({
+              type: 'error',
+              message: `Import failed: ${status.message || 'Unknown error'}`,
+            });
+          } 
+          else if (status.status === 'not_found' || status.status === 'cancel') {
+            clearInterval(interval);
+            notify({
+              type: 'warning',
+              message: 'Task not found (it may have expired or finished)',
+            });
+          }
+        } catch (err: any) {
+          //console.error('Polling error:', err);
+          clearInterval(interval);
+          notify({
+            type: 'error',
+            message: 'Error while checking status',
+          });
+        }
+      }, 500);
+      return () => clearInterval(interval);
+    },
+    [notify]);
+    const cancelTask = useCallback(async (projectSlug: string,task_id: string,) => {
+    try {
+      await api.DELETE('/projects/evalset/task/{task_id}', {
+        params: { path: { task_id }, 
+        query: { project_slug: projectSlug } },
+      });
+      //console.log(task_id)
+      notify({ type: 'warning', message: 'Import cancelled' });
+       } catch (err) {
+      notify({ type: 'error', message: 'Failed to cancel import' });
+      }
+  }, [notify]);
+  return { pollStatus,cancelTask };
 }
 
 /**
@@ -400,6 +500,7 @@ export function useProject(projectSlug?: string) {
       });
       if (res.error) {
         notify({ type: 'error', message: formatApiError(res.error) });
+        notify({ type: 'error', message: formatApiError(res.error) });
         return null;
       }
       //return res.data.params;
@@ -530,10 +631,9 @@ export function useAddFeature() {
       featureType: string,
       featureName: string,
       featureUseDefaultName: boolean,
-      featureParameters: Record<string, string | number | undefined> | null,
+      featureParameters: Record<string, string | number > | null,
     ) => {
       if (!featureName) featureName = featureType;
-
       if (featureType && featureParameters && projectSlug) {
         const res = await api.POST('/features/add', {
           params: {
@@ -543,6 +643,11 @@ export function useAddFeature() {
             name: featureName,
             type: featureType,
             parameters: featureParameters,
+              // ? (Object.fromEntries(
+              //     Object.entries(featureParameters).filter(([_, v]) => v !== undefined)
+              //   ) as Record<string, string | number>)
+              // : {},
+              //added this until check out why undefined parameters cause an issue in the backend :AM_Ouer
             use_default_name: featureUseDefaultName,
           },
         });
@@ -1841,12 +1946,12 @@ export function useTableDisagreement(project_slug?: string, scheme?: string, dat
   return {
     tableDisagreement: data ? data.table : null,
     users: data ? data.users : null,
-    agreementStats: data
-      ? {
+     agreementStats: data
+     ? {
           n_total: data.n_total,
           n_agreements: data.n_agreements,
-          n_disagreements: data.n_disagreements,
-          agreement_percentage: data.agreement_percentage,
+          n_disagreements: data.n_disagreements,           
+          agreement_percentage: data.agreement_percentage,      
           cohen_kappa: data.cohen_kappa,
         }
       : null,
@@ -1937,24 +2042,22 @@ export async function deleteGenModel(project: string, modelId: number) {
   const res = await api.DELETE(`/generate/models/{model_id}`, {
     params: { path: { model_id: modelId }, query: { project_slug: project } },
   });
-  if (res.error) console.error(res.error);
-}
-
-export async function fetchOllamaModels(
+  if (res.error) console.error(res.error);}
+  export async function fetchOllamaModels(
   endpoint: string,
-): Promise<Array<{ slug: string; name: string }>> {
-  const baseUrl = config.api.url.replace(/\/+$/, '');
-  const url = `${baseUrl}/generate/ollama/models?endpoint=${encodeURIComponent(endpoint)}`;
-  const auth = JSON.parse(localStorage.getItem('activeTigger.auth') || '{}');
-  const res = await fetch(url, {
-    headers: {
-      ...(auth.access_token ? { Authorization: `Bearer ${auth.access_token}` } : {}),
-    },
-  });
-  if (!res.ok) {
-    const detail = await res.json().catch(() => null);
-    throw new Error(detail?.detail || `HTTP ${res.status}`);
-  }
+  ): Promise<Array<{ slug: string; name: string }>> {
+   const baseUrl = config.api.url.replace(/\/+$/, '');
+   const url = `${baseUrl}/generate/ollama/models?endpoint=${encodeURIComponent(endpoint)}`;
+   const auth = JSON.parse(localStorage.getItem('activeTigger.auth') || '{}');
+   const res = await fetch(url, {
+     headers: {
+       ...(auth.access_token ? { Authorization: `Bearer ${auth.access_token}` } : {}),
+     },
+   });
+   if (!res.ok) {
+     const detail = await res.json().catch(() => null);
+     throw new Error(detail?.detail || `HTTP ${res.status}`);    
+   }
   return res.json();
 }
 
@@ -2879,8 +2982,8 @@ export function useExportTopicsToScheme(projectSlug: string | null) {
 }
 
 /**
- * Hook to export the topics as a feature for quick models
- */
+ * Hook to export the topics as a feature for quick models      
+*/
 export function useExportTopicsToFeature(projectSlug: string | null) {
   const { notify } = useNotifications();
   const exportTopicsToFeature = useCallback(
@@ -2898,6 +3001,7 @@ export function useExportTopicsToFeature(projectSlug: string | null) {
   );
   return exportTopicsToFeature;
 }
+
 
 export function useGetMonitoringMetrics() {
   const [fetchTrigger, setFetchTrigger] = useState<boolean>(false);
@@ -2927,4 +3031,38 @@ export function useGetMonitoringData(kind: string) {
   const reFetch = useCallback(() => setFetchTrigger((f) => !f), []);
 
   return { data: getAsyncMemoData(getMonitoringData) || null, reFetchData: reFetch };
+}
+
+export function useWaxSuggest() {
+  const { notify } = useNotifications();
+const start = useCallback(
+  async (projectSlug: string, scheme: string, dataset: string, params: WaxParams) => {
+    const res = await api.POST('/elements/wax_suggest', {
+      params: { query: { project_slug: projectSlug, scheme, dataset, n: params.n_suggest } },
+      query: {
+        model: params.model,
+        p: params.p, q: params.q,
+        alpha: params.alpha, beta: params.beta,
+        n: params.n, reg: params.reg,
+        r: params.r, C: params.C,
+        lr: params.lr, n_iter: params.n_iter,
+      },
+    });
+    if (res.error) {
+      notify({ type: 'error', message: 'WAX suggestion failed to start' });
+      return null;
+    }
+    return res.data as { task_id: string };
+  },
+  [notify],
+);
+  const poll = useCallback(async (taskId: string) => {
+    if(!taskId) return null;
+    const res = await api.GET('/elements/wax_status/{task_id}', {
+      params: { path: { task_id: taskId }},
+    });
+    if (res.error) return null;
+    return res.data as { status: string; result: any; error: string | null };
+  }, []);
+  return { start, poll };
 }

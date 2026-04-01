@@ -1,4 +1,4 @@
-import { FC, useEffect, useState } from 'react';
+import { FC, useEffect, useState ,useRef } from 'react';
 import DataTable from 'react-data-table-component';
 import { Controller, SubmitHandler, useForm, useWatch } from 'react-hook-form';
 import Select from 'react-select';
@@ -12,6 +12,7 @@ import { loadFile } from '../../core/utils';
 import { Modal } from 'react-bootstrap';
 import { useNavigate } from 'react-router-dom';
 import { EvalSetModel } from '../../types';
+import { useEvalSetStatus } from '../../core/api';
 
 // format of the data table
 export interface DataType {
@@ -25,6 +26,7 @@ export interface EvalSetsManagementModel {
   currentScheme: string;
   dataset: string;
   exist: boolean;
+  task_id:string;
 }
 
 // component
@@ -33,16 +35,18 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
   currentScheme,
   dataset,
   exist,
+  task_id,
 }) => {
   // form management
   const datasetCleanForPrinting = dataset == 'test' ? 'Test' : 'Validation';
+  const Message1 = task_id==""? "Cancelling ": "Importing";
   const { register, control, handleSubmit, setValue } = useForm<EvalSetModel & { files: FileList }>(
     {
       defaultValues: { scheme: currentScheme },
     },
   );
-
   const createValidSet = useCreateValidSet(); // API call
+  const {pollStatus,cancelTask} = useEvalSetStatus();
   const { notify } = useNotifications();
 
   const dropEvalSet = useDropEvalSet(projectSlug); // API call to drop existing test set
@@ -52,6 +56,10 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
 
   const [data, setData] = useState<DataType | null>(null);
   const files = useWatch({ control, name: 'files' });
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [statusMessage, setStatusMessage] = useState('');
+  const [currentTaskId, setCurrentTaskId] = useState<string>(task_id);
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
   // available columns
   const columns = data?.headers.map((h) => (
     <option key={`${h}`} value={`${h}`}>
@@ -74,8 +82,7 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
       });
     }
   }, [files, setValue, notify]);
-
-  // action when form validated
+  useEffect(()=>{return()=>{if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)};},[]);
   const onSubmit: SubmitHandler<EvalSetModel & { files: FileList }> = async (formData) => {
     if (data) {
       if (!formData.col_id || !formData.cols_text || !formData.n_eval) {
@@ -83,19 +90,29 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
         return;
       }
       const csv = data ? unparse(data.data, { header: true, columns: data.headers }) : '';
+      setIsProcessing(true);
+      setStatusMessage("Starting Import...")
       formData.scheme = currentScheme;
-      await createValidSet(projectSlug, dataset, {
+      const task=await createValidSet(projectSlug, dataset, {
         ...omit(formData, 'files'),
         csv,
         filename: data.filename,
       });
+      console.log("task is ",task)
+      console.log(task)
+      
+      if (!task) {
+      setIsProcessing(false);
+      return;
+    }
+    setCurrentTaskId(task);
+    pollStatus(projectSlug,task);
     }
   };
 
   const capFirstLetter = (word: string) => {
     return word.charAt(0).toUpperCase() + word.slice(1);
   };
-
   return (
     <div>
       <h4 className="subsection">{capFirstLetter(dataset)} set</h4>
@@ -112,7 +129,28 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
 
       {!exist && (
         <form onSubmit={handleSubmit(onSubmit)}>
-          <div className="col-lg-6">
+          <div className="col-lg-6" style={{ position: 'relative',isolation: 'isolate' }}>
+            {isProcessing && (
+              <div style={{position: 'absolute',top: 0,left: 0,right: 0,
+                bottom: 0,
+                backgroundColor: 'rgba(216, 215, 215, 0.95)',
+                zIndex: 9999,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: '8px'}}>
+                <h5 className="mb-4 text-center">{statusMessage}</h5>
+                <div className="loading" />
+                <p className="text-muted small text-center">
+                  {Message1}{datasetCleanForPrinting.toLowerCase()} set <br />
+                </p>
+                <button type="button" className="btn-submit"   onClick={async () => {await cancelTask(projectSlug, currentTaskId);setCurrentTaskId("");setIsProcessing(false);}}>
+                  Cancel
+                </button>
+              </div>
+              )
+            }
             <div className="explanations">
               No {datasetCleanForPrinting} data set has been created. You can upload a{' '}
               {datasetCleanForPrinting} set. Careful : all features will be dropped and need to be
@@ -182,15 +220,23 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
                     <option key="none" value="">
                       No label
                     </option>
-
                     {columns}
                   </select>
                   <label htmlFor="n_test">Number of rows to import</label>
                   <input id="n_test" type="number" {...register('n_eval')} />
 
-                  <button type="submit" className="btn-submit">
+                  {isProcessing ? (
+                      <button 
+                        type="button" 
+                        className="btn-submit" 
+                        disabled
+                        style={{ opacity: 0.7 }}
+                      >
+                        Adding Evaluation Set...
+                      </button>
+                    ) :(<button type="submit" className="btn-submit">
                     Create
-                  </button>
+                  </button>)}
                 </div>
               )
             }
