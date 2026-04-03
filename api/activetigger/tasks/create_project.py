@@ -41,6 +41,205 @@ class CreateProject(BaseTask):
         self.test_file = test_file
         self.valid_file = valid_file
         self.features_file = features_file
+    #===============================================================================================#
+    # Defining 3 Main functions for Now :                   
+    # 1- 'Build test_val" dataset" : responsible for the build of both test / validation dataset(s)
+    # 2- buildtrainset : responsible for building the trainset 
+    # 3- detect labels : this function will automatically catch label cols with no human 
+    #     internvation and give suggestion to use it 
+    # 4- adding WaX /U-WaX ---> 
+    #================================================================================================#
+    # def detect_cols_with_labels(self,dataset:pd.DataFrame)->list:
+    #     """
+    #     """
+    #     empty_cols=[col for col in dataset.columns if dataset[col].isna().any()]
+    #     label_candidates=[col for col in empty_cols if 'label' in col.lower() or 'traget' in col.lower()]
+    #     if not label_candidates and empty_cols:
+    #         label_candidates=[max(empty_cols,key=lambda col : dataset[col].isna().sum())]
+    #     return label_candidates 
+    def build_trainset(self, dataset: pd.DataFrame) -> tuple[pd.DataFrame | None, list]:
+        """
+        Build a Training Set based on all The possible train selection
+        modes taken in count 
+        Returns (trainset,list_of_train_row_indices)
+        """
+        if self.params.n_train<=0:
+            return None,[]
+        trainset=None
+        #========================Sequential train (first N rows)==============================
+        if self.params.train_selection=="sequential":
+            n=min(self.params.n_train,len(dataset))
+            trainset = dataset.iloc[:n].copy()
+        #========================Force label (prioritize already labeled rows)==========================
+        elif self.params.train_selection=="force_label" and self.params.cols_label:
+            col=self.params.cols_label[0]
+            labeled=dataset[dataset[col].notna()]
+            unlabeled=dataset[dataset[col].isna()]
+            if len(labeled) >= self.params.n_train:
+                trainset=labeled.sample(self.params.n_train,random_state=self.random_seed)
+            else:
+                n_random=self.params.n_train-len(labeled)
+                trainset = pd.concat([labeled,unlabeled.sample(n_random, random_state=self.random_seed)], ignore_index=False)
+        #===============================Stratified train======================================================
+        elif len(self.params.cols_stratify)>0 and self.params.train_selection=="stratify":
+            df_grouped=dataset.groupby(self.params.cols_stratify, group_keys=False)
+            nb_cat=len(df_grouped)
+            nb_per_cat=round(self.params.n_train/nb_cat)
+            sampled_idx = df_grouped.apply(
+                lambda x: x.sample(min(len(x), nb_per_cat), random_state=self.random_seed)
+            ).index.get_level_values(-1)
+            trainset = dataset.loc[sampled_idx]
+        # ===================================================================
+        # 4. Random (default / fallback)
+        # ===================================================================
+        else:
+            self.params.train_selection = "random"  # normalize
+            trainset = dataset.sample(
+                self.params.n_train, 
+                random_state=self.random_seed
+            )
+
+        # ====================== SAVE TRAINSET ======================
+        if trainset is not None and len(trainset) > 0:
+            cols_to_save = ["id_external", "text"] + self.params.cols_context
+            trainset[cols_to_save].to_parquet(
+                self.params.dir.joinpath(self.train_file), 
+                index=True
+            )
+
+        train_rows = list(trainset.index) if trainset is not None else []
+        print(len(trainset))
+        return trainset, train_rows
+    def build_test_val_set(
+        self,
+        dataset: pd.DataFrame,
+        train_rows: list | None = None,
+        start_index_val: int | None = None,
+        start_index_test: int | None = None,
+    ) -> tuple[pd.DataFrame | None, pd.DataFrame | None, list, list]:
+        """
+        Build valid and test sets with support for explicit start indices + overlap protection.
+        """
+        n_test = getattr(self.params, 'n_test', 0)
+        n_val = getattr(self.params, 'n_valid', 0)
+        n_draw = n_test + n_val
+
+        validset = testset = None
+        rows_valid: list = []
+        rows_test: list = []
+
+        if n_draw == 0:
+            return None, None, [], []
+
+        # Pool for random/stratified cases (excludes train to prevent leakage)
+        if train_rows:
+            holdout_pool = dataset.drop(index=train_rows)
+            train_idx_set = set(train_rows)
+        else:
+            holdout_pool = dataset.copy()
+            train_idx_set = set()
+
+        # ===================================================================
+        # 1. SEQUENTIAL MODE (holdout_selection is None)
+        # ===================================================================
+        if self.params.holdout_selection is None:
+
+            # Determine start positions
+            start_val = start_index_val if start_index_val is not None else self.params.n_train
+            start_test = start_index_test if start_index_test is not None else (start_val + n_val)
+
+            # --- Build Validation ---
+            if n_val > 0:
+                end_val = start_val + n_val
+                if end_val > len(dataset):
+                    raise Exception(f"Validation slice [{start_val}:{end_val}] out of bounds! "
+                                  f"Dataset has {len(dataset)} rows.")
+                validset = dataset.iloc[start_val:end_val]
+
+            # --- Build Test ---
+            if n_test > 0:
+                end_test = start_test + n_test
+                if end_test > len(dataset):
+                    raise Exception(f"Test slice [{start_test}:{end_test}] out of bounds! "
+                                  f"Dataset has {len(dataset)} rows.")
+                testset = dataset.iloc[start_test:end_test]
+
+            # ====================== OVERLAP CHECKS ======================
+            valid_idx = set(validset.index) if validset is not None else set()
+            test_idx = set(testset.index) if testset is not None else set()
+
+            # 1. Val overlaps with Train?
+            if valid_idx & train_idx_set:
+                overlap = len(valid_idx & train_idx_set)
+                raise Exception(f"Validation set overlaps with train by {overlap} rows!")
+
+            # 2. Test overlaps with Train?
+            if test_idx & train_idx_set:
+                overlap = len(test_idx & train_idx_set)
+                raise Exception(f"Test set overlaps with train by {overlap} rows!")
+
+            # 3. Test overlaps with Validation?
+            if valid_idx & test_idx:
+                overlap = len(valid_idx & test_idx)
+                raise Exception(f"Test and Validation sets overlap by {overlap} rows!")
+
+        # ===================================================================
+        # 2. STRATIFIED HOLD OUT
+        # ===================================================================
+        elif self.params.holdout_selection == "stratify" and len(self.params.cols_stratify) > 0:
+            if len(holdout_pool) < n_draw:
+                raise Exception(f"Not enough rows for stratified holdout. Need {n_draw}, have {len(holdout_pool)}")
+
+            df_grouped = holdout_pool.groupby(self.params.cols_stratify, group_keys=False)
+            nb_cat = len(df_grouped)
+            nb_per_cat = max(1, round(n_draw / nb_cat))
+
+            sampled_idx = df_grouped.apply(
+                lambda x: x.sample(min(len(x), nb_per_cat), random_state=self.random_seed)
+            ).index.get_level_values(-1)
+
+            holdout = holdout_pool.loc[sampled_idx]
+
+            if n_test > 0 and n_val > 0:
+                testset = holdout.sample(n_test, random_state=self.random_seed)
+                validset = holdout.drop(index=testset.index)
+            elif n_test > 0:
+                testset = holdout
+            else:
+                validset = holdout
+
+        # ===================================================================
+        # 3. RANDOM HOLD OUT (default)
+        # ===================================================================
+        else:
+            if len(holdout_pool) < n_draw:
+                raise Exception(f"Not enough rows for holdout. Need {n_draw}, have {len(holdout_pool)}")
+
+            holdout = holdout_pool.sample(n_draw, random_state=self.random_seed)
+
+            if n_test > 0 and n_val > 0:
+                testset = holdout.sample(n_test, random_state=self.random_seed)
+                validset = holdout.drop(index=testset.index)
+            elif n_test > 0:
+                testset = holdout
+            else:
+                validset = holdout
+
+        # ====================== SAVE TO PARQUET ======================
+        for name, ds, file_attr, flag in [
+            ("valid", validset, "valid_file", "valid"),
+            ("test",  testset,  "test_file",  "test")
+        ]:
+            if ds is not None and len(ds) > 0:
+                ds.to_parquet(self.params.dir.joinpath(getattr(self.params, file_attr)), index=True)
+                setattr(self.params, flag, True)
+                rows = list(ds.index)
+                if name == "valid":
+                    rows_valid = rows
+                else:
+                    rows_test = rows
+        
+        return validset, testset, rows_valid, rows_test
 
     def __call__(
         self,
@@ -97,7 +296,7 @@ class CreateProject(BaseTask):
             self.params.cols_label = ["dataset_" + i for i in self.params.cols_label if i]
             self.params.cols_stratify = ["dataset_" + i for i in self.params.cols_stratify if i]
 
-            # remove completely empty lines
+            # remove completely empty lines..
             content = content.dropna(how="all")
 
         # quickfix : case where the index is the row number
@@ -162,102 +361,46 @@ class CreateProject(BaseTask):
         # save a complete copy of the dataset
         content.to_parquet(self.params.dir.joinpath(self.data_all), index=True)
 
-        # ------------------------
+        # -----------------------
+        # -
         # End of the data cleaning
         # ------------------------
-        # Step 2 : valid/test dataset : from the complete dataset + random/stratification
-        # if both, draw together valid / test set and then separage
-        rows_test = []
-        rows_valid = []
+
+        # ====================== SPLITTING LOGIC (NO DATA LEAKAGE) ======================
+        rows_test: list = []
+        rows_valid: list = []
         self.params.test = False
         self.params.valid = False
-        testset = None
+        trainset = None
         validset = None
+        testset = None
 
-        # case there is a test or valid set, common draw
-        if self.params.n_test + self.params.n_valid != 0:
-            n_to_draw = self.params.n_test + self.params.n_valid
-            # manage stratification
-            if len(self.params.cols_stratify) == 0:
-                draw = content.sample(n_to_draw, random_state=self.random_seed)
-            else:
-                df_grouped = content.groupby(self.params.cols_stratify, group_keys=False)
-                nb_cat = len(df_grouped)
-                nb_elements_cat = round(n_to_draw / nb_cat)
-                sampled_idx = df_grouped.apply(
-                    lambda x: x.sample(min(len(x), nb_elements_cat), random_state=self.random_seed)
-                ).index.get_level_values(-1)
-                draw = content.loc[sampled_idx]
+        # ------------------------------------------------------------------
+        # Sequential train → build train first, then holdout from remaining
+        # ------------------------------------------------------------------
+        if self.params.train_selection == "sequential":
+            trainset, train_rows = self.build_trainset(content)
 
-            # divide between test and valid
-            if self.params.n_test > 0 and self.params.n_valid == 0:
-                testset = draw
-                testset.to_parquet(self.params.dir.joinpath(self.test_file), index=True)
-                self.params.test = True
-                rows_test = list(testset.index)
-            elif self.params.n_valid > 0 and self.params.n_test == 0:
-                validset = draw
-                validset.to_parquet(self.params.dir.joinpath(self.valid_file), index=True)
-                self.params.valid = True
-                rows_valid = list(validset.index)
-            else:
-                testset = draw.sample(self.params.n_test, random_state=self.random_seed)
-                validset = draw.drop(index=testset.index)
-                validset.to_parquet(self.params.dir.joinpath(self.valid_file), index=True)
-                testset.to_parquet(self.params.dir.joinpath(self.test_file), index=True)
-                self.params.test = True
-                self.params.valid = True
-                rows_valid = list(validset.index)
-                rows_test = list(testset.index)
+            validset, testset, rows_valid, rows_test = self.build_test_val_set(
+                dataset=content,
+                train_rows=train_rows,
+                start_index_val=getattr(self.params, 'start_index_val', None),
+                start_index_test=getattr(self.params, 'start_index_test', None),
+            )
 
-        # Step 3 : train dataset / different strategies
-
-        # remove test rows
-        content = content.drop(rows_test)
-        content = content.drop(rows_valid)
-
-        # case where there is no valid/test set and the selection is deterministic
-        if (
-            not self.params.random_selection
-            and self.params.n_test == 0
-            and self.params.n_valid == 0
-        ):
-            trainset = content[0 : self.params.n_train]
-        # case to force the max of label from one column
-        elif self.params.force_label and len(self.params.cols_label) > 0:
-            f_notna = content[self.params.cols_label[0]].notna()
-            f_na = content[self.params.cols_label[0]].isna()
-            # different case regarding the number of labels
-            if f_notna.sum() > self.params.n_train:
-                trainset = content[f_notna].sample(
-                    self.params.n_train, random_state=self.random_seed
-                )
-            else:
-                n_train_random = self.params.n_train - f_notna.sum()
-                trainset = pd.concat(
-                    [
-                        content[f_notna],
-                        content[f_na].sample(n_train_random, random_state=self.random_seed),
-                    ]
-                )
-        # case there is stratification on the trainset
-        elif len(self.params.cols_stratify) > 0 and self.params.stratify_train:
-            df_grouped = content.groupby(self.params.cols_stratify, group_keys=False)
-            nb_cat = len(df_grouped)
-            nb_elements_cat = round(self.params.n_train / nb_cat)
-            sampled_idx = df_grouped.apply(
-                lambda x: x.sample(min(len(x), nb_elements_cat), random_state=self.random_seed)
-            ).index.get_level_values(-1)
-            trainset = content.loc[sampled_idx]
-        # default with random selection in the remaining elements
+        # ------------------------------------------------------------------
+        # Non-sequential (random/stratify/force_label) → build holdout first
+        # ------------------------------------------------------------------
         else:
-            trainset = content.sample(self.params.n_train, random_state=self.random_seed)
+            # Build holdout on full data
+            validset, testset, rows_valid, rows_test = self.build_test_val_set(content)
 
-        # write the trainset
-        trainset[["id_external", "text"] + self.params.cols_context].to_parquet(
-            self.params.dir.joinpath(self.train_file), index=True
-        )
+            # Then build train on the remaining rows (prevents leakage)
+            excluded_idx = set(rows_valid + rows_test)
+            remaining = content.drop(index=list(excluded_idx)) if excluded_idx else content
+            trainset, _ = self.build_trainset(remaining)
 
+        # ====================== SAVE PARAMETERS & LABELS ======================
         # save parameters (without the data)
         project = self.params.model_dump()
 
@@ -270,14 +413,18 @@ class CreateProject(BaseTask):
         import_trainset = None
         import_testset = None
         import_validset = None
+
         if len(self.params.cols_label) > 0:
-            import_trainset = trainset[self.params.cols_label].dropna(how="all")
-            if testset is not None and not self.params.clear_test:
+            if trainset is not None:
+                import_trainset = trainset[self.params.cols_label].dropna(how="all")
+
+            if testset is not None and not getattr(self.params, 'clear_test', False):
                 import_testset = testset[self.params.cols_label].dropna(how="all")
-            if validset is not None and not self.params.clear_valid:
+
+            if validset is not None and not getattr(self.params, 'clear_valid', False):
                 import_validset = validset[self.params.cols_label].dropna(how="all")
 
-        # delete the initial file
+        # delete the initial uploaded file
         if self.params.filename is not None:
             try:
                 self.params.dir.joinpath(self.params.filename).unlink()
