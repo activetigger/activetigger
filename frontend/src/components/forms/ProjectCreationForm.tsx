@@ -185,11 +185,11 @@ export const ProjectCreationForm: FC = () => {
   const n_valid = useWatch({ control, name: 'n_valid' });
   const n_test = useWatch({ control, name: 'n_test' });
   const cols_label = useWatch({ control, name: 'cols_label' });
-  // ── Derived max values ──
+  //Derived max values
   const maxTrain = Math.max(0, Math.min(maxTrainSet, lengthData - Number(n_valid) - Number(n_test)));
   const maxValid = Math.max(0, lengthData - Number(n_train) - Number(n_test));
   const maxTest = Math.max(0, lengthData - Number(n_train) - Number(n_valid));
-  // ── File load ──
+  //File load 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;

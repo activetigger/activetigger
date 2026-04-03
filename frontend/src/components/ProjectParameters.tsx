@@ -37,28 +37,43 @@ export const ProjectParameters: FC<ProjectParametersModel> = ({ project, project
 
       <ModelParametersTab
         params={
-          {
-            'Project Name': project.params.project_name,
-            'Project Slug': project.params.project_slug,
-            Filename: project.params.filename,
-            'Total Rows': project.params.n_total,
-            Language: project.params.language,
-            'Text Column': project.params.cols_text,
-            'Column ID': project.params.col_id,
-            'Colums context': project.params.cols_context,
-            'Rows in train set': project.params.n_train,
-            'Rows in test set': project.params.test ? project.params.n_test : 'Empty',
-            'Rows in valid set': project.params.valid ? project.params.n_valid : 'Empty',
-            'Stratify train set': project.params.stratify_train ? 'Yes' : 'No',
-            'Stratify test set': project.params.stratify_test ? 'Yes' : 'No',
-            'Random Sample': project.params.random_selection ? 'Yes' : 'No',
-            'Stratification columns':
-              project.params.cols_stratify.length > 0
-                ? project.params.cols_stratify.join(', ')
-                : 'None',
-          } as Record<string, unknown>
-        }
-      />
+        {
+          'Project Name': project.params.project_name,
+          Filename: project.params.filename ?? 'N/A',
+          Language: project.params.language,
+          'Text Columns': Array.isArray(project.params.cols_text)
+            ? project.params.cols_text.join(', ')
+            : project.params.cols_text,
+          'Column ID': project.params.col_id,
+          'Context Columns':
+            project.params.cols_context.length > 0
+              ? project.params.cols_context.join(', ')
+              : 'None',
+          'Label Columns':
+            project.params.cols_label.length > 0
+              ? project.params.cols_label.join(', ')
+              : 'None',
+          'Total Rows': project.params.n_total ?? 'N/A',
+          'Rows in train set': project.params.n_train,
+          'Rows in test set': project.params.test ? project.params.n_test : 'Empty',
+          'Rows in valid set': project.params.valid ? project.params.n_valid : 'Empty',
+          'Skipped Rows': project.params.n_skip,
+          'Train Selection': project.params.train_selection,
+          'Holdout Selection': project.params.holdout_selection ?? 'None',
+          'Stratification Columns':
+            project.params.cols_stratify.length > 0
+              ? project.params.cols_stratify.join(', ')
+              : 'None',
+          'From Project': project.params.from_project ?? 'None',
+          'From Toy Dataset': project.params.from_toy_dataset ? 'Yes' : 'No',
+          'Embeddings':
+            project.params.embeddings.length > 0
+              ? project.params.embeddings.join(', ')
+              : 'None',
+          Seed: project.params.seed,
+        } as Record<string, unknown>
+      }
+            />
       <Modal show={showModify} onHide={() => setShowModify(false)} id="addfeature-modal">
         <Modal.Header closeButton>
           <Modal.Title>Change project parameters</Modal.Title>
