@@ -3,7 +3,7 @@ import DataTable from 'react-data-table-component';
 import { Controller, SubmitHandler, useForm, useWatch } from 'react-hook-form';
 import Select from 'react-select';
 
-import { omit } from 'lodash';
+import { omit} from 'lodash';
 import { unparse } from 'papaparse';
 import { useCreateValidSet, useDropEvalSet } from '../../core/api';
 import { useNotifications } from '../../core/notifications';
@@ -12,7 +12,7 @@ import { loadFile } from '../../core/utils';
 import { Modal } from 'react-bootstrap';
 import { useNavigate } from 'react-router-dom';
 import { EvalSetModel } from '../../types';
-
+import { UploadProgressBar} from '../UploadProgressBar';
 // format of the data table
 export interface DataType {
   headers: string[];
@@ -42,7 +42,7 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
     },
   );
 
-  const createValidSet = useCreateValidSet(); // API call
+  const {progression,cancel,createValidSet} = useCreateValidSet(); // API call
   const { notify } = useNotifications();
 
   const dropEvalSet = useDropEvalSet(projectSlug); // API call to drop existing test set
@@ -51,6 +51,8 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
   const [alertDrop, setAlertDrop] = useState<boolean>(false);
 
   const [data, setData] = useState<DataType | null>(null);
+  const [adding,setAdding] = useState(true);
+
   const files = useWatch({ control, name: 'files' });
   // available columns
   const columns = data?.headers.map((h) => (
@@ -73,6 +75,7 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
         setValue('n_eval', data.data.length - 1);
       });
     }
+
   }, [files, setValue, notify]);
 
   // action when form validated
@@ -84,11 +87,20 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
       }
       const csv = data ? unparse(data.data, { header: true, columns: data.headers }) : '';
       formData.scheme = currentScheme;
-      await createValidSet(projectSlug, dataset, {
-        ...omit(formData, 'files'),
-        csv,
-        filename: data.filename,
-      });
+      try {
+        await createValidSet(projectSlug, dataset, {
+          ...omit(formData, 'files'),
+          csv,
+          filename: data.filename,
+        });
+      } catch(err) {
+        console.error(err);
+      } finally {
+        setAdding(false);
+        console.log(adding);
+      }
+
+      navigate(`/projects/${projectSlug}/settings`);
     }
   };
 
@@ -187,9 +199,11 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
                   </select>
                   <label htmlFor="n_test">Number of rows to import</label>
                   <input id="n_test" type="number" {...register('n_eval')} />
-
-                  <button type="submit" className="btn-submit">
-                    Create
+                  {adding && (
+                    <UploadProgressBar progression={progression} cancel={cancel} />
+                  )}
+                  <button type="submit" className="btn-submit" disabled={adding}>
+                    {adding ? 'Creating... Please wait' : 'Create'}
                   </button>
                 </div>
               )
