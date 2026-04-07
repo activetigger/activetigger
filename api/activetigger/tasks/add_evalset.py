@@ -68,8 +68,9 @@ class AddEvalSet(BaseTask):
             df["id_external"] = df["id"].apply(str)
             if not ((df["id"].astype(str).apply(slugify)).nunique() == len(df)):
                 df["id"] = [str(i) for i in range(len(df))]
-                print("ID not unique, changed to default id")
-            #compare with the general dataset            
+                print("ID not unique, changed to default id")  
+            #=================== Compare with the general dataset (Overlaps) ===================
+            #                    ============================================        
             overlapping_ids = set(df["id_external"]).intersection(set(self.index_all))
             if overlapping_ids:
                 df.loc[df["id_external"].isin(overlapping_ids), "id"] = [
@@ -89,7 +90,7 @@ class AddEvalSet(BaseTask):
             if self.dataset in ("test", "valid") and len(df) > 0:
                 file_name = config.test_file if self.dataset == "test" else config.valid_file
                 df[["id_external", "text"]].to_parquet(self.Project.dir.joinpath(file_name))
-                self.Project.__dict__[f"{self.dataset}"] = True
+                self.Project.__dict__[f"{self.dataset}"] = True 
                 self.Project.__dict__[f"n_{self.dataset}"] = len(df)
             else:
                 raise Exception("Dataset should be test or valid")

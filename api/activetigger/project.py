@@ -459,7 +459,7 @@ class Project:
         if dataset == "valid" and self.params.valid:
             raise Exception("There is already a valid dataset")
         try:
-            #check existing task in the queue
+            #check existing task in the queue → if there is already an add_evalset task for this project and this dataset, we return the status of the task without adding a new one
             if self.queue.current:
                 add_eval_task= next((t for t in self.queue.current if t.kind == "add_evalset"and t.project_slug == project_slug and t.task.dataset == dataset),None)
                 if add_eval_task.event.is_set():
@@ -489,7 +489,7 @@ class Project:
                     kind="add_evalset",
                 )
             )
-            #second check
+            #second check → return the status of the task if it has been added in the queue during the process
             return {"status": "adding"}          
         except Exception as e:
             print(e)
