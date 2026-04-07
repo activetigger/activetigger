@@ -56,7 +56,7 @@ export const ProjectSettingsPage: FC = () => {
 
   return (
     <ProjectPageLayout projectName={projectSlug} currentAction="settings">
-      <Tabs id="panel" className="mt-3" defaultActiveKey="parameters">
+      <Tabs style={{ overflow: 'auto', minHeight: 0, flex: 1}} id="panel" className="mt-3" defaultActiveKey="parameters">
         <Tab eventKey="parameters" title="Parameters">
           <ProjectParameters project={project} projectSlug={projectSlug} />
         </Tab>

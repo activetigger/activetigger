@@ -5,7 +5,7 @@ import Select from 'react-select';
 
 import { omit, set} from 'lodash';
 import { unparse } from 'papaparse';
-import { useCreateValidSet, useDropEvalSet } from '../../core/api';
+import { useCreateValidSet, useDropEvalSet ,useStopProcesses } from '../../core/api';
 import { useNotifications } from '../../core/notifications';
 import { loadFile } from '../../core/utils';
 
@@ -13,6 +13,8 @@ import { Modal } from 'react-bootstrap';
 import { useNavigate } from 'react-router-dom';
 import { EvalSetModel } from '../../types';
 import { UploadProgressBar} from '../UploadProgressBar';
+
+
 // format of the data table
 export interface DataType {
   headers: string[];
@@ -44,6 +46,7 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
 
   const {progression,cancel,status,createValidSet} = useCreateValidSet(); // API call
   const { notify } = useNotifications();
+  const { stopProcesses } = useStopProcesses(projectSlug); // API call to stop processes if needed
 
   const dropEvalSet = useDropEvalSet(projectSlug); // API call to drop existing test set
   const navigate = useNavigate(); // for navigation after drop
@@ -76,7 +79,12 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
     }
 
   }, [files, setValue, notify]);
-
+  useEffect(() => {
+  if (!cancel) return;
+  cancel.signal.addEventListener('abort', () => {
+    stopProcesses("add_evalset");
+  });
+  }, [cancel]);
   // action when form validated
   const onSubmit: SubmitHandler<EvalSetModel & { files: FileList }> = async (formData) => {
     if (data) {
@@ -121,7 +129,7 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
 
       {!exist && (
         <form onSubmit={handleSubmit(onSubmit)}>
-          <div className="col-lg-6">
+          <div className="col-lg-6" >
             <div className="explanations">
               No {datasetCleanForPrinting} data set has been created. You can upload a{' '}
               {datasetCleanForPrinting} set. Careful : all features will be dropped and need to be
@@ -133,7 +141,7 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
             {
               // display datable if data available
               data !== null && (
-                <div>
+                <div style={{ overflow: 'auto', maxWidth: '80%', maxHeight: '40vh'}}>
                   <div className="explanations">Preview</div>
                   <div>
                     Size of the dataset : <b>{data.data.length - 1}</b>
@@ -199,7 +207,7 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
                   
                   {status === 'uploading' || status === 'processing' && (
                     <div style={{ display: 'block', width: '100%', height: '100%', position: 'relative' }}>
-                    <UploadProgressBar progression={progression} cancel={cancel} />
+                      <UploadProgressBar progression={progression} cancel={cancel} />
                     </div>
                   )}
                   <button type="submit" className="btn-submit" disabled={status === 'uploading' || status === 'processing'}>

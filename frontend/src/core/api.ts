@@ -31,6 +31,7 @@ import { useNotifications } from './notifications';
 import { useAppContext } from './useAppContext';
 import { getAsyncMemoData, useAsyncMemo } from './useAsyncMemo';
 import { getAuthHeaders, useAuth } from './useAuth';
+import { use } from 'marked';
 
 
 /**
@@ -263,7 +264,8 @@ export function useCreateValidSet() {
       setController(newController);
       setStatus('uploading');
       const Url = config.api.url.replace(/\/$/, '')
-      const evalsetRes = () =>axios.post(`${Url}/projects/evalset/add`,{} as EvalSetDataModel,{
+      const dummy_evalset: EvalSetDataModel = {col_id: '',cols_text: [],n_eval: 0,filename: '',csv: ''};//to avoid error 422 and confusion 
+      const evalsetRes = () =>axios.post(`${Url}/projects/evalset/add`,dummy_evalset,{
           headers: getAuthHeaders(authenticatedUser)?.headers,
           signal: newController.signal,
           params: {project_slug: projectSlug, dataset: dataset},
@@ -283,6 +285,7 @@ export function useCreateValidSet() {
           setStatus('processing');
           while (responseStatus === "adding"){
             await new Promise((resolve) => setTimeout(resolve, 2500));
+            if (newController.signal.aborted) break;
             const {data: statusRes} = await evalsetRes();
             responseStatus = statusRes.status;
         }
@@ -292,10 +295,12 @@ export function useCreateValidSet() {
 
       } catch (error) {
         if (axios.isCancel(error)) {
+
           setStatus('idle');
           notify({ type: 'info', message: 'Test set creation cancelled.' });
-        }else if (status==="processing" && error) {
+        }else if (status==="processing") {
           setStatus('done');
+          notify({ type: 'info', message: 'Test set created.' });
         }
         else {
           setStatus('error');

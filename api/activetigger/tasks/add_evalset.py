@@ -37,6 +37,8 @@ class AddEvalSet(BaseTask):
         self.elements=None
     def __call__(self) -> Tuple[Tuple[str,str,str,str,list],ProjectBaseModel]:
         try:
+            if self.event.is_set():
+                raise Exception("Task cancelled")
             csv_buffer=io.StringIO(self.evalset.csv)
             df=pd.read_csv(
                 csv_buffer,
