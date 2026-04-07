@@ -287,6 +287,7 @@ export function useCreateValidSet() {
             await new Promise((resolve) => setTimeout(resolve, 2500));
             if (newController.signal.aborted) break;
             const {data: statusRes} = await evalsetRes();
+            if (statusRes.status === 'cancelled') break; 
             responseStatus = statusRes.status;
         }
       }

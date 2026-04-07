@@ -129,7 +129,7 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
 
       {!exist && (
         <form onSubmit={handleSubmit(onSubmit)}>
-          <div className="col-lg-6" >
+          <div className="col-lg-6" style={{ position: 'relative' }}>
             <div className="explanations">
               No {datasetCleanForPrinting} data set has been created. You can upload a{' '}
               {datasetCleanForPrinting} set. Careful : all features will be dropped and need to be
@@ -206,7 +206,7 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
                   <input id="n_test" type="number" {...register('n_eval')} />
                   
                   {status === 'uploading' || status === 'processing' && (
-                    <div style={{ display: 'block', width: '100%', height: '100%', position: 'relative' }}>
+                    <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 10 }}>
                       <UploadProgressBar progression={progression} cancel={cancel} />
                     </div>
                   )}

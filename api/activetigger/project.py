@@ -461,8 +461,11 @@ class Project:
         try:
             #check existing task in the queue
             if self.queue.current:
-                if any(t for t in self.queue.current if t.kind == "add_evalset" and t.project_slug == project_slug and t.task.dataset==dataset):
-                    return {"status": "adding"}
+                add_eval_task= next((t for t in self.queue.current if t.kind == "add_evalset"and t.project_slug == project_slug and t.task.dataset == dataset),None)
+                if add_eval_task.event.is_set():
+                    return {"status": "abort"}
+                return {"status": "adding"}
+                
             #call task
             unique_id=self.queue.add_task(
                 "add_evalset",
