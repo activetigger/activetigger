@@ -3,7 +3,7 @@ import DataTable from 'react-data-table-component';
 import { Controller, SubmitHandler, useForm, useWatch } from 'react-hook-form';
 import Select from 'react-select';
 
-import { omit} from 'lodash';
+import { omit, set} from 'lodash';
 import { unparse } from 'papaparse';
 import { useCreateValidSet, useDropEvalSet } from '../../core/api';
 import { useNotifications } from '../../core/notifications';
@@ -42,7 +42,7 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
     },
   );
 
-  const {progression,cancel,createValidSet} = useCreateValidSet(); // API call
+  const {progression,cancel,status,createValidSet} = useCreateValidSet(); // API call
   const { notify } = useNotifications();
 
   const dropEvalSet = useDropEvalSet(projectSlug); // API call to drop existing test set
@@ -51,7 +51,6 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
   const [alertDrop, setAlertDrop] = useState<boolean>(false);
 
   const [data, setData] = useState<DataType | null>(null);
-  const [adding,setAdding] = useState(true);
 
   const files = useWatch({ control, name: 'files' });
   // available columns
@@ -85,6 +84,7 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
         notify({ type: 'error', message: 'Please fill all the fields.' });
         return;
       }
+      
       const csv = data ? unparse(data.data, { header: true, columns: data.headers }) : '';
       formData.scheme = currentScheme;
       try {
@@ -93,14 +93,11 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
           csv,
           filename: data.filename,
         });
+        console.log('create valid set success');
+        navigate(`/projects/${projectSlug}/settings`);
       } catch(err) {
         console.error(err);
-      } finally {
-        setAdding(false);
-        console.log(adding);
       }
-
-      navigate(`/projects/${projectSlug}/settings`);
     }
   };
 
@@ -162,7 +159,7 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
             {
               // only display if data
               data != null && (
-                <div>
+                <div style={{ position: 'relative', width: '100%', height: '100%' }}>
                   <label htmlFor="col_id">ID column (IDs must be unique)</label>
                   <select id="col_id" disabled={data === null} {...register('col_id')}>
                     {columns}
@@ -199,11 +196,14 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
                   </select>
                   <label htmlFor="n_test">Number of rows to import</label>
                   <input id="n_test" type="number" {...register('n_eval')} />
-                  {adding && (
+                  
+                  {status === 'uploading' || status === 'processing' && (
+                    <div style={{ display: 'block', width: '100%', height: '100%', position: 'relative' }}>
                     <UploadProgressBar progression={progression} cancel={cancel} />
+                    </div>
                   )}
-                  <button type="submit" className="btn-submit" disabled={adding}>
-                    {adding ? 'Creating... Please wait' : 'Create'}
+                  <button type="submit" className="btn-submit" disabled={status === 'uploading' || status === 'processing'}>
+                    {status === 'uploading' ? 'Uploading...' : status === 'processing' ? 'Processing...' : 'Create'}
                   </button>
                 </div>
               )

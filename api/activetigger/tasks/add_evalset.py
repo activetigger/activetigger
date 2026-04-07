@@ -45,7 +45,7 @@ class AddEvalSet(BaseTask):
             )
             if len(df) > 10000:
                 raise Exception("You valid set is too large")
-            #added a check if DF is empty to avoid errors in the future
+            #added a check if DF is empty to avoid errors 
             if len(df) == 0:
                 raise Exception("Your valid set is empty")
             # create text column
@@ -88,8 +88,7 @@ class AddEvalSet(BaseTask):
                 file_name = config.test_file if self.dataset == "test" else config.valid_file
                 df[["id_external", "text"]].to_parquet(self.Project.dir.joinpath(file_name))
                 self.Project.__dict__[f"{self.dataset}"] = True
-                self.Project.__dict__[f"n_{self.dataset}"] = self.evalset.cols_text
-                
+                self.Project.__dict__[f"n_{self.dataset}"] = len(df)
             else:
                 raise Exception("Dataset should be test or valid")
             # import labels if specified + scheme // check if the labels are in the scheme

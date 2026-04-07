@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { saveAs } from 'file-saver';
-import { toPairs, values } from 'lodash';
+import { set, toPairs, values } from 'lodash';
 import createClient, { Middleware } from 'openapi-fetch';
 import { useCallback, useState } from 'react';
 
@@ -31,6 +31,7 @@ import { useNotifications } from './notifications';
 import { useAppContext } from './useAppContext';
 import { getAsyncMemoData, useAsyncMemo } from './useAsyncMemo';
 import { getAuthHeaders, useAuth } from './useAuth';
+
 
 /**
  * API methods
@@ -255,13 +256,20 @@ export function useCreateValidSet() {
   const { authenticatedUser } = useAuth();
   const [controller, setController] = useState<AbortController | undefined>(undefined);
   const [progression, setProgression] = useState<{loaded?:number;total?:number}>({});
+  const [status, setStatus] = useState<'idle' | 'uploading' | 'processing' | 'done' | 'error'>('idle');
   const createValidSet = useCallback(
     async (projectSlug: string, dataset: string, testset: EvalSetDataModel) => {
       const newController = new AbortController();
       setController(newController);
-      try {
+      setStatus('uploading');
       const Url = config.api.url.replace(/\/$/, '')
-      await axios.post(`${Url}/projects/evalset/add`,testset,{
+      const evalsetRes = () =>axios.post(`${Url}/projects/evalset/add`,{} as EvalSetDataModel,{
+          headers: getAuthHeaders(authenticatedUser)?.headers,
+          signal: newController.signal,
+          params: {project_slug: projectSlug, dataset: dataset},
+      });
+      try {
+      const {data}=await axios.post(`${Url}/projects/evalset/add`,testset,{
           headers: getAuthHeaders(authenticatedUser)?.headers,
           signal: newController.signal,
           params: {project_slug: projectSlug, dataset: dataset},
@@ -270,11 +278,27 @@ export function useCreateValidSet() {
               setProgression({ loaded, total });
             },
         });
+        let responseStatus = data.status;
+        if (responseStatus === "adding") {
+          setStatus('processing');
+          while (responseStatus === "adding"){
+            await new Promise((resolve) => setTimeout(resolve, 2500));
+            const {data: statusRes} = await evalsetRes();
+            responseStatus = statusRes.status;
+        }
+      }
+        setStatus('done');
         notify({ type: 'success', message: 'Test set created.' });
+
       } catch (error) {
         if (axios.isCancel(error)) {
+          setStatus('idle');
           notify({ type: 'info', message: 'Test set creation cancelled.' });
-        } else {
+        }else if (status==="processing" && error) {
+          setStatus('done');
+        }
+        else {
+          setStatus('error');
           console.error('[useCreateValidSet]', error);
           notify({ type: 'error', message: formatApiError(error) });
         }
@@ -286,7 +310,7 @@ export function useCreateValidSet() {
 
     [notify,authenticatedUser],
   );
-  return {createValidSet,progression, cancel:controller};
+  return {createValidSet,progression,status, cancel:controller};
 }
 
 /**

@@ -459,6 +459,10 @@ class Project:
         if dataset == "valid" and self.params.valid:
             raise Exception("There is already a valid dataset")
         try:
+            #check existing task in the queue
+            if self.queue.current:
+                if any(t for t in self.queue.current if t.kind == "add_evalset" and t.project_slug == project_slug and t.task.dataset==dataset):
+                    return {"status": "adding"}
             #call task
             unique_id=self.queue.add_task(
                 "add_evalset",
@@ -482,9 +486,12 @@ class Project:
                     kind="add_evalset",
                 )
             )
+            #second check
+            return {"status": "adding"}          
         except Exception as e:
             print(e)
             raise e
+
 
 
     def train_quickmodel(
@@ -1702,13 +1709,14 @@ class Project:
                         self.monitoring.close_process(bertopic_model.unique_id, events)
                     case "add_evalset":
                         e=cast(ProcessComputing,e)
-                        self.db_manager.projects_service.add_annotations(*results[0])
-                        self.params=results[1]
-                        self.db_manager.projects_service.update_project(self.params.project_slug, jsonable_encoder(self.params))
-                        #reset the features file and load the dataset again
-                        self.features.reset_features_file()
-                        self.quickmodels.drop_models(which="all")
-                        self.data.load_dataset(results[0][0])  
+                        if results is not None and len(results) > 0:
+                            self.db_manager.projects_service.add_annotations(*results[0])
+                            self.params=results[1]
+                            self.db_manager.projects_service.update_project(self.params.project_slug, jsonable_encoder(self.params))
+                            #reset the features file and load the dataset again
+                            self.features.reset_features_file()
+                            self.quickmodels.drop_models(which="all")
+                            self.data.load_dataset(results[0][0])  
             except Exception as ex:
                 print(f"Error in {e.kind} : {ex}")
                 self.errors.add(f"Error in {e.kind} : {str(ex)}")
