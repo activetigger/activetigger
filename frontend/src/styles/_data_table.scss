@@ -267,12 +267,15 @@
 
 #history-table{
   width: 100%;
+  table-layout: fixed;
 
   td{
     padding: 5px 10px;
     vertical-align:top;
     height: 60px;
     overflow-y: scroll;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
   th{
     padding: 5px 10px;
