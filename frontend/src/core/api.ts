@@ -32,6 +32,7 @@ import { useAppContext } from './useAppContext';
 import { getAsyncMemoData, useAsyncMemo } from './useAsyncMemo';
 import { getAuthHeaders, useAuth } from './useAuth';
 import { use } from 'marked';
+import { Controller } from 'react-hook-form';
 
 
 /**
@@ -252,71 +253,36 @@ export function useCreateProject() {
 /**
  * Create test set
  */
-export function useCreateValidSet() {
+export function useCreateValidSet(){
   const { notify } = useNotifications();
   const { authenticatedUser } = useAuth();
   const [controller, setController] = useState<AbortController | undefined>(undefined);
-  const [progression, setProgression] = useState<{loaded?:number;total?:number}>({});
-  const [status, setStatus] = useState<'idle' | 'uploading' | 'processing' | 'done' | 'error'>('idle');
-  const createValidSet = useCallback(
-    async (projectSlug: string, dataset: string, testset: EvalSetDataModel) => {
-      const newController = new AbortController();
-      setController(newController);
-      setStatus('uploading');
-      const Url = config.api.url.replace(/\/$/, '')
-      const dummy_evalset: EvalSetDataModel = {col_id: '',cols_text: [],n_eval: 0,filename: '',csv: ''};//to avoid error 422 and confusion 
-      const evalsetRes = () =>axios.post(`${Url}/projects/evalset/add`,dummy_evalset,{
-          headers: getAuthHeaders(authenticatedUser)?.headers,
-          signal: newController.signal,
-          params: {project_slug: projectSlug, dataset: dataset},
+  const [progression, setProgression] = useState<{ loaded?: number; total?: number }>({});
+   const [id, setId] = useState<string | null>(null);
+  //const [status,setStatus]=useState<'inactive'|'adding'|'done'| 'aborted' | 'error'>('inactive')
+  const createValidSet=useCallback(async(projectSlung:string,dataset:string,testset:EvalSetDataModel)=>{   
+    const controller = new AbortController();
+    setController(controller);
+    const URL=config.api.url.replace(/\/$/, '');
+    const base={headers:getAuthHeaders(authenticatedUser)?.headers,params:{project_slug:projectSlung,dataset}};
+    //Creating a dummy variable for checks 
+    try {
+     const res=await axios.post(`${URL}/projects/evalset/add`,testset,{
+        ...base,
+        signal:controller.signal,
+        onUploadProgress:({loaded,total})=>setProgression({loaded,total}),
+
       });
-      try {
-      const {data}=await axios.post(`${Url}/projects/evalset/add`,testset,{
-          headers: getAuthHeaders(authenticatedUser)?.headers,
-          signal: newController.signal,
-          params: {project_slug: projectSlug, dataset: dataset},
-          onUploadProgress: (progressEvent) => {
-              const { loaded, total } = progressEvent;
-              setProgression({ loaded, total });
-            },
-        });
-        let responseStatus = data.status;
-        if (responseStatus === "adding") {
-          setStatus('processing');
-          while (responseStatus === "adding"){
-            await new Promise((resolve) => setTimeout(resolve, 2500));
-            if (newController.signal.aborted) break;
-            const {data: statusRes} = await evalsetRes();
-            if (statusRes.status === 'cancelled') break; 
-            responseStatus = statusRes.status;
-        }
-      }
-        setStatus('done');
-        notify({ type: 'success', message: 'Test set created.' });
-
-      } catch (error) {
-        if (axios.isCancel(error)) {
-
-          setStatus('idle');
-          notify({ type: 'info', message: 'Test set creation cancelled.' });
-        }else if (status==="processing") {
-          setStatus('done');
-          notify({ type: 'info', message: 'Test set created.' });
-        }
-        else {
-          setStatus('error');
-          console.error('[useCreateValidSet]', error);
-          notify({ type: 'error', message: formatApiError(error) });
-        }
-      }finally {
-        setProgression({});
-        setController(undefined);
-      }   
-    },
-
-    [notify,authenticatedUser],
-  );
-  return {createValidSet,progression,status, cancel:controller};
+      setId(res.data)
+      return true;
+    }catch(error:any){
+      notify({ type: 'error', message: formatApiError(error) });
+      return false;
+    }
+    
+  },[notify,authenticatedUser],
+);
+  return { createValidSet, progression, cancel: controller,id};
 }
 
 /**

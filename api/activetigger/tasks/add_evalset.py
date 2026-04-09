@@ -35,10 +35,14 @@ class AddEvalSet(BaseTask):
         self.scheme = scheme
         self.project_slug = project_slug
         self.elements=None
+    def __stop_process_opportunity(self):
+        if self.event is not None and self.event.is_set():
+            file_name = config.test_file if self.dataset == "test" else config.valid_file
+            self.Project.dir.joinpath(file_name).unlink(missing_ok=True)
+            raise Exception ("Adding evaluation set process interrupted by user")
     def __call__(self) -> Tuple[Tuple[str,str,str,str,list],ProjectBaseModel]:
         try:
-            if self.event.is_set():
-                raise Exception("Task cancelled")
+            self.__stop_process_opportunity()
             csv_buffer=io.StringIO(self.evalset.csv)
             df=pd.read_csv(
                 csv_buffer,
@@ -50,6 +54,9 @@ class AddEvalSet(BaseTask):
             #added a check if DF is empty to avoid errors 
             if len(df) == 0:
                 raise Exception("Your valid set is empty")
+            
+            #stop Process
+            self.__stop_process_opportunity()
             # create text column
             df["text"]=df[self.evalset.cols_text].apply(
                 lambda x: "\n\n".join([str(i) for i in x if pd.notnull(i)]), axis=1
@@ -74,7 +81,7 @@ class AddEvalSet(BaseTask):
             overlapping_ids = set(df["id_external"]).intersection(set(self.index_all))
             if overlapping_ids:
                 df.loc[df["id_external"].isin(overlapping_ids), "id"] = [
-                    str(i) for i in range(len(overlapping_ids))
+                    str(i)+'_'+str(i) for i in range(len(overlapping_ids))
                     ]
                 print(f"{len(overlapping_ids)} IDs in the eval set already exist in the main dataset") 
             df["id"] = df["id"].apply(lambda x: f"imported-{str(x)}")
@@ -85,7 +92,8 @@ class AddEvalSet(BaseTask):
                 for label in df["label"].dropna().unique():
                     if label not in self.scheme:
                         raise Exception(f"Label {label} not in the scheme {self.evalset.scheme}")
-        
+            #stop Process
+            self.__stop_process_opportunity()
             #write to parquet
             if self.dataset in ("test", "valid") and len(df) > 0:
                 file_name = config.test_file if self.dataset == "test" else config.valid_file
@@ -94,6 +102,8 @@ class AddEvalSet(BaseTask):
                 self.Project.__dict__[f"n_{self.dataset}"] = len(df)
             else:
                 raise Exception("Dataset should be test or valid")
+            #stop Process
+            self.__stop_process_opportunity()
             # import labels if specified + scheme // check if the labels are in the scheme
             if self.Project.__dict__[f"{self.dataset}"] :
                 if self.evalset.col_label and self.evalset.scheme:

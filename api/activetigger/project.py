@@ -433,7 +433,8 @@ class Project:
         self.db_manager.projects_service.update_project(
             self.params.project_slug, jsonable_encoder(self.params)
         )
-
+        #add reload 
+        self.data.load_dataset("all")
         # reset the features file
         self.features.reset_features_file()
         self.quickmodels.drop_models(which="all")
@@ -462,9 +463,8 @@ class Project:
             #check existing task in the queue → if there is already an add_evalset task for this project and this dataset, we return the status of the task without adding a new one
             if self.queue.current:
                 add_eval_task= next((t for t in self.queue.current if t.kind == "add_evalset"and t.project_slug == project_slug and t.task.dataset == dataset),None)
-                if add_eval_task.event.is_set():
-                    return {"status": "abort"}
-                return {"status": "adding"}
+                if add_eval_task:
+                    raise Exception('this set is already being added')
                 
             #call task
             unique_id=self.queue.add_task(
@@ -475,7 +475,7 @@ class Project:
                     evalset=evalset,
                     project=self.params,
                     username=username,
-                    index=self.data.get_index(),
+                    index=self.data.get_full_id(),
                     project_slug=project_slug,
                     scheme=self.schemes.available()[evalset.scheme].labels if evalset.scheme else None,
                 ),
@@ -489,8 +489,10 @@ class Project:
                     kind="add_evalset",
                 )
             )
-            #second check → return the status of the task if it has been added in the queue during the process
-            return {"status": "adding"}          
+            if  username=='root':
+                return unique_id
+            else:
+                None   
         except Exception as e:
             print(e)
             raise e

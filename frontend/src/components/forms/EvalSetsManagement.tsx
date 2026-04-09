@@ -1,4 +1,4 @@
-import { FC, useEffect, useState } from 'react';
+import { FC, useEffect, useRef, useState } from 'react';
 import DataTable from 'react-data-table-component';
 import { Controller, SubmitHandler, useForm, useWatch } from 'react-hook-form';
 import Select from 'react-select';
@@ -44,7 +44,7 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
     },
   );
 
-  const {progression,cancel,status,createValidSet} = useCreateValidSet(); // API call
+  const {progression,cancel,createValidSet,id} = useCreateValidSet(); // API call
   const { notify } = useNotifications();
   const { stopProcesses } = useStopProcesses(projectSlug); // API call to stop processes if needed
 
@@ -56,6 +56,12 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
   const [data, setData] = useState<DataType | null>(null);
 
   const files = useWatch({ control, name: 'files' });
+
+  const [uploading , setUploading]=useState<boolean>(false);
+
+  const [isCancelling, setIsCancelling] = useState<boolean>(false);
+
+  const cancelRef=useRef(cancel);
   // available columns
   const columns = data?.headers.map((h) => (
     <option key={`${h}`} value={`${h}`}>
@@ -79,14 +85,11 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
     }
 
   }, [files, setValue, notify]);
-  useEffect(() => {
-  if (!cancel) return;
-  cancel.signal.addEventListener('abort', () => {
-    stopProcesses("add_evalset");
-  });
-  }, [cancel]);
+
   // action when form validated
   const onSubmit: SubmitHandler<EvalSetModel & { files: FileList }> = async (formData) => {
+    if (uploading || isCancelling) return;
+
     if (data) {
       if (!formData.col_id || !formData.cols_text || !formData.n_eval) {
         notify({ type: 'error', message: 'Please fill all the fields.' });
@@ -96,15 +99,19 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
       const csv = data ? unparse(data.data, { header: true, columns: data.headers }) : '';
       formData.scheme = currentScheme;
       try {
-        await createValidSet(projectSlug, dataset, {
+        setUploading(true);
+        const req=await createValidSet(projectSlug, dataset, {
           ...omit(formData, 'files'),
           csv,
           filename: data.filename,
         });
-        console.log('create valid set success');
-        navigate(`/projects/${projectSlug}/settings`);
+        
+        console.log('uploadinf file :' , uploading);
+        if (req){navigate(`/projects/${projectSlug}/settings`);}
       } catch(err) {
         console.error(err);
+        notify({ type: 'error', message: "error with adding a new eval set" });
+        
       }
     }
   };
@@ -112,6 +119,24 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
   const capFirstLetter = (word: string) => {
     return word.charAt(0).toUpperCase() + word.slice(1);
   };
+
+  useEffect(() => {
+    cancelRef.current = cancel;
+  }, [cancel]);
+
+  useEffect(() => {
+    if (!cancel?.signal) return;
+    const onAbort = async () => {
+      setIsCancelling(true);
+      const ok= await stopProcesses('add_evalset',id);
+      if(ok)
+        {setUploading(false);}
+      setIsCancelling(false);
+    };
+
+    cancel.signal.addEventListener('abort', onAbort);
+    return () => cancel.signal.removeEventListener('abort', onAbort);
+  }, [cancel?.signal]);
 
   return (
     <div>
@@ -129,24 +154,25 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
 
       {!exist && (
         <form onSubmit={handleSubmit(onSubmit)}>
-          <div className="col-lg-6" style={{ position: 'relative' }}>
+          <div className="col-lg-6">
             <div className="explanations">
               No {datasetCleanForPrinting} data set has been created. You can upload a{' '}
               {datasetCleanForPrinting} set. Careful : all features will be dropped and need to be
               computed again, and id will be modified with "imported-". You are responsible to check
               that the elements are not already in the train set.
             </div>
-            <label htmlFor="csvFile">File to upload</label>
-            <input id="csvFile" className="form-control" type="file" {...register('files')} />
+
+              <label htmlFor="csvFile">File to upload</label>
+               <input id="csvFile" className="form-control" type="file" {...register('files')} />
+         
             {
               // display datable if data available
               data !== null && (
-                <div style={{ overflow: 'auto', maxWidth: '80%', maxHeight: '40vh'}}>
+                <div style={{ overflow: 'auto', maxWidth: '100%'}}>
                   <div className="explanations">Preview</div>
                   <div>
                     Size of the dataset : <b>{data.data.length - 1}</b>
                   </div>
-                  {/* TODO: AXEL if too many rows, the page expands and it messes everything */}
                   <DataTable<Record<DataType['headers'][number], string | number>>
                     columns={data.headers.map((h) => ({
                       name: h,
@@ -156,6 +182,7 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
                         return typeof v === 'bigint' ? Number(v) : v;
                       },
                       width: '200px',
+                      wrap:true,
                     }))}
                     data={
                       data.data.slice(0, 5) as Record<keyof DataType['headers'], string | number>[]
@@ -205,13 +232,13 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
                   <label htmlFor="n_test">Number of rows to import</label>
                   <input id="n_test" type="number" {...register('n_eval')} />
                   
-                  {status === 'uploading' || status === 'processing' && (
+                  {!exist && uploading && (
                     <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 10 }}>
                       <UploadProgressBar progression={progression} cancel={cancel} />
                     </div>
                   )}
-                  <button type="submit" className="btn-submit" disabled={status === 'uploading' || status === 'processing'}>
-                    {status === 'uploading' ? 'Uploading...' : status === 'processing' ? 'Processing...' : 'Create'}
+                  <button type="submit" className="btn-submit" disabled={uploading||isCancelling}>
+                    {uploading || isCancelling ? 'Processing...' : 'Create'}
                   </button>
                 </div>
               )
