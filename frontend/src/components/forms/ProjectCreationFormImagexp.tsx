@@ -2,7 +2,12 @@
 import { FC, useState } from 'react';
 import { SubmitHandler, useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
-import { getProjectStatus, useAddProjectFile, useCreateProject } from '../../core/api';
+import {
+  getProjectStatus,
+  useAddFeature,
+  useAddProjectFile,
+  useCreateProject,
+} from '../../core/api';
 import { useNotifications } from '../../core/notifications';
 import { useAppContext } from '../../core/useAppContext';
 import { getRandomName } from '../../core/utils';
@@ -24,7 +29,10 @@ export const ProjectCreationFormImagexp: FC = () => {
   const { resetContext } = useAppContext();
   const createProject = useCreateProject();
   const { addProjectFile } = useAddProjectFile();
+  const addFeature = useAddFeature();
   const [submitting, setSubmitting] = useState(false);
+  const [computeEmbeddings, setComputeEmbeddings] = useState(true);
+  const [batchSize, setBatchSize] = useState(16);
 
   const onSubmit: SubmitHandler<ImageFormValues> = async (data) => {
     if (!data.files || data.files.length === 0) {
@@ -78,6 +86,14 @@ export const ProjectCreationFormImagexp: FC = () => {
           }
           if (status === 'existing') {
             clearInterval(intervalId);
+            // Fire image embedding computation from frontend, same pattern
+            // as text projects do with sentence-embeddings.
+            if (computeEmbeddings) {
+              addFeature(slug, 'image-embeddings', 'default', true, {
+                model: 'generic',
+                batch_size: batchSize,
+              });
+            }
             resetContext();
             setSubmitting(false);
             navigate(`/projects/${slug}?fromCreatePage=true`);
@@ -128,9 +144,47 @@ export const ProjectCreationFormImagexp: FC = () => {
           <input className="form-control" type="number" {...register('n_valid')} />
         </div>
       </div>
+      <details className="mt-3">
+        <summary>Advanced parameters</summary>
+        <div className="d-flex align-items-center gap-2 mt-2">
+          <label htmlFor="compute_embeddings" className="m-0">
+            <input
+              id="compute_embeddings"
+              type="checkbox"
+              disabled={submitting}
+              checked={computeEmbeddings}
+              onChange={() => setComputeEmbeddings(!computeEmbeddings)}
+            />{' '}
+            Compute image embeddings
+          </label>
+          {computeEmbeddings && (
+            <label className="batch-size-label">
+              batch
+              <input
+                type="number"
+                min={1}
+                max={512}
+                value={batchSize}
+                onChange={(e) => setBatchSize(Math.max(1, parseInt(e.target.value) || 1))}
+                title="Batch size for embedding computation"
+                disabled={submitting}
+                style={{ width: 60, marginLeft: 4 }}
+              />
+            </label>
+          )}
+        </div>
+      </details>
       <button type="submit" className="btn btn-primary mt-3" disabled={submitting}>
         {submitting ? 'Creating…' : 'Create image project'}
       </button>
+      {submitting && (
+        <div className="d-flex align-items-center gap-2 mt-3 text-muted">
+          <div className="spinner-border spinner-border-sm" role="status" />
+          <span>
+            Creating project: uploading images and generating thumbnails. This may take a moment...
+          </span>
+        </div>
+      )}
     </form>
   );
 };

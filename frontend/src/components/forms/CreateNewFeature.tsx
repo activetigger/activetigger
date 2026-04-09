@@ -46,7 +46,7 @@ export const CreateNewFeature: FC<CreateNewFeatureProps> = ({
         max_length_tokens: 1024,
         batch_size: 32,
       },
-      type: 'sentence-embeddings',
+      type: 'image-embeddings' in featuresOption ? 'image-embeddings' : 'sentence-embeddings',
       name: defaultName,
     },
   });

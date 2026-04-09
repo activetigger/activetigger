@@ -373,7 +373,7 @@ class Features:
             raise Exception("Index not recognized")
 
     def current_user_processes(self, user: str):
-        return [e for e in self.computing if e.user == user]
+        return [e for e in self.computing if getattr(e, "user", None) == user]
 
     def current_computing(self) -> dict[str, dict[str, str | None]]:
         return {

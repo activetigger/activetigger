@@ -2,6 +2,7 @@ import { FC, useState } from 'react';
 import { Button } from 'react-bootstrap';
 import Modal from 'react-bootstrap/Modal';
 import { FaRegTrashAlt } from 'react-icons/fa';
+import { HiOutlineDocumentText, HiOutlinePhotograph } from 'react-icons/hi';
 import { useNavigate } from 'react-router-dom';
 import { useDeleteProject } from '../core/api';
 import { AvailableProjectsModel } from '../types';
@@ -34,7 +35,14 @@ export const ProjectCard: FC<ProjectCardProps> = ({ project, resetContext }) => 
   return (
     <div key={project.parameters.project_slug} id="project-card">
       <div onClick={navigateToProject} className="clickable-zone">
-        <h3 className="projecttitle">{project.parameters.project_name}</h3>
+        <h3 className="projecttitle">
+          {project.parameters.kind === 'image' ? (
+            <HiOutlinePhotograph size={18} title="Image project" className="me-1 text-muted" />
+          ) : (
+            <HiOutlineDocumentText size={18} title="Text project" className="me-1 text-muted" />
+          )}
+          {project.parameters.project_name}
+        </h3>
         <p className="projectdetails">
           <span id="key">Creator: </span>
           <span id="value">{project.created_by}</span>

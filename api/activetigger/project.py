@@ -419,8 +419,9 @@ class Project:
             AuthUserModel(username="root", project_slug=project.project_slug, status="manager")
         )
 
-        # NB: image projects no longer auto-compute or register CLIP embeddings
-        # at creation time. Embeddings can be computed on-demand later.
+        # Load the full project (data, features, schemes, etc.) now that it
+        # exists in the DB and the data files are on disk.
+        self.load_project(project.project_slug)
 
         self.status = "created"
 
