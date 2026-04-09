@@ -170,6 +170,16 @@ def get_project_status(
         slug = slugify(project_name)
         # if project is in creation
         if slug in orchestrator.project_creation_ongoing:
+            # Try to read creation progress for image projects
+            project = orchestrator.project_creation_ongoing[slug]
+            try:
+                proj_dir = getattr(project, "params", None) and project.params.dir
+                if proj_dir is not None:
+                    progress_file = Path(proj_dir) / "creation_progress"
+                    if progress_file.exists():
+                        return f"creating:{progress_file.read_text().strip()}"
+            except Exception:
+                pass
             return "creating"
         # if creation failed, return the error (consumed once)
         if slug in orchestrator.creation_errors:

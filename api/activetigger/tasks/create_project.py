@@ -304,9 +304,8 @@ class CreateProjectImagexp(BaseTask):
     kind = "create_project_imagexp"
 
     # caps (v1)
-    MAX_IMAGES = 5000
-    MAX_ZIP_BYTES = 2 * 1024 * 1024 * 1024  # 2 GB
-    MAX_IMAGE_BYTES = 100 * 1024 * 1024  # 10 MB
+    MAX_ZIP_BYTES = 1 * 1024 * 1024 * 1024  # 1 GB
+    MAX_IMAGE_BYTES = 100 * 1024 * 1024  # 100 MB
     ALLOWED_EXT = {".png", ".jpg", ".jpeg"}
 
     def __init__(
@@ -369,10 +368,6 @@ class CreateProjectImagexp(BaseTask):
             ]
             if len(image_infos) == 0:
                 raise Exception("Zip does not contain any .png/.jpg image")
-            if len(image_infos) > self.MAX_IMAGES:
-                raise Exception(
-                    f"Too many images in zip (max {self.MAX_IMAGES}, found {len(image_infos)})"
-                )
             for info in image_infos:
                 if info.file_size > self.MAX_IMAGE_BYTES:
                     raise Exception(
@@ -393,7 +388,9 @@ class CreateProjectImagexp(BaseTask):
                 ImageOps = None  # type: ignore[assignment]
                 print(f"Pillow not available, skipping thumbnail generation: {ex}")
 
-            for info in image_infos:
+            total_images = len(image_infos)
+            progress_file = self.params.dir.joinpath("creation_progress")
+            for idx, info in enumerate(image_infos, 1):
                 src_name = Path(info.filename).name
                 element_id = Path(info.filename).stem
                 target = images_dir.joinpath(src_name)
@@ -415,6 +412,20 @@ class CreateProjectImagexp(BaseTask):
                             im.save(thumb_path, "JPEG", quality=80, optimize=True)
                     except Exception as ex:
                         print(f"thumbnail generation failed for {src_name}: {ex}")
+
+                # Write progress
+                progress_pct = round((idx / total_images) * 100, 1)
+                try:
+                    with open(progress_file, "w") as pf:
+                        pf.write(str(progress_pct))
+                except OSError:
+                    pass
+
+            # Clean up progress file
+            try:
+                progress_file.unlink()
+            except OSError:
+                pass
 
             metadata_df = None
             if metadata_infos:

@@ -11,6 +11,7 @@ import {
 import { useNotifications } from '../../core/notifications';
 import { useAppContext } from '../../core/useAppContext';
 import { getRandomName } from '../../core/utils';
+import { UploadProgressBar } from '../UploadProgressBar';
 
 interface ImageFormValues {
   project_name: string;
@@ -28,9 +29,10 @@ export const ProjectCreationFormImagexp: FC = () => {
   const { notify } = useNotifications();
   const { resetContext } = useAppContext();
   const createProject = useCreateProject();
-  const { addProjectFile } = useAddProjectFile();
+  const { addProjectFile, progression, cancel } = useAddProjectFile();
   const addFeature = useAddFeature();
   const [submitting, setSubmitting] = useState(false);
+  const [creationProgress, setCreationProgress] = useState<number | null>(null);
   const [computeEmbeddings, setComputeEmbeddings] = useState(true);
   const [batchSize, setBatchSize] = useState(16);
 
@@ -84,6 +86,15 @@ export const ProjectCreationFormImagexp: FC = () => {
             navigate('/projects');
             return;
           }
+          // Parse creation progress (e.g. "creating:45.2")
+          if (status?.startsWith('creating:')) {
+            const pct = parseFloat(status.split(':')[1]);
+            if (!isNaN(pct)) setCreationProgress(pct);
+            return;
+          }
+          if (status === 'creating') {
+            return;
+          }
           if (status === 'existing') {
             clearInterval(intervalId);
             // Fire image embedding computation from frontend, same pattern
@@ -123,8 +134,8 @@ export const ProjectCreationFormImagexp: FC = () => {
   return (
     <form onSubmit={handleSubmit(onSubmit)}>
       <div className="alert alert-warning small">
-        Experimental: image projects support only a minimal workflow (no BERT, no regex). Max 5000
-        images, 2 GB zip, 10 MB per image.
+        Experimental: image projects support only a minimal workflow (no BERT, no regex). Max 1 GB
+        zip, 100 MB per image.
       </div>
       <label className="form-label">Project name</label>
       <input className="form-control mb-2" {...register('project_name', { required: true })} />
@@ -177,12 +188,22 @@ export const ProjectCreationFormImagexp: FC = () => {
       <button type="submit" className="btn btn-primary mt-3" disabled={submitting}>
         {submitting ? 'Creating…' : 'Create image project'}
       </button>
-      {submitting && (
-        <div className="d-flex align-items-center gap-2 mt-3 text-muted">
-          <div className="spinner-border spinner-border-sm" role="status" />
-          <span>
-            Creating project: uploading images and generating thumbnails. This may take a moment...
-          </span>
+      {submitting && <UploadProgressBar progression={progression} cancel={cancel} />}
+      {submitting && creationProgress !== null && (
+        <div className="mt-3 text-muted">
+          <div className="d-flex align-items-center gap-2 mb-2">
+            <div className="spinner-border spinner-border-sm" role="status" />
+            <span>
+              Extracting images and generating thumbnails ({Math.round(creationProgress)}%)...
+            </span>
+          </div>
+          <div className="progress" style={{ height: 8 }}>
+            <div
+              className="progress-bar"
+              role="progressbar"
+              style={{ width: `${creationProgress}%` }}
+            />
+          </div>
         </div>
       )}
     </form>
