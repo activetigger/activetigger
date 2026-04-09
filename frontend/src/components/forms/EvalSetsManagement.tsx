@@ -123,11 +123,14 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
   useEffect(() => {
     cancelRef.current = cancel;
   }, [cancel]);
-
+  useEffect(()=>{
+    if (exist){setUploading(false);}
+  },[exist]);
   useEffect(() => {
     if (!cancel?.signal) return;
     const onAbort = async () => {
       setIsCancelling(true);
+      console.log(id);
       const ok= await stopProcesses('add_evalset',id);
       if(ok)
         {setUploading(false);}

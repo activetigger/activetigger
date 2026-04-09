@@ -489,7 +489,7 @@ class Project:
                     kind="add_evalset",
                 )
             )
-            if  username=='root':
+            if  username=="root":
                 return unique_id
             else:
                 None   
