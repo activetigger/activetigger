@@ -246,6 +246,10 @@ def post_bert(
     Compute bertmodel
     """
     test_rights(ProjectAction.ADD, current_user.username, project.name)
+    if getattr(project.params, "kind", "text") == "image":
+        raise HTTPException(
+            status_code=400, detail="BERT models are not supported for image projects"
+        )
     try:
         if not orchestrator.available_storage(current_user.username):
             raise HTTPException(
@@ -275,6 +279,10 @@ def delete_bert(
     # TODO : check the replace
     """
     test_rights(ProjectAction.DELETE, current_user.username, project.name)
+    if getattr(project.params, "kind", "text") == "image":
+        raise HTTPException(
+            status_code=400, detail="BERT models are not supported for image projects"
+        )
     try:
         # delete the model
         project.languagemodels.delete(bert_name)
@@ -299,6 +307,10 @@ def rename_bert(
     Rename bertmodel
     """
     test_rights(ProjectAction.UPDATE, current_user.username, project.name)
+    if getattr(project.params, "kind", "text") == "image":
+        raise HTTPException(
+            status_code=400, detail="BERT models are not supported for image projects"
+        )
     try:
         project.languagemodels.rename(former_name, new_name)
         orchestrator.log_action(

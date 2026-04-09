@@ -43,6 +43,7 @@ export const ProjectExplorePage: FC = () => {
                   availableLabels={availableLabels}
                   availableUsers={project?.users?.users ?? []}
                   kindScheme={kindScheme}
+                  projectKind={project?.params.kind || 'text'}
                   isValid={project?.params.valid || false}
                   isTest={project?.params.test || false}
                   currentDataset={phase}
@@ -58,6 +59,7 @@ export const ProjectExplorePage: FC = () => {
                   currentElementId={undefined}
                 />
               </Tab>
+              {project?.params.kind !== 'image' && (
               <Tab eventKey="bertopic" title="Topic model">
                 <div className="explanations">
                   Explore the topics in your train data with{' '}
@@ -80,6 +82,7 @@ export const ProjectExplorePage: FC = () => {
                 </div>
                 <BertopicPage />
               </Tab>
+              )}
             </Tabs>
           </div>
         </div>

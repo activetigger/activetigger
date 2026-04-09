@@ -39,6 +39,8 @@ def compute_bertopic(
     # Force the language of the project
     bertopic.language = project.params.language
 
+    if project.params.kind == "image":
+        raise HTTPException(status_code=400, detail="BERTopic is not supported for image projects")
     try:
         unique_id = project.bertopic.compute(
             path_data=project.params.dir,
@@ -73,6 +75,8 @@ def get_bertopic_topics(
     """
     Get topics from the BERTopic model for the project.
     """
+    if project.params.kind == "image":
+        raise HTTPException(status_code=400, detail="BERTopic is not supported for image projects")
     try:
         return BertopicTopicsOutModel(
             topics=project.bertopic.get_topics(name=name),
@@ -91,6 +95,8 @@ def get_bertopic_projection(
     """
     Get projection from the BERTopic model for the project.
     """
+    if project.params.kind == "image":
+        raise HTTPException(status_code=400, detail="BERTopic is not supported for image projects")
     try:
         return project.bertopic.get_projection(name=name)
     except Exception as e:
@@ -106,6 +112,8 @@ def delete_bertopic_model(
     """
     Delete a BERTopic model for the project.
     """
+    if project.params.kind == "image":
+        raise HTTPException(status_code=400, detail="BERTopic is not supported for image projects")
     try:
         project.bertopic.delete(name=name)
         orchestrator.log_action(
@@ -124,6 +132,8 @@ def export_bertopic_to_scheme(
     """
     Export the topic model as a scheme for the train set
     """
+    if project.params.kind == "image":
+        raise HTTPException(status_code=400, detail="BERTopic is not supported for image projects")
     try:
         test_rights(ProjectAction.ADD, current_user.username, project.name)
 
@@ -172,6 +182,8 @@ def export_bertopic_to_feature(
     """
     Export the topic model as a feature for quick models
     """
+    if project.params.kind == "image":
+        raise HTTPException(status_code=400, detail="BERTopic is not supported for image projects")
     try:
         test_rights(ProjectAction.ADD, current_user.username, project.name)
 

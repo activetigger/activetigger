@@ -1,5 +1,5 @@
 import classNames from 'classnames';
-import { FC, ReactNode, useCallback, useEffect, useState } from 'react';
+import { FC, ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 
 import { FaLock } from 'react-icons/fa';
 import { HiOutlineQuestionMarkCircle } from 'react-icons/hi';
@@ -8,6 +8,7 @@ import { Tooltip } from 'react-tooltip';
 import { useGetElementById } from '../core/api';
 import { useAppContext } from '../core/useAppContext';
 import { ElementOutModel, ProjectionOutModel } from '../types';
+import { ImageClassificationPanelImagexp } from './Annotation/ImageClassificationPanelImagexp';
 import { ProjectionVizSigma } from './ProjectionVizSigma';
 import { MarqueBoundingBox } from './ProjectionVizSigma/MarqueeController';
 
@@ -42,15 +43,14 @@ export const ProjectionExplorer: FC<ProjectionExplorerProps> = ({
   panelClassName,
   children,
 }) => {
-  const {
-    appContext: { selectionConfig },
-    setAppContext,
-  } = useAppContext();
+  const { appContext, setAppContext } = useAppContext();
+  const { selectionConfig, currentProject } = appContext;
   const navigate = useNavigate();
 
   // element selection state
   const { getElementById } = useGetElementById();
   const [selectedElement, setSelectedElement] = useState<ElementOutModel | null>(null);
+  const imageFrameRef = useRef<HTMLDivElement>(null);
 
   const setSelectedId = useCallback(
     (id?: string) => {
@@ -151,7 +151,19 @@ export const ProjectionExplorer: FC<ProjectionExplorerProps> = ({
               >
                 Text {selectedElement.element_id}
               </a>
-              <div>{selectedElement.text}</div>
+              <div>
+                {currentProject?.params?.kind === 'image' && projectName ? (
+                  <ImageClassificationPanelImagexp
+                    element={selectedElement}
+                    displayConfig={appContext.displayConfig}
+                    elementId={selectedElement.element_id}
+                    projectSlug={projectName}
+                    frameRef={imageFrameRef as unknown as HTMLDivElement}
+                  />
+                ) : (
+                  selectedElement.text
+                )}
+              </div>
               <details>
                 <summary>Previous annotations:</summary>
                 <ul>

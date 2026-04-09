@@ -1,10 +1,14 @@
 from typing import Annotated
 
+from pathlib import Path
+
 from fastapi import (
     APIRouter,
     Depends,
     HTTPException,
+    Request,
 )
+from fastapi.responses import FileResponse, Response
 
 from activetigger.app.dependencies import (
     ProjectAction,
@@ -272,3 +276,146 @@ def get_project_state(
         return project.state()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+# --- Experimental image projects (see docs/image-projects-strategy.md) ---
+
+
+@router.get(
+    "/projects/{project_slug}/image_imagexp/{element_id}",
+    dependencies=[Depends(verified_user)],
+)
+def get_project_image_imagexp(
+    project_slug: str,
+    element_id: str,
+    request: Request,
+    current_user: Annotated[UserInDBModel, Depends(verified_user)],
+    project: Annotated[Project, Depends(get_project)],
+) -> Response:
+    """
+    Stream an image element from an image project.
+    Safe caching: images are immutable once uploaded.
+    """
+    test_rights(ProjectAction.GET, current_user.username, project.project_slug)
+    if getattr(project.params, "kind", "text") != "image":
+        raise HTTPException(status_code=400, detail="Not an image project")
+    if project.params.dir is None:
+        raise HTTPException(status_code=500, detail="Project directory missing")
+    images_dir = Path(project.params.dir) / "images"
+    safe_id = Path(element_id).name  # strip any path component
+
+    # Resolve the on-disk path via the in-memory DataFrames (train/valid/test).
+    # The "text" column holds the file path for image projects.
+    candidate: Path | None = None
+    for df in (project.data.train, project.data.valid, project.data.test):
+        if df is not None and safe_id in df.index and "text" in df.columns:
+            p = Path(str(df.loc[safe_id, "text"]))
+            if p.exists():
+                candidate = p
+                break
+
+    # Fallback: try direct stem match in images_dir
+    if candidate is None:
+        for ext in (".png", ".jpg", ".jpeg"):
+            p = images_dir / f"{safe_id}{ext}"
+            if p.exists():
+                candidate = p
+                break
+
+    # Confine to images_dir for safety
+    if candidate is not None:
+        try:
+            candidate.resolve().relative_to(images_dir.resolve())
+        except ValueError:
+            candidate = None
+
+    if candidate is None:
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    stat = candidate.stat()
+    etag = f'"{int(stat.st_mtime)}-{stat.st_size}"'
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304)
+    return FileResponse(
+        candidate,
+        headers={
+            "Cache-Control": "private, max-age=3600",
+            "ETag": etag,
+        },
+    )
+
+
+@router.get(
+    "/projects/{project_slug}/thumbnail_imagexp/{element_id}",
+    dependencies=[Depends(verified_user)],
+)
+def get_project_thumbnail_imagexp(
+    project_slug: str,
+    element_id: str,
+    request: Request,
+    current_user: Annotated[UserInDBModel, Depends(verified_user)],
+    project: Annotated[Project, Depends(get_project)],
+) -> Response:
+    """
+    Stream a precomputed 256px JPEG thumbnail for an image element.
+    Falls back to the original image if the thumbnail file is missing
+    (e.g. ingest failure or older project), so the route is safe to deploy
+    without a backfill migration.
+    """
+    test_rights(ProjectAction.GET, current_user.username, project.project_slug)
+    if getattr(project.params, "kind", "text") != "image":
+        raise HTTPException(status_code=400, detail="Not an image project")
+    if project.params.dir is None:
+        raise HTTPException(status_code=500, detail="Project directory missing")
+
+    images_dir = Path(project.params.dir) / "images"
+    thumbs_dir = images_dir / "thumbs"
+    safe_id = Path(element_id).name
+
+    # Thumbnails are named `{id_internal}.jpg` under images/thumbs/.
+    # If missing (older project or ingest failure), fall back to the original.
+    candidate: Path | None = None
+    thumb_path = thumbs_dir / f"{safe_id}.jpg"
+    if thumb_path.exists():
+        try:
+            thumb_path.resolve().relative_to(images_dir.resolve())
+            candidate = thumb_path
+        except ValueError:
+            pass
+
+    # Fallback: serve the original via in-memory DataFrames
+    if candidate is None:
+        for df in (project.data.train, project.data.valid, project.data.test):
+            if df is not None and safe_id in df.index and "text" in df.columns:
+                p = Path(str(df.loc[safe_id, "text"]))
+                if p.exists():
+                    candidate = p
+                    break
+
+    if candidate is None:
+        for ext in (".png", ".jpg", ".jpeg"):
+            p = images_dir / f"{safe_id}{ext}"
+            if p.exists():
+                candidate = p
+                break
+
+    if candidate is not None:
+        try:
+            candidate.resolve().relative_to(images_dir.resolve())
+        except ValueError:
+            candidate = None
+
+    if candidate is None:
+        raise HTTPException(status_code=404, detail="Thumbnail not found")
+
+    stat = candidate.stat()
+    etag = f'"{int(stat.st_mtime)}-{stat.st_size}"'
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304)
+    return FileResponse(
+        candidate,
+        headers={
+            "Cache-Control": "private, max-age=3600",
+            "ETag": etag,
+        },
+    )

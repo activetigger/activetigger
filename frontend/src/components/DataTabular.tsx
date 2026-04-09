@@ -11,6 +11,7 @@ import { HiOutlineQuestionMarkCircle } from 'react-icons/hi';
 import { Link } from 'react-router-dom';
 import { Tooltip } from 'react-tooltip';
 import { useAddTableAnnotations, useTableElements } from '../core/api';
+import { ImageThumbnailImagexp } from './ImageThumbnailImagexp';
 import { AppContextValue } from '../core/context';
 import { AnnotationModel } from '../types';
 import { TableFilterState, TableTagFilterSelect } from './TableTagFilterSelect';
@@ -34,6 +35,7 @@ interface DataTabularModel {
   isTest: boolean;
   currentDataset: string;
   setAppContext: React.Dispatch<React.SetStateAction<AppContextValue>>;
+  projectKind?: string;
 }
 
 export const DataTabular: FC<DataTabularModel> = ({
@@ -46,7 +48,9 @@ export const DataTabular: FC<DataTabularModel> = ({
   isTest,
   currentDataset,
   setAppContext,
+  projectKind,
 }) => {
+  const isImageKind = projectKind === 'image';
   // data modification management
   const [modifiedRows, setModifiedRows] = useState<Record<string, AnnotationModel>>({});
 
@@ -155,10 +159,15 @@ export const DataTabular: FC<DataTabularModel> = ({
     },
     {
       key: 'text',
-      name: 'Text',
+      name: isImageKind ? 'Image' : 'Text',
       resizable: true,
 
-      renderCell: (props) => (
+      renderCell: (props) =>
+        isImageKind ? (
+          <div style={{ width: '100%', height: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+            <ImageThumbnailImagexp projectSlug={projectSlug} elementId={props.row.id_internal} />
+          </div>
+        ) : (
         <div
           style={{
             maxHeight: '100%',
@@ -181,7 +190,7 @@ export const DataTabular: FC<DataTabularModel> = ({
             caseSensitive={true}
           />
         </div>
-      ),
+        ),
     },
     {
       key: 'comment',
@@ -275,6 +284,7 @@ export const DataTabular: FC<DataTabularModel> = ({
             }}
           />
         </div>
+        {!isImageKind && (
         <div>
           <label htmlFor="filter-input">
             Filter by content
@@ -290,6 +300,7 @@ export const DataTabular: FC<DataTabularModel> = ({
             }}
           />
         </div>
+        )}
       </div>
       <div className="horizontal wrap" id="tabular-view-page-control">
         <div>
@@ -342,7 +353,7 @@ export const DataTabular: FC<DataTabularModel> = ({
         style={{ backgroundColor: 'white' }}
         columns={columns}
         rows={rows}
-        rowHeight={80}
+        rowHeight={isImageKind ? 100 : 80}
         onRowsChange={(e) => {
           setRows(e);
         }}

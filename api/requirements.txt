@@ -725,3 +725,5 @@ yarl==1.23.0 ; sys_platform == 'darwin' or sys_platform == 'linux'
     # via aiohttp
 zipp==3.23.0 ; sys_platform == 'darwin' or sys_platform == 'linux'
     # via importlib-metadata
+# image-experimental: used only by compute_embeddings_imagexp (see docs/image-projects-strategy.md)
+# open_clip_torch

@@ -22,6 +22,7 @@ import { useNotifications } from '../../core/notifications';
 import { useAppContext } from '../../core/useAppContext';
 import { getRandomName, loadFile } from '../../core/utils';
 import { ProjectModel } from '../../types';
+import { ProjectCreationFormImagexp } from './ProjectCreationFormImagexp';
 
 // format of the data table
 export interface DataType {
@@ -313,10 +314,31 @@ export const ProjectCreationForm: FC = () => {
     // reset data when changing dataset
   }, [dataset, reset]);
 
+  // Experimental image projects — see docs/image-projects-strategy.md
+  const [kind, setKind] = useState<'text' | 'image'>('text');
+
   return (
     <div>
       <div className="explanations">Create a new project</div>
 
+      <div className="form-check form-switch d-flex align-items-center gap-2 mb-2 text-muted small">
+        <input
+          className="form-check-input"
+          type="checkbox"
+          role="switch"
+          id="image-kind-switch"
+          checked={kind === 'image'}
+          onChange={(e) => setKind(e.target.checked ? 'image' : 'text')}
+          style={{ filter: 'grayscale(1)' }}
+        />
+        <label className="form-check-label" htmlFor="image-kind-switch">
+          Image project (experimental)
+        </label>
+      </div>
+
+      {kind === 'image' ? (
+        <ProjectCreationFormImagexp />
+      ) : (
       <form onSubmit={handleSubmit(onSubmit)}>
         <label htmlFor="project_name">Project name</label>
         <input
@@ -774,6 +796,7 @@ export const ProjectCreationForm: FC = () => {
           </>
         }
       </form>
+      )}
     </div>
   );
 };

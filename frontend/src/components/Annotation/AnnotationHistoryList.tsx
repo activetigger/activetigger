@@ -14,6 +14,7 @@ import { useAnnotationSessionHistory } from '../../core/useHistory';
 import { displayTime } from '../../core/utils';
 import { ElementHistoryPoint } from '../../types';
 import { AnnotationIcon, NoAnnotationIcon } from '../Icons';
+import { ImageThumbnailImagexp } from '../ImageThumbnailImagexp';
 import { MiddleEllipsis } from './MiddleEllipsis';
 
 const dateTimeFormat = new Intl.DateTimeFormat('en-GB', {
@@ -28,9 +29,10 @@ const sameDayTimeFormat = new Intl.DateTimeFormat('en-GB', {
   minute: 'numeric',
 });
 
-const AnnotationHistoryEntry: FC<{ elementHistoryPoint: ElementHistoryPoint }> = ({
-  elementHistoryPoint,
-}) => {
+const AnnotationHistoryEntry: FC<{
+  elementHistoryPoint: ElementHistoryPoint;
+  isImageKind?: boolean;
+}> = ({ elementHistoryPoint, isImageKind }) => {
   const { projectName, elementId: currentElementId } = useParams();
 
   const date = elementHistoryPoint.time ? new Date(elementHistoryPoint.time) : undefined;
@@ -49,7 +51,14 @@ const AnnotationHistoryEntry: FC<{ elementHistoryPoint: ElementHistoryPoint }> =
       )}
       to={`/projects/${projectName}/tag/${elementHistoryPoint.element_id}`}
     >
-      <p>{truncate(elementHistoryPoint.element_text, { length: 100 })}</p>
+      {isImageKind && projectName ? (
+        <ImageThumbnailImagexp
+          projectSlug={projectName}
+          elementId={elementHistoryPoint.element_id}
+        />
+      ) : (
+        <p>{truncate(elementHistoryPoint.element_text, { length: 100 })}</p>
+      )}
       <div className="d-flex gap-1 flex-wrap position-relative w-100">
         {elementHistoryPoint.label !== undefined && (
           <span className="badge d-flex align-center gap-1">
@@ -76,7 +85,10 @@ const AnnotationHistoryEntry: FC<{ elementHistoryPoint: ElementHistoryPoint }> =
   );
 };
 
-const AnnotationHistoryTable: FC<{ items: ElementHistoryPoint[] }> = ({ items }) => {
+const AnnotationHistoryTable: FC<{ items: ElementHistoryPoint[]; isImageKind?: boolean }> = ({
+  items,
+  isImageKind,
+}) => {
   const { projectName, elementId: currentElementId } = useParams();
 
   return (
@@ -85,7 +97,7 @@ const AnnotationHistoryTable: FC<{ items: ElementHistoryPoint[] }> = ({ items })
         <tr>
           <th>Time</th>
           <th>Label</th>
-          <th>Text</th>
+          <th>{isImageKind ? 'Image' : 'Text'}</th>
           <th>Element ID</th>
         </tr>
       </thead>
@@ -101,7 +113,14 @@ const AnnotationHistoryTable: FC<{ items: ElementHistoryPoint[] }> = ({ items })
             <td>{hp.label || ''}</td>
             <td>
               <Link to={`/projects/${projectName}/tag/${hp.element_id}`}>
-                {truncate(hp.element_text, { length: 80 })}
+                {isImageKind && projectName ? (
+                  <ImageThumbnailImagexp
+                    projectSlug={projectName}
+                    elementId={hp.element_id}
+                  />
+                ) : (
+                  truncate(hp.element_text, { length: 80 })
+                )}
               </Link>
             </td>
             <td>{hp.element_id}</td>
@@ -115,6 +134,7 @@ const AnnotationHistoryTable: FC<{ items: ElementHistoryPoint[] }> = ({ items })
 export const AnnotationHistoryList: FC = () => {
   const { appContext, setAppContext } = useAppContext();
   const { history, phase, currentProject, currentScheme, displayConfig } = appContext;
+  const isImageKind = currentProject?.params.kind === 'image';
 
   const { clearAnnotationSessionHistory } = useAnnotationSessionHistory();
   const [showCodebook, setShowCodebook] = useState(false);
@@ -204,13 +224,14 @@ export const AnnotationHistoryList: FC = () => {
               <AnnotationHistoryEntry
                 key={`${historyPoint.element_id}-${i}`}
                 elementHistoryPoint={historyPoint}
+                isImageKind={isImageKind}
               />
             );
           })}
         </div>
       ) : (
         <div style={{ width: '100%', overflowX: 'auto' }}>
-          <AnnotationHistoryTable items={filteredHistory} />
+          <AnnotationHistoryTable items={filteredHistory} isImageKind={isImageKind} />
         </div>
       )}
     </div>

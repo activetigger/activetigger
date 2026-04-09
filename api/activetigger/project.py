@@ -72,7 +72,7 @@ from activetigger.projections import Projections
 from activetigger.queue_manager import Queue
 from activetigger.quickmodels import QuickModels
 from activetigger.schemes import Schemes
-from activetigger.tasks.create_project import CreateProject
+from activetigger.tasks.create_project import CreateProject, CreateProjectImagexp
 from activetigger.tasks.generate_call import GenerateCall
 from activetigger.tasks.update_datasets import UpdateDatasets
 from activetigger.users import Users
@@ -224,6 +224,7 @@ class Project:
             cast(list[FeatureComputing], self.computing),
             self.db_manager,
             self.params.language,
+            kind=getattr(self.params, "kind", "text"),
         )
         self.languagemodels = LanguageModels(
             project_slug,
@@ -283,6 +284,44 @@ class Project:
         )
 
         # Update the register
+        self.computing.append(
+            ProjectCreatingModel(
+                username=username,
+                project_slug=self.project_slug,
+                unique_id=unique_id,
+                time=datetime.now(timezone.utc),
+                kind="create_project",
+                status="training",
+            )
+        )
+
+    def start_project_creation_imagexp(
+        self, params: ProjectBaseModel, username: str, path: Path
+    ) -> None:
+        """
+        Experimental: enqueue creation of an image project.
+        See docs/image-projects-strategy.md.
+        """
+        self.status = "creating"
+        params.dir = path.joinpath(self.project_slug)
+
+        unique_id = self.queue.add_task(
+            "create_project",
+            self.project_slug,
+            CreateProjectImagexp(
+                self.project_slug,
+                params,
+                username,
+                data_all=config.data_all,
+                train_file=config.train_file,
+                valid_file=config.valid_file,
+                test_file=config.test_file,
+                features_file=config.features_file,
+                random_seed=config.random_seed,
+            ),
+            queue="cpu",
+        )
+
         self.computing.append(
             ProjectCreatingModel(
                 username=username,
@@ -379,6 +418,10 @@ class Project:
         self.users.set_auth(
             AuthUserModel(username="root", project_slug=project.project_slug, status="manager")
         )
+
+        # NB: image projects no longer auto-compute or register CLIP embeddings
+        # at creation time. Embeddings can be computed on-demand later.
+
         self.status = "created"
 
     def delete(self) -> None:

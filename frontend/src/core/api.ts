@@ -712,6 +712,66 @@ export function useGetElementById() {
 }
 
 /**
+ * Fetch an image (imagexp) as an authenticated object URL.
+ * The endpoint requires auth headers, so a plain <img src> won't work.
+ */
+export function useGetImageImagexp() {
+  const { authenticatedUser } = useAuth();
+
+  const getImageImagexp = useCallback(
+    async (projectSlug: string, elementId: string): Promise<string | null> => {
+      if (!authenticatedUser?.access_token) return null;
+      const base = config.api.url.replace(/\/$/, '');
+      const url = `${base}/projects/${projectSlug}/image_imagexp/${encodeURIComponent(elementId)}`;
+      try {
+        const res = await fetch(url, {
+          headers: {
+            Authorization: `Bearer ${authenticatedUser.access_token}`,
+            username: authenticatedUser.username,
+          },
+        });
+        if (!res.ok) return null;
+        const blob = await res.blob();
+        return URL.createObjectURL(blob);
+      } catch {
+        return null;
+      }
+    },
+    [authenticatedUser],
+  );
+
+  return { getImageImagexp };
+}
+
+export function useGetThumbnailImagexp() {
+  const { authenticatedUser } = useAuth();
+
+  const getThumbnailImagexp = useCallback(
+    async (projectSlug: string, elementId: string): Promise<string | null> => {
+      if (!authenticatedUser?.access_token) return null;
+      const base = config.api.url.replace(/\/$/, '');
+      const url = `${base}/projects/${projectSlug}/thumbnail_imagexp/${encodeURIComponent(elementId)}`;
+      try {
+        const res = await fetch(url, {
+          headers: {
+            Authorization: `Bearer ${authenticatedUser.access_token}`,
+            username: authenticatedUser.username,
+          },
+        });
+        if (!res.ok) return null;
+        const blob = await res.blob();
+        return URL.createObjectURL(blob);
+      } catch {
+        return null;
+      }
+    },
+    [authenticatedUser],
+  );
+
+  return { getThumbnailImagexp };
+}
+
+/**
  * add an annotation
  */
 export function useAddAnnotation(
@@ -2404,7 +2464,7 @@ export function useAddProjectFile() {
 
   // main callback to upload to API
   const addProjectFile = useCallback(
-    async (project_name: string, file: File) => {
+    async (project_name: string, file: File, kind?: 'text' | 'image') => {
       try {
         // create a new controller
         const controller = new AbortController();
@@ -2420,6 +2480,7 @@ export function useAddProjectFile() {
             signal: controller.signal,
             params: {
               project_name,
+              ...(kind ? { kind } : {}),
             },
             // add auth
             headers: getAuthHeaders(authenticatedUser)?.headers,

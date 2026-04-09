@@ -18,9 +18,24 @@ from activetigger.datamodels import (
 )
 from activetigger.db.projects import ProjectsService
 from activetigger.queue_manager import Queue
+from activetigger.tasks.compute_clip_imagexp import ComputeClipImagexp
 from activetigger.tasks.compute_dfm import ComputeDfm
 from activetigger.tasks.compute_fasttext import ComputeFasttext
 from activetigger.tasks.compute_sbert import ComputeSbert
+
+# Experimental image projects: list of selectable image embedding models.
+# Each entry maps a UI label to (open_clip model name, pretrained tag).
+# See docs/image-projects-strategy.md.
+IMAGE_EMBEDDING_MODELS_IMAGEXP: dict[str, dict[str, str]] = {
+    "ViT-B-32/openai": {"model": "ViT-B-32", "pretrained": "openai"},
+    "ViT-B-16/openai": {"model": "ViT-B-16", "pretrained": "openai"},
+    "ViT-L-14/openai": {"model": "ViT-L-14", "pretrained": "openai"},
+    "ViT-B-32/laion2b_s34b_b79k": {
+        "model": "ViT-B-32",
+        "pretrained": "laion2b_s34b_b79k",
+    },
+}
+DEFAULT_IMAGE_EMBEDDING_MODEL_IMAGEXP = "ViT-B-32/openai"
 
 
 class Features:
@@ -55,6 +70,7 @@ class Features:
         computing: list,
         db_manager,
         lang: str,
+        kind: str = "text",
     ) -> None:
         """
         Initit features
@@ -70,29 +86,42 @@ class Features:
 
         self.lang = lang
         self.computing = computing
+        self.kind = kind
 
-        # load possible embeddings models
-        fasttext_models = [f for f in os.listdir(self.path_models) if f.endswith(".bin")]
-        # possibility to create a embeddings.yaml file to add models
+        # Experimental image projects: replace the text embedding model list
+        # with image embedding models, drop fasttext/dfm/regex (text-only).
+        # See docs/image-projects-strategy.md.
+        if kind == "image":
+            self.options: dict = {
+                "image-embeddings": {
+                    "models": IMAGE_EMBEDDING_MODELS_IMAGEXP,
+                    "default": DEFAULT_IMAGE_EMBEDDING_MODEL_IMAGEXP,
+                },
+                "dataset": {},
+            }
+        else:
+            # load possible embeddings models
+            fasttext_models = [f for f in os.listdir(self.path_models) if f.endswith(".bin")]
+            # possibility to create a embeddings.yaml file to add models
 
-        # options
-        self.options: dict = {
-            "sentence-embeddings": {
-                "models": config.models_embeddings,
-                "default": "jinaai/jina-embeddings-v5-text-small",
-            },
-            "fasttext": {"models": fasttext_models},
-            "dfm": {
-                "tfidf": False,
-                "ngrams": 1,
-                "min_term_freq": 5,
-                "max_term_freq": 100,
-                "norm": None,
-                "log": None,
-            },
-            "regex": {"formula": None},
-            "dataset": {},
-        }
+            # options
+            self.options = {
+                "sentence-embeddings": {
+                    "models": config.models_embeddings,
+                    "default": "jinaai/jina-embeddings-v5-text-small",
+                },
+                "fasttext": {"models": fasttext_models},
+                "dfm": {
+                    "tfidf": False,
+                    "ngrams": 1,
+                    "min_term_freq": 5,
+                    "max_term_freq": 100,
+                    "norm": None,
+                    "log": None,
+                },
+                "regex": {"formula": None},
+                "dataset": {},
+            }
 
         # create the features file if not exist
         if not self.path_features.exists():
@@ -387,6 +416,12 @@ class Features:
             and use_default_name
         ):
             pretty_name = f"{parameters['dataset_col']}_{parameters['dataset_type'].lower()}"
+        elif kind == "image-embeddings":
+            ui_label = parameters.get("model") or DEFAULT_IMAGE_EMBEDDING_MODEL_IMAGEXP
+            if use_default_name:
+                pretty_name = f"CLIP_{ui_label.replace('/', '_')}"
+            else:
+                pretty_name = f"CLIP_{name}"
         elif kind == "fasttext":
             if parameters["model"] is not None and parameters["model"] != "":
                 short_model = (
@@ -415,8 +450,21 @@ class Features:
         if len(self.current_user_processes(username)) > 0:
             raise ValueError("A process is already running")
 
-        if kind not in {"sentence-embeddings", "fasttext", "dfm", "regex", "dataset"}:
+        if kind not in {
+            "sentence-embeddings",
+            "fasttext",
+            "dfm",
+            "regex",
+            "dataset",
+            "image-embeddings",
+        }:
             raise ValueError("Kind not recognized")
+
+        # Experimental image projects: gate text-only feature kinds.
+        if self.kind == "image" and kind not in {"image-embeddings", "dataset"}:
+            raise ValueError(f"Feature kind '{kind}' is not supported on image projects")
+        if self.kind != "image" and kind == "image-embeddings":
+            raise ValueError("image-embeddings is only available on image projects")
 
         name = self.__create_pretty_name(kind, name, use_default_name, parameters)
         if self.exists(name):
@@ -501,6 +549,37 @@ class Features:
                 "kind": kind,
                 "username": username,
                 "max_length_tokens": parameters["max_length_tokens"],
+            }
+
+        if kind == "image-embeddings":
+            # Resolve UI label -> (open_clip model, pretrained tag)
+            ui_label = parameters.get("model") or DEFAULT_IMAGE_EMBEDDING_MODEL_IMAGEXP
+            if ui_label == "generic":
+                ui_label = DEFAULT_IMAGE_EMBEDDING_MODEL_IMAGEXP
+            spec = IMAGE_EMBEDDING_MODELS_IMAGEXP.get(ui_label)
+            if spec is None:
+                raise ValueError(f"Unknown image embedding model: {ui_label}")
+
+            batch_size = int(parameters.get("batch_size", 16))
+            unique_id = self.queue.add_task(
+                "feature",
+                self.project_slug,
+                ComputeClipImagexp(
+                    paths=df,
+                    path_process=self.path_all.parent,
+                    model=spec["model"],
+                    pretrained=spec["pretrained"],
+                    batch_size=batch_size,
+                ),
+                queue="gpu",
+            )
+
+            parameters = {
+                "model": ui_label,
+                "name": name,
+                "kind": kind,
+                "username": username,
+                "batch_size": batch_size,
             }
 
         if kind == "fasttext":

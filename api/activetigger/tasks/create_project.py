@@ -1,6 +1,8 @@
 import csv
 import shutil
 import sys
+import zipfile
+from pathlib import Path
 
 import pandas as pd  # type: ignore[import]
 
@@ -286,3 +288,230 @@ class CreateProject(BaseTask):
         print("Project created")
 
         return ProjectModel(**project), import_trainset, import_validset, import_testset
+
+
+# --- Experimental image projects (see docs/image-projects-strategy.md) ---
+
+
+class CreateProjectImagexp(BaseTask):
+    """
+    Experimental task for creating an "image" project.
+    Accepts a .zip upload containing png/jpg files and an optional metadata
+    csv/parquet. Builds data_all.parquet with id/path (+ metadata) columns.
+    Lives next to CreateProject to be easy to grep and eventually remove.
+    """
+
+    kind = "create_project_imagexp"
+
+    # caps (v1)
+    MAX_IMAGES = 5000
+    MAX_ZIP_BYTES = 2 * 1024 * 1024 * 1024  # 2 GB
+    MAX_IMAGE_BYTES = 100 * 1024 * 1024  # 10 MB
+    ALLOWED_EXT = {".png", ".jpg", ".jpeg"}
+
+    def __init__(
+        self,
+        project_slug: str,
+        params: ProjectBaseModel,
+        username: str,
+        data_all: str = "data_all.parquet",
+        train_file: str = "train.parquet",
+        valid_file: str = "valid.parquet",
+        test_file: str = "test.parquet",
+        features_file: str = "features.parquet",
+        random_seed: int = 42,
+    ):
+        super().__init__()
+        self.random_seed = params.seed if hasattr(params, "seed") else random_seed
+        self.project_slug = project_slug
+        self.params = params
+        self.username = username
+        self.data_all = data_all
+        self.train_file = train_file
+        self.valid_file = valid_file
+        self.test_file = test_file
+        self.features_file = features_file
+
+    def __call__(
+        self,
+    ) -> tuple[ProjectModel, pd.DataFrame | None, pd.DataFrame | None, pd.DataFrame | None]:
+        print(f"Start queue image project {self.project_slug} for {self.username}")
+
+        if self.params.dir is None or not self.params.dir.exists():
+            raise Exception("The directory does not exist and should")
+
+        if self.params.filename is None:
+            raise Exception("An image .zip archive must be uploaded for image projects")
+
+        zip_path = self.params.dir.joinpath(self.params.filename)
+        if not zip_path.exists() or not str(zip_path).lower().endswith(".zip"):
+            raise Exception("Image project expects a .zip archive upload")
+
+        # cap on zip size
+        if zip_path.stat().st_size > self.MAX_ZIP_BYTES:
+            raise Exception(f"Zip file too large (max {self.MAX_ZIP_BYTES // (1024 * 1024)} MB)")
+
+        # read central directory first, validate, then extract
+        images_dir = self.params.dir.joinpath("images")
+        images_dir.mkdir(parents=True, exist_ok=True)
+        thumbs_dir = images_dir.joinpath("thumbs")
+        thumbs_dir.mkdir(parents=True, exist_ok=True)
+
+        rows: list[dict] = []
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            infos = [i for i in zf.infolist() if not i.is_dir()]
+            image_infos = [
+                i
+                for i in infos
+                if Path(i.filename).suffix.lower() in self.ALLOWED_EXT
+                and not Path(i.filename).name.startswith("._")
+                and "__MACOSX" not in Path(i.filename).parts
+            ]
+            if len(image_infos) == 0:
+                raise Exception("Zip does not contain any .png/.jpg image")
+            if len(image_infos) > self.MAX_IMAGES:
+                raise Exception(
+                    f"Too many images in zip (max {self.MAX_IMAGES}, found {len(image_infos)})"
+                )
+            for info in image_infos:
+                if info.file_size > self.MAX_IMAGE_BYTES:
+                    raise Exception(
+                        f"Image '{info.filename}' exceeds per-file cap of "
+                        f"{self.MAX_IMAGE_BYTES // (1024 * 1024)} MB"
+                    )
+
+            # optional metadata file in the zip
+            metadata_infos = [
+                i for i in infos if Path(i.filename).suffix.lower() in {".csv", ".parquet"}
+            ]
+
+            # Lazy import: Pillow ships with the API deps but isolate the import here
+            try:
+                from PIL import Image, ImageOps  # type: ignore[import]
+            except Exception as ex:
+                Image = None  # type: ignore[assignment]
+                ImageOps = None  # type: ignore[assignment]
+                print(f"Pillow not available, skipping thumbnail generation: {ex}")
+
+            for info in image_infos:
+                src_name = Path(info.filename).name
+                element_id = Path(info.filename).stem
+                target = images_dir.joinpath(src_name)
+                with zf.open(info) as src, open(target, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+                rows.append({"id": element_id, "path": str(target)})
+
+                # Precompute a 256px JPEG thumbnail keyed by the slugified id
+                # (id_internal). Failures on individual files are logged and
+                # skipped — the thumbnail route falls back to the original.
+                if Image is not None:
+                    try:
+                        thumb_path = thumbs_dir.joinpath(f"{slugify(element_id)}.jpg")
+                        with Image.open(target) as im:
+                            im = ImageOps.exif_transpose(im)
+                            if im.mode not in ("RGB", "L"):
+                                im = im.convert("RGB")
+                            im.thumbnail((256, 256), Image.LANCZOS)
+                            im.save(thumb_path, "JPEG", quality=80, optimize=True)
+                    except Exception as ex:
+                        print(f"thumbnail generation failed for {src_name}: {ex}")
+
+            metadata_df = None
+            if metadata_infos:
+                meta_info = metadata_infos[0]
+                tmp_meta = self.params.dir.joinpath(Path(meta_info.filename).name)
+                with zf.open(meta_info) as src, open(tmp_meta, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+                try:
+                    if str(tmp_meta).endswith(".csv"):
+                        metadata_df = pd.read_csv(tmp_meta)
+                    else:
+                        metadata_df = pd.read_parquet(tmp_meta)
+                except Exception as e:
+                    print(f"Could not read metadata file: {e}")
+                    metadata_df = None
+                try:
+                    tmp_meta.unlink()
+                except OSError:
+                    pass
+
+        content = pd.DataFrame(rows)
+        if metadata_df is not None and len(metadata_df) > 0:
+            # match on filename stem; first column of metadata is assumed to be the id
+            id_col = metadata_df.columns[0]
+            metadata_df[id_col] = metadata_df[id_col].astype(str).map(lambda s: Path(s).stem)
+            metadata_df = metadata_df.rename(columns={id_col: "id"})
+            content = content.merge(metadata_df, on="id", how="left")
+
+        # internal / external indexing to match CreateProject expectations
+        content["id_external"] = content["id"].astype(str)
+        content["id_internal"] = content["id_external"].apply(slugify)
+        if content["id_internal"].nunique() != len(content):
+            content["id_internal"] = [str(i) for i in range(len(content))]
+        content.set_index("id_internal", inplace=True)
+        # the rest of the pipeline expects a "text" column
+        content["text"] = content["path"].astype(str)
+
+        all_columns = list(content.columns)
+        n_total = len(content)
+
+        # simple split: everything is train by default; honor n_test / n_valid if set
+        n_test = max(0, int(self.params.n_test or 0))
+        n_valid = max(0, int(self.params.n_valid or 0))
+        n_train = int(self.params.n_train or (n_total - n_test - n_valid))
+        n_train = max(0, min(n_train, n_total - n_test - n_valid))
+
+        testset = None
+        validset = None
+        rows_test: list = []
+        rows_valid: list = []
+        self.params.test = False
+        self.params.valid = False
+        if n_test + n_valid > 0:
+            draw = content.sample(n_test + n_valid, random_state=self.random_seed)
+            if n_test > 0:
+                testset = draw.sample(n_test, random_state=self.random_seed)
+                testset.to_parquet(self.params.dir.joinpath(self.test_file), index=True)
+                self.params.test = True
+                rows_test = list(testset.index)
+            if n_valid > 0:
+                validset = draw.drop(index=rows_test) if rows_test else draw
+                validset = validset.sample(n_valid, random_state=self.random_seed)
+                validset.to_parquet(self.params.dir.joinpath(self.valid_file), index=True)
+                self.params.valid = True
+                rows_valid = list(validset.index)
+
+        remaining = content.drop(rows_test + rows_valid, errors="ignore")
+        trainset = (
+            remaining.sample(min(n_train, len(remaining)), random_state=self.random_seed)
+            if n_train > 0
+            else remaining
+        )
+
+        # persist data_all
+        content.to_parquet(self.params.dir.joinpath(self.data_all), index=True)
+        # persist train
+        trainset[["id_external", "text"]].to_parquet(
+            self.params.dir.joinpath(self.train_file), index=True
+        )
+
+        # NB: image embeddings are NOT computed here. They can be computed
+        # on-demand later via the features API.
+
+        # make sure cols_text has the expected shape for downstream code
+        self.params.cols_text = ["text"]
+        self.params.col_id = "id"
+
+        project = self.params.model_dump()
+        project["project_slug"] = self.project_slug
+        project["all_columns"] = all_columns
+        project["n_total"] = n_total
+
+        # delete uploaded zip
+        try:
+            zip_path.unlink()
+        except OSError as e:
+            print(f"Warning: could not delete uploaded zip: {e}")
+
+        print("Image project created")
+        return ProjectModel(**project), None, None, None

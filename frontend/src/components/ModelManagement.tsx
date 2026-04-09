@@ -246,6 +246,8 @@ export const ModelManagement: FC = () => {
         </button>
       </ModelsPillDisplay>
 
+      {currentProject?.params?.kind !== 'image' && (
+      <>
       <span className="fw-semibold text-muted small">Bert Models</span>
       <ModelsPillDisplay
         modelNames={Object.values(availableBertModels)
@@ -273,6 +275,8 @@ export const ModelManagement: FC = () => {
           {kindScheme === 'span' ? 'Span classification is not yet available' : 'Train a model'}
         </Tooltip>
       </ModelsPillDisplay>
+      </>
+      )}
 
       {isComputing && authenticatedUser?.username && (
         <DisplayTrainingProcesses

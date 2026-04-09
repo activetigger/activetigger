@@ -156,11 +156,19 @@ class Orchestrator:
             users=self.users,
             messages=self.messages,
         )
-        self.project_creation_ongoing[project_slug].start_project_creation(
-            params=project,
-            username=username,
-            path=self.path,
-        )
+        # dispatch on kind before enqueuing (see docs/image-projects-strategy.md)
+        if getattr(project, "kind", "text") == "image":
+            self.project_creation_ongoing[project_slug].start_project_creation_imagexp(
+                params=project,
+                username=username,
+                path=self.path,
+            )
+        else:
+            self.project_creation_ongoing[project_slug].start_project_creation(
+                params=project,
+                username=username,
+                path=self.path,
+            )
         return project_slug
 
     def _sync_update_processes(self, project_lifetime: int) -> None:

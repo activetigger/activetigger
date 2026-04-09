@@ -453,6 +453,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{project_slug}/image_imagexp/{element_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Project Image Imagexp
+         * @description Stream an image element from an image project.
+         *     Safe caching: images are immutable once uploaded.
+         */
+        get: operations["get_project_image_imagexp_projects__project_slug__image_imagexp__element_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/elements/next": {
         parameters: {
             query?: never;
@@ -2182,18 +2203,12 @@ export interface components {
         };
         /** Body_upload_file_dataset_files_add_dataset_post */
         Body_upload_file_dataset_files_add_dataset_post: {
-            /**
-             * File
-             * Format: binary
-             */
+            /** File */
             file: string;
         };
         /** Body_upload_file_project_files_add_project_post */
         Body_upload_file_project_files_add_project_post: {
-            /**
-             * File
-             * Format: binary
-             */
+            /** File */
             file: string;
         };
         /**
@@ -2901,6 +2916,12 @@ export interface components {
          * @description Parameters of a project to save in the database
          */
         ProjectBaseModel: {
+            /**
+             * Kind
+             * @default text
+             * @enum {string}
+             */
+            kind: "text" | "image";
             /** Cols Text */
             cols_text: string[];
             /** Project Name */
@@ -3054,6 +3075,12 @@ export interface components {
          * @description Once created
          */
         ProjectModel: {
+            /**
+             * Kind
+             * @default text
+             * @enum {string}
+             */
+            kind: "text" | "image";
             /** Cols Text */
             cols_text: string[];
             /** Project Name */
@@ -3659,6 +3686,10 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+            /** Input */
+            input?: unknown;
+            /** Context */
+            ctx?: Record<string, never>;
         };
         /**
          * WaitingModel
@@ -4323,6 +4354,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectStateModel"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_project_image_imagexp_projects__project_slug__image_imagexp__element_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_slug: string;
+                element_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
@@ -6172,6 +6235,7 @@ export interface operations {
         parameters: {
             query: {
                 project_name: string;
+                kind?: string;
             };
             header?: never;
             path?: never;

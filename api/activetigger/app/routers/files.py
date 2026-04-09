@@ -35,6 +35,7 @@ def upload_file_project(
     current_user: Annotated[UserInDBModel, Depends(verified_user)],
     project_name: str,
     file: UploadFile = File(...),
+    kind: str = "text",
 ) -> None:
     """
     Upload a file on the server to create a new project
@@ -54,7 +55,14 @@ def upload_file_project(
     # test the incoming file
     if file.filename is None:
         raise HTTPException(status_code=500, detail="Problem with the file")
-    if (
+    # Experimental image projects accept a .zip archive (see docs/image-projects-strategy.md)
+    if kind == "image":
+        if not file.filename.lower().endswith(".zip"):
+            raise HTTPException(
+                status_code=500,
+                detail="Image projects require a .zip archive of images",
+            )
+    elif (
         not file.filename.endswith("csv")
         and not file.filename.endswith("parquet")
         and not file.filename.endswith("xlsx")

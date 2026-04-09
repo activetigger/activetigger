@@ -26,6 +26,7 @@ import { AnnotationModeForm } from './AnnotationMode';
 import { MulticlassInput } from './MulticlassInput';
 import { MultilabelInput } from './MultilabelInput';
 import { SelectActiveLearning } from './SelectActiveLearning';
+import { ImageClassificationPanelImagexp } from './ImageClassificationPanelImagexp';
 import { TextClassificationPanel } from './TextClassificationPanel';
 import { TextSpanPanel } from './TextSpanPanel';
 
@@ -319,17 +320,27 @@ export const AnnotationManagement: FC = () => {
         {elementId !== 'noelement' &&
           (kindScheme !== 'span' ? (
             <>
-              <TextClassificationPanel
-                element={element as ElementOutModel}
-                displayConfig={displayConfig}
-                textInFrame={textInFrame}
-                textOutFrame={textOutFrame}
-                validHighlightText={validHighlightText}
-                elementId={elementId as string}
-                lastTag={lastTag as string}
-                phase={effectivePhase}
-                frameRef={frameRef as unknown as HTMLDivElement}
-              />
+              {project?.params?.kind === 'image' ? (
+                <ImageClassificationPanelImagexp
+                  element={element as ElementOutModel}
+                  displayConfig={displayConfig}
+                  elementId={elementId as string}
+                  projectSlug={project.params.project_slug}
+                  frameRef={frameRef as unknown as HTMLDivElement}
+                />
+              ) : (
+                <TextClassificationPanel
+                  element={element as ElementOutModel}
+                  displayConfig={displayConfig}
+                  textInFrame={textInFrame}
+                  textOutFrame={textOutFrame}
+                  validHighlightText={validHighlightText}
+                  elementId={elementId as string}
+                  lastTag={lastTag as string}
+                  phase={effectivePhase}
+                  frameRef={frameRef as unknown as HTMLDivElement}
+                />
+              )}
             </>
           ) : (
             <>

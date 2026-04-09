@@ -58,6 +58,8 @@ class ProjectBaseModel(BaseModel):
     Parameters of a project to save in the database
     """
 
+    # Experimental: image projects.
+    kind: Literal["text", "image"] = "text"
     cols_text: list[str]
     project_name: str
     col_id: str

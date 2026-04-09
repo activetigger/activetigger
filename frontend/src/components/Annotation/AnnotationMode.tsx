@@ -230,6 +230,7 @@ export const AnnotationModeForm: FC<AnnotationModeFormProps> = ({
         {
           // input validated on deselect
         }
+        {project?.params?.kind !== 'image' && (
         <div className="at-input-group">
           <label htmlFor="select_regex" className=" small-gray">
             Filter by content
@@ -253,6 +254,14 @@ export const AnnotationModeForm: FC<AnnotationModeFormProps> = ({
             Use CONTEXT= or QUERY= for specific requests
           </Tooltip>
         </div>
+        )}
+        {/*
+         * Image projects (experimental): regex input is hidden above, and
+         * UMAP click-to-select reuses the existing projection explorer
+         * rendered below (ProjectionExplorer branches on kind to show an
+         * image preview instead of the text snippet). No parallel selection
+         * panel is needed — see docs/image-projects-strategy.md.
+         */}
         {currentProjection && (
           <div>
             {/* LOCK on UMAP */}

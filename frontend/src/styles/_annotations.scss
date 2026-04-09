@@ -422,6 +422,11 @@
     flex-direction: column;
     justify-content: space-between;
     align-items: start;
+    p {
+      max-width: 100%;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
     .badge {
       max-width: calc(100% - 2 * map.get($spacers, 2));
       margin: 0;

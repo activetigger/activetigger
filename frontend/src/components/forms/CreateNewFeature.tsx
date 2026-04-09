@@ -14,6 +14,7 @@ interface Options {
 interface FeaturesOptions {
   fasttext?: Options;
   'sentence-embeddings'?: Options;
+  'image-embeddings'?: Options;
 }
 
 interface CreateNewFeatureProps {
@@ -114,6 +115,33 @@ export const CreateNewFeature: FC<CreateNewFeatureProps> = ({
           />
           <label htmlFor="batch_size">Batch size</label>
           <input type="number" placeholder="Batch size" {...register('parameters.batch_size')} />
+        </details>
+      )}
+
+      {selectedFeatureToCreate === 'image-embeddings' && (
+        <details open>
+          <summary>Image embedding model</summary>
+          <label htmlFor="image_model">Model to use</label>
+          <select id="image_model" {...register('parameters.model')}>
+            <option key="generic" value="generic">
+              Default model
+            </option>
+            {(featuresOption['image-embeddings']?.models
+              ? Object.keys(featuresOption['image-embeddings']['models'] as Record<string, unknown>)
+              : []
+            ).map((element) => (
+              <option key={element} value={element}>
+                {element}
+              </option>
+            ))}
+          </select>
+          <label htmlFor="image_batch_size">Batch size</label>
+          <input
+            type="number"
+            id="image_batch_size"
+            placeholder="Batch size"
+            {...register('parameters.batch_size')}
+          />
         </details>
       )}
 
