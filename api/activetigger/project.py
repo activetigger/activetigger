@@ -475,7 +475,7 @@ class Project:
                     evalset=evalset,
                     project=self.params,
                     username=username,
-                    index=self.data.get_full_id(),
+                    index=self.data.get_full_id().index,
                     project_slug=project_slug,
                     scheme=self.schemes.available()[evalset.scheme].labels if evalset.scheme else None,
                 ),
