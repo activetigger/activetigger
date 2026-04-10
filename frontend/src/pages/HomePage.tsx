@@ -8,6 +8,7 @@ import logo from '../assets/at.png';
 import { LoginForm } from '../components/forms/LoginForm';
 import Notifications from '../components/layout/Notifications';
 import { useGetActiveUsers, useGetServer } from '../core/api';
+import { useAppContext } from '../core/useAppContext';
 import { useAuth } from '../core/useAuth';
 import { LoginParams } from '../types';
 
@@ -47,16 +48,14 @@ export const HomePage: FC = () => {
   const { authenticatedUser, logout } = useAuth();
   const { n_users } = useGetActiveUsers();
 
-  // add a development mode switch
-  // const {
-  //   appContext: { developmentMode },
-  //   setAppContext,
-  // } = useAppContext();
+  const {
+    appContext: { developmentMode },
+    setAppContext,
+  } = useAppContext();
 
-  // function to change the status of the interface
-  // const actionDevelopmentMode = () => {
-  //   setAppContext((prev) => ({ ...prev, developmentMode: !prev.developmentMode }));
-  // };
+  const toggleDevelopmentMode = () => {
+    setAppContext((prev) => ({ ...prev, developmentMode: !prev.developmentMode }));
+  };
 
   // possibility to log directly from the URL
   const navigate = useNavigate();
@@ -188,7 +187,7 @@ export const HomePage: FC = () => {
                 style={{ all: 'unset', cursor: 'pointer' }}
               >
                 {'\u00A0•\u00A0'}
-                CREST / CSS @ IPP © 2025
+                CREST / CSS @ IPP © 2026
               </a>
               <a
                 href="https://github.com/activetigger/activetigger"
@@ -199,6 +198,16 @@ export const HomePage: FC = () => {
               >
                 <FaGithub className="mx-2" />
               </a>
+              {'\u00A0•\u00A0'}
+              <div
+                className="d-flex align-items-center gap-1"
+                style={{ cursor: 'pointer', opacity: developmentMode ? 1 : 0.4 }}
+                onClick={toggleDevelopmentMode}
+                title={developmentMode ? 'Disable experimental mode' : 'Enable experimental mode'}
+              >
+                <span style={{ fontSize: '1rem' }}>🧪</span>
+                <span style={{ fontSize: '0.7rem' }}>experimental</span>
+              </div>
             </div>
           </div>
         </footer>
