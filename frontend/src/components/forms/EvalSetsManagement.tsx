@@ -225,8 +225,7 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
                         return typeof v === 'bigint' ? Number(v) : v;
                       },
                       width:'200px',
-                      //`calc(100% / ${data.headers.length})`,
-                      minWidth: '100px',
+                      //`calc(100% / ${data.headers.length})`,,
                       wrap:true,
                     }))}
                     data={
