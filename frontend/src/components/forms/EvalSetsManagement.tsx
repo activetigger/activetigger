@@ -46,7 +46,7 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
 
   const {progression,cancel,createValidSet,id} = useCreateValidSet(); // API call
   const { notify } = useNotifications();
-  const { stopProcesses } = useStopProcesses(projectSlug); // API call to stop processes if needed
+  const { stopProcesses}=useStopProcesses(projectSlug); // API call to stop processes if needed
 
   const dropEvalSet = useDropEvalSet(projectSlug); // API call to drop existing test set
   const navigate = useNavigate(); // for navigation after drop
@@ -57,7 +57,7 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
 
   const files = useWatch({ control, name: 'files' });
 
-  const [uploading , setUploading]=useState<boolean>( () => sessionStorage.getItem('evalset-uploading') === 'true');
+  const [uploading , setUploading]=useState<boolean>( () =>sessionStorage.getItem('evalset-uploading') ==='true');
 
   const [isCancelling, setIsCancelling] = useState<boolean>(false);
 
