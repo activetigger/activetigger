@@ -78,10 +78,10 @@ class AddEvalSet(BaseTask):
                 print("ID not unique, changed to default id")  
             #=================== Compare with the general dataset (Overlaps) ===================
             #                    ============================================        
-            overlapping_ids = set(df["id_external"]).intersection(set(self.index_all))
+            overlapping_ids = set(df["id"]).intersection(set(self.index_all))
             if overlapping_ids:
-                df.loc[df["id_external"].isin(overlapping_ids), "id"] = [
-                    str(i)+'_'+str(i) for i in range(len(overlapping_ids))
+                df.loc[df["id"].isin(overlapping_ids), "id"] = [
+                    'c-ev-'+str(i) for i in range(len(overlapping_ids))
                     ]
                 print(f"{len(overlapping_ids)} IDs in the eval set already exist in the main dataset") 
             df["id"] = df["id"].apply(lambda x: f"imported-{str(x)}")
