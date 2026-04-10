@@ -432,7 +432,9 @@ class Project:
         self.db_manager.projects_service.update_project(
             self.params.project_slug, jsonable_encoder(self.params)
         )
-
+        
+        #Added Load → getfullid refresh
+        self.data.load_dataset("all")
         # reset the features file
         self.features.reset_features_file()
         self.quickmodels.drop_models(which="all")
@@ -498,11 +500,22 @@ class Project:
             df["label"] = df["label"].apply(lambda x: str(x) if pd.notna(x) else None)
 
         # deal with non-unique id
-        # TODO : compare with the general dataset
         df["id_external"] = df["id"].apply(str)
         if not ((df["id"].astype(str).apply(slugify)).nunique() == len(df)):
             df["id"] = [str(i) for i in range(len(df))]
             print("ID not unique, changed to default id")
+        
+        #General Set Comparision
+        
+        #get full Ids
+        index_all=self.data.get_full_id()
+        #check for overlaps
+        overlapping_ids = set(df["id_external"]).intersection(set(index_all))
+        if overlapping_ids:
+            df.loc[df["id_external"].isin(overlapping_ids), "id"] = [
+                str(i)+'_'+str(i) for i in range(len(overlapping_ids))
+                ]
+            print(f"{len(overlapping_ids)} IDs in the eval set already exist in the main dataset") 
 
         # identify the dataset as imported and set the id
         df["id"] = df["id"].apply(lambda x: f"imported-{str(x)}")
