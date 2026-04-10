@@ -146,7 +146,7 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
                       },
                       width: '200px',
                       wrap:true,
-                      
+        
                     }))}
                     data={
                       data.data.slice(0, 5) as Record<keyof DataType['headers'], string | number>[]
