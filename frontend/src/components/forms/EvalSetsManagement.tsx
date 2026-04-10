@@ -62,6 +62,23 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
   const [isCancelling, setIsCancelling] = useState<boolean>(false);
 
   const cancelRef=useRef(cancel);
+
+
+  const [restoredCancel, setRestoredCancel] = useState<AbortController | null>(null);
+
+  useEffect(() => {
+    if (uploading && !cancel) {
+      const controller = new AbortController();
+      controller.signal.addEventListener('abort', async () => {
+        setIsCancelling(true);
+        const storedId = sessionStorage.getItem(`evalset-process-id_${dataset}`);
+        const ok = await stopProcesses('add_evalset', storedId ?? undefined);
+        if (ok) setUploadingPersisted(false);
+        setIsCancelling(false);
+      });
+      setRestoredCancel(controller);
+    }
+  }, []);
   // available columns
   const columns = data?.headers.map((h) => (
     <option key={`${h}`} value={`${h}`}>
@@ -188,13 +205,18 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
             {
               // display datable if data available
               data !== null && (
-                <div style={{ overflow: 'auto', width: 'fit-content', minWidth: '100%' }}>
+                <div>
                   <div className="explanations">Preview</div>
                   <div>
                     Size of the dataset : <b>{data.data.length - 1}</b>
                   </div>
                   <DataTable<Record<DataType['headers'][number], string | number>>
-                    responsive
+                      customStyles={{responsiveWrapper: {
+                                                         style: {
+                                                          maxWidth: '600px',
+                                                          overflowX: 'auto',},
+                                                                      },
+                                                                  }}
                     columns={data.headers.map((h) => ({
                       name: h,
                       selector: (row) => row[h],
@@ -254,19 +276,20 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
                   </select>
                   <label htmlFor="n_test">Number of rows to import</label>
                   <input id="n_test" type="number" {...register('n_eval')} />
-                  
-                  {!exist && uploading && (
-                    <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 10 }}>
-                      <UploadProgressBar progression={progression} cancel={cancel} />
-                    </div>
-                  )}
+
                   <button type="submit" className="btn-submit" disabled={uploading||isCancelling}>
                     {uploading || isCancelling ? 'Processing...' : 'Create'}
                   </button>
                 </div>
+                
               )
             }
-          </div>
+            {uploading && (
+                    <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 10 }}>
+                      <UploadProgressBar progression={progression} cancel={cancel ?? restoredCancel ?? undefined} />
+                    </div>
+            )}
+           </div>
         </form>
       )}
       <Modal show={alertDrop} onHide={() => setAlertDrop(false)}>

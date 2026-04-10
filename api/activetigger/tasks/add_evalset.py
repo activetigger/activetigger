@@ -88,7 +88,6 @@ class AddEvalSet(BaseTask):
             df = df.set_index("id")
             if self.evalset.col_label and self.evalset.scheme:
                 # Check the label columns if they match the scheme or raise error
-                #scheme = self.schemes.available()[self.evalset.scheme].labels
                 for label in df["label"].dropna().unique():
                     if label not in self.scheme:
                         raise Exception(f"Label {label} not in the scheme {self.evalset.scheme}")
