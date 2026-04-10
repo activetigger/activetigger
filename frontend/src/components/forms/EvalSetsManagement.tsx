@@ -57,7 +57,7 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
 
   const files = useWatch({ control, name: 'files' });
 
-  const [uploading , setUploading]=useState<boolean>(false);
+  const [uploading , setUploading]=useState<boolean>( () => sessionStorage.getItem('evalset-uploading') === 'true');
 
   const [isCancelling, setIsCancelling] = useState<boolean>(false);
 
@@ -86,6 +86,14 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
 
   }, [files, setValue, notify]);
 
+
+  const setUploadingPersisted = (val: boolean) => {
+    val
+      ? sessionStorage.setItem('evalset-uploading', 'true')
+      : sessionStorage.removeItem('evalset-uploading');
+    setUploading(val);
+  };
+
   // action when form validated
   const onSubmit: SubmitHandler<EvalSetModel & { files: FileList }> = async (formData) => {
     if (uploading || isCancelling) return;
@@ -99,7 +107,7 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
       const csv = data ? unparse(data.data, { header: true, columns: data.headers }) : '';
       formData.scheme = currentScheme;
       try {
-        setUploading(true);
+        setUploadingPersisted(true);
         const req=await createValidSet(projectSlug, dataset, {
           ...omit(formData, 'files'),
           csv,
@@ -108,6 +116,7 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
         
         console.log('uploadinf file :' , uploading);
         if (req){navigate(`/projects/${projectSlug}/settings`);}
+        else{setUploadingPersisted(false)}
       } catch(err) {
         console.error(err);
         notify({ type: 'error', message: "error with adding a new eval set" });
@@ -123,9 +132,17 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
   useEffect(() => {
     cancelRef.current = cancel;
   }, [cancel]);
+
+
   useEffect(()=>{
-    if (exist){setUploading(false);}
-  },[exist]);
+    if (exist){setUploadingPersisted(false);}
+   },[exist]);
+
+  useEffect(() => {
+  if (id) sessionStorage.setItem('evalset-process-id', id);
+   }, [id]);
+
+
   useEffect(() => {
     if (!cancel?.signal) return;
     const onAbort = async () => {
@@ -133,7 +150,7 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
       console.log(id);
       const ok= await stopProcesses('add_evalset',id);
       if(ok)
-        {setUploading(false);}
+        {setUploadingPersisted(false);}
       setIsCancelling(false);
     };
 
@@ -157,7 +174,7 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
 
       {!exist && (
         <form onSubmit={handleSubmit(onSubmit)}>
-          <div className="col-lg-6">
+          <div className="col-lg-6" >
             <div className="explanations">
               No {datasetCleanForPrinting} data set has been created. You can upload a{' '}
               {datasetCleanForPrinting} set. Careful : all features will be dropped and need to be
@@ -171,12 +188,13 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
             {
               // display datable if data available
               data !== null && (
-                <div style={{ overflow: 'auto', maxWidth: '100%'}}>
+                <div style={{ overflow: 'auto', width: 'fit-content', minWidth: '100%' }}>
                   <div className="explanations">Preview</div>
                   <div>
                     Size of the dataset : <b>{data.data.length - 1}</b>
                   </div>
                   <DataTable<Record<DataType['headers'][number], string | number>>
+                    responsive
                     columns={data.headers.map((h) => ({
                       name: h,
                       selector: (row) => row[h],
@@ -184,7 +202,9 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
                         const v = row[h];
                         return typeof v === 'bigint' ? Number(v) : v;
                       },
-                      width: '200px',
+                      width:'200px',
+                      //`calc(100% / ${data.headers.length})`,
+                      minWidth: '100px',
                       wrap:true,
                     }))}
                     data={
