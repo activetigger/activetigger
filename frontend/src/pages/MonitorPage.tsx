@@ -303,7 +303,7 @@ export const MonitorPage: FC = () => {
                   <div>No rights</div>
                 )}
               </Tab>
-              <Tab eventKey="ressources" title="Ressouces">
+              <Tab eventKey="ressources" title="Resources">
                 <h2 className="subtitle">Monitor ressources</h2>
                 <table className="table-statistics">
                   <thead>

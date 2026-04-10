@@ -822,7 +822,7 @@ class Schemes:
         # match to the internal index and keep only annotated
         df = df.set_index(annotationsdata.col_id)
         df = self.data.train.join(df, on="id_external")
-        col = df[annotationsdata.col_label].dropna()
+        col = df[annotationsdata.col_label].dropna().astype(str)
 
         # if needed, create the labels in the scheme
         for i in col.unique():

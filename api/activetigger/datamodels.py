@@ -1,10 +1,10 @@
 import datetime
 from enum import Enum, StrEnum
 from pathlib import Path
-from typing import Any, Callable, Literal, Optional
+from typing import Annotated, Any, Callable, Literal, Optional
 
 from pandas import DataFrame  # type: ignore[import]
-from pydantic import BaseModel, ConfigDict  # for dataframe
+from pydantic import BaseModel, BeforeValidator, ConfigDict  # for dataframe
 from sklearn.base import BaseEstimator  # type: ignore[import]
 
 # Data model to use of the API
@@ -280,7 +280,7 @@ class SchemeModel(BaseModel):
     project_slug: str
     name: str
     kind: str = "multiclass"
-    labels: list[str] = []
+    labels: list[Annotated[str, BeforeValidator(lambda v: str(v))]] = []
 
 
 class RegexModel(BaseModel):
