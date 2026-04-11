@@ -1,9 +1,12 @@
 # Active Tigger
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/activetigger/activetigger/blob/main/LICENSE)
-[![Python Version](https://img.shields.io/badge/python-3.11-blue)](https://www.python.org/downloads/)
+[![Python Version](https://img.shields.io/badge/python-3.11+-blue)](https://www.python.org/downloads/)
 [![PyPI Version](https://img.shields.io/pypi/v/activetigger)](https://pypi.org/project/activetigger/)
-![React](https://img.shields.io/badge/React-18.0.0-blue)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688)
+![React](https://img.shields.io/badge/React-18.3-blue)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.4-3178C6)
+![Docker](https://img.shields.io/badge/Docker-Compose-2496ED)
 
 Hi❗
 
@@ -12,9 +15,8 @@ ActiveTigger[^1] is a collaborative text annotation web tool dedicated to comput
 Designed primarily by researchers in social sciences, its use can extend to all users that need to annotate textual data.
 
 > [!IMPORTANT]
-> The app is currently 🚧 **in beta test** 🚧. The stable version is planned for August 2025.
+> The app is currently 🚧 **in beta test** 🚧. The stable version is planned for May 2026.
 
-[Presentation of ActiveTigger 🇫🇷](https://emilienschultz.github.io/activetigger-presentation/#/title-slide)
 
 ## Run the app with Docker (recommended)
  
@@ -148,11 +150,6 @@ On Ubuntu, you need to install some drivers for the Postgresql database and the 
 sudo apt-get install libpq-dev
 ```
 
-#### Temporary: some models (ModernBERT) need unpublished versions of Huggingface Transformers
-
-The requirements contain the clone of the repository. 
-
-
 ### Install the React frontend
 
 The frontend is written in React/Typescript. To run the dev version and to build the app, you need first to install node.js and npm (version > 20).
@@ -205,7 +202,7 @@ A python client is under development to interact with the API https://github.com
 
 ## Documentation
 
-The documentation is [here](https://activetigger/documentation)
+The documentation is [here](http://activetigger.com/activetigger/)
 
 ## Contributing
 
@@ -217,7 +214,7 @@ The development of Active Tigger is supported by : [DRARI Île-de-France](https:
 
 ## How to cite
 
-Boelaert J., Ollion É., Schultz É. (2025). ActiveTigger (Version 0.9.0) [Computer software]. https://github.com/activetigger/activetigger
+Boelaert J., Ollion É., Schultz É. (2026). ActiveTigger (Version 0.9.9) [Computer software]. https://github.com/activetigger/activetigger
 
 
 [^1]: The current version is a refactor of [R Shiny ActiveTigger app (Julien Boelaert & Etienne Ollion)](https://gitlab.univ-lille.fr/julien.boelaert/activetigger). Active Tigger name is a pun that draws on the similarity between the words 'Tagger' and 'Tigger.'
