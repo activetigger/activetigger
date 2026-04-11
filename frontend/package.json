@@ -7,7 +7,7 @@
     "dev": "vite --host",
     "compile": "npm run lint && tsc -b",
     "build": "tsc -b && vite build",
-    "generate": "npx openapi-typescript http://localhost:4000/openapi.json -o src/generated/openapi.d.ts",
+    "generate": "npx openapi-typescript http://localhost:5000/openapi.json -o src/generated/openapi.d.ts",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview"
   },

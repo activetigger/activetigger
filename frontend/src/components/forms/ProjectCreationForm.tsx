@@ -13,7 +13,6 @@ import { ProjectModel } from '../../types';
 import { FiChevronDown, FiChevronUp, FiEye, FiEyeOff, FiUpload, FiFolder, FiPlus, FiMinus, FiHelpCircle, FiTag } from 'react-icons/fi';
 
 
-
 export interface DataType {
   headers: string[];
   data: Record<string, string | number | bigint>[];
@@ -71,50 +70,6 @@ function NumericStepper({ value, onChange, min = 0, max = Infinity, disabled }: 
   );
 }
 
-interface SplitSliderProps {
-  label: string;
-  value: number;
-  onChange: (v: number) => void;
-  min?: number;
-  max: number;
-  disabled?: boolean;
-  color: string;
-}
-
-function SplitSlider({ label, value, onChange, min = 0, max, disabled, color }: SplitSliderProps) {
-  const pct = max > 0 ? Math.round((value / max) * 100) : 0;
-
-  return (
-    <div className="split-slider">
-      <div className="split-slider__header">
-        <span className="split-slider__label">{label}</span>
-        <span className="split-slider__pct">{pct}%</span>
-      </div>
-      <div className="split-slider__track">
-        <div
-          className="split-slider__fill"
-          style={{ width: `${Math.min(pct, 100)}%`, backgroundColor: color }}
-        />
-        <input
-          type="range"
-          min={min}
-          max={max}
-          step={1}
-          value={value}
-          onChange={(e) => onChange(parseInt(e.target.value, 10))}
-          disabled={disabled}
-          className="split-slider__range"
-        />
-      </div>
-      <div className="split-slider__controls">
-        <span className="split-slider__bound">{min.toLocaleString()}</span>
-        <NumericStepper value={value} onChange={onChange} min={min} max={max} disabled={disabled} />
-        <span className="split-slider__bound">{max.toLocaleString()}</span>
-      </div>
-    </div>
-  );
-}
-
 const languages = [
   { value: 'en', label: 'English' },
   { value: 'fr', label: 'French' },
@@ -129,6 +84,10 @@ const TRAIN_STRATEGIES: { value: TrainSelection; label: string; hint: string }[]
   { value: 'sequential', label: 'Sequential', hint: 'First N rows in order' },
   { value: 'stratify', label: 'Stratified', hint: 'Balanced by a column value' },
   { value: 'force_label', label: 'Force label', hint: 'Prioritise labelled rows' },
+];
+const HOLDOUT_STRATEGIES: { value: HoldoutSelection; label: string; hint: string }[] = [
+  { value: 'random', label: 'Random', hint: 'Random sample from the full dataset,If chosen sequential for train those will be from ' },
+  { value: 'stratify', label: 'Stratified', hint: 'Balanced by a column value' },
 ];
 
 export const ProjectCreationForm: FC = () => {
@@ -168,6 +127,7 @@ export const ProjectCreationForm: FC = () => {
   const [creatingProject, setCreatingProject] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [featureBatchSize, setFeatureBatchSize] = useState<number>(32);
+  //----
   //------
   const { resetContext } = useAppContext();
   const { notify } = useNotifications(); // replace your local notify state
@@ -189,6 +149,10 @@ export const ProjectCreationForm: FC = () => {
   const maxTrain = Math.max(0, Math.min(maxTrainSet, lengthData - Number(n_valid) - Number(n_test)));
   const maxValid = Math.max(0, lengthData - Number(n_train) - Number(n_test));
   const maxTest = Math.max(0, lengthData - Number(n_train) - Number(n_valid));
+  const [slicePanelOpen,setSlicePanelOpen]=useState(true);
+  useEffect(() => {
+    if (train_selection==='sequential')setSlicePanelOpen(true);
+  }, [train_selection]);
   //File load 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -273,9 +237,13 @@ const onSubmit: SubmitHandler<ProjectModel> = async (formData) => {
   if (!formData.cols_text?.length) { notify({ type: 'error', message: 'Select at least one text column.' }); return; }
   if (Number(formData.n_train) + Number(formData.n_test) + Number(formData.n_valid) > lengthData) {
     notify({ type: 'warning', message: 'Sizes exceed dataset length — please adjust.' });
-    return;
-  }
-
+    return;}
+  if (formData.train_selection === 'stratify' && !formData.cols_stratify?.length) {
+    notify({ type: 'error', message: 'Please select at least one stratification column for train.' });
+    return;}
+  if (formData.holdout_selection === 'stratify' && !formData.cols_stratify?.length) {
+    notify({ type: 'error', message: 'Please select at least one stratification column for holdout.' });
+    return;}
   const available = await availableProjectName(formData.project_name);
   if (!available) { notify({ type: 'error', message: 'Project name already taken.' }); return; }
 
@@ -366,17 +334,32 @@ const onSubmit: SubmitHandler<ProjectModel> = async (formData) => {
   }
 };
 
-const colsLabelSuggestions = availableFields?.filter((f) => {
-  if ((cols_label || []).includes(f.value)) return false;
-  const nameMatch = /label|class|category|tag|type|sentiment|score|target/i.test(f.value);
-  const hasEmptyEntries = data
-    ? data.data.some((row) => {
-        const val = row[f.value];
-        return val === null || val === undefined || val === '' || val === 'null' || val === 'nan';
-      })
-    : false;
-  return nameMatch || hasEmptyEntries;
-}) ?? [];
+  const colsLabelSuggestions = availableFields?.filter((f) => {
+    if ((cols_label || []).includes(f.value)) return false;
+    const nameMatch = /label|class|category|tag|type|sentiment|score|target/i.test(f.value);
+    const hasEmptyEntries = data
+      ? data.data.some((row) => {
+          const val = row[f.value];
+          return val === null || val === undefined || val === '' || val === 'null' || val === 'nan';
+        })
+      : false;
+    return nameMatch || hasEmptyEntries;
+  }) ?? [];
+
+  useEffect(() => {
+    if (train_selection !== 'sequential') return;
+    const valStart = Number(watch('start_index_val')) || Number(n_train);
+    const valEnd = valStart + Number(n_valid);
+    const testStart = Number(watch('start_index_test')) || 0;
+    if (Number(n_test) > 0 && Number(n_valid) > 0 && testStart < valEnd) {
+      setValue('start_index_test', valEnd);
+    }
+  }, [n_valid, watch('start_index_val')]);
+
+  useEffect(() => {
+    setValue('start_index_val', null);
+    setValue('start_index_test', null);
+  }, [holdout_selection, train_selection]);
 
   return (
     <div className="projectcontainer">
@@ -548,7 +531,6 @@ const colsLabelSuggestions = availableFields?.filter((f) => {
                 <div className="col-mapping">
                   <p className="col-mapping__title">Column mapping</p>
                   <div className="col-fields">
-
                     {/* ID column */}
                     <div>
                       <label className="field-sublabel" htmlFor="col_id">
@@ -640,6 +622,7 @@ const colsLabelSuggestions = availableFields?.filter((f) => {
                       <label className="field-sublabel">
                         Context column(s) <span className="field-sublabel__note">— optional</span>
                       </label>
+                    
                       <Controller
                         name="cols_context"
                         control={control}
@@ -680,33 +663,18 @@ const colsLabelSuggestions = availableFields?.filter((f) => {
                 <div className="form-section">
                   <p className="section-title--mb">Split sizes</p>
                   <div className="split-grid">
-                    <SplitSlider
-                      label="Train"
-                      value={Number(n_train)}
-                      onChange={(v) => setValue('n_train', v)}
-                      min={1}
-                      max={maxTrain}
-                      disabled={creatingProject}
-                      color="#3B82F6"
-                    />
-                    <SplitSlider
-                      label="Validation"
-                      value={Number(n_valid)}
-                      onChange={(v) => setValue('n_valid', v)}
-                      min={0}
-                      max={maxValid}
-                      disabled={creatingProject}
-                      color="#8B5CF6"
-                    />
-                    <SplitSlider
-                      label="Test"
-                      value={Number(n_test)}
-                      onChange={(v) => setValue('n_test', v)}
-                      min={0}
-                      max={maxTest}
-                      disabled={creatingProject}
-                      color="#10B981"
-                    />
+                    <div>
+                      <label className="field-sublabel">Train</label>
+                      <NumericStepper value={Number(n_train)} onChange={(v) => setValue('n_train', v)} min={1} max={maxTrain} disabled={creatingProject} />
+                    </div>
+                    <div>
+                      <label className="field-sublabel">Validation</label>
+                      <NumericStepper value={Number(n_valid)} onChange={(v) => setValue('n_valid', v)} min={0} max={maxValid} disabled={creatingProject} />
+                    </div>
+                    <div>
+                      <label className="field-sublabel">Test</label>
+                      <NumericStepper value={Number(n_test)} onChange={(v) => setValue('n_test', v)} min={0} max={maxTest} disabled={creatingProject} />
+                    </div>
                   </div>
                   {lengthData > 0 && (
                     <p className="split-total">
@@ -737,65 +705,107 @@ const colsLabelSuggestions = availableFields?.filter((f) => {
                   {train_selection === 'sequential' && (
                     <div className="slice-panel">
                       <p className="slice-panel__desc">
-                        Define where validation/test slices start in your ordered data. Leave at 0 to auto-place after the train block.
+                        Define where validation/test slices start in your ordered data. Leave at 0 to auto-place after the train block
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (slicePanelOpen) {
+                              setValue('start_index_val', null);
+                              setValue('start_index_test', null);
+                              notify({ type: 'info', message: 'Slice configuration cleared. Start indices reset to auto-placement.' });
+                            }
+                            setSlicePanelOpen(v => !v);
+                          }}
+                          title={slicePanelOpen ? 'Hide and reset slice indices' : 'Show slice configuration'}
+                          className="data-preview__toggle"
+                        >
+                          {slicePanelOpen ? <FiEyeOff size={12} /> : <FiEye size={12} />}
+                        </button>
                       </p>
-                      <div className="slice-panel__grid">
+                      {slicePanelOpen &&(<div className="slice-panel__grid">
                         {[
-                          { startName: 'start_index_val' as const, sizeName: 'num_rows_val' as const, label: 'Validation slice', show: Number(n_valid) > 0 },
-                          { startName: 'start_index_test' as const, sizeName: 'num_rows_t' as const, label: 'Test slice', show: Number(n_test) > 0 },
-                        ].map(({ startName, sizeName, label, show }) => (
-                          <div key={startName} className={`slice-item${show ? '' : ' slice-item--disabled'}`}>
-                            <p className="slice-item__title">{label}</p>
-                            <div className="slice-item__fields">
-                              <div>
-                                <div className="slice-field__header">
-                                  <span>Start row</span>
-                                  <span>{Number(watch(startName)).toLocaleString()}</span>
+                          { startName: 'start_index_val' as const, label: 'Validation slice', show: Number(n_valid) > 0, defaultStart: Number(n_train) },
+                          { startName: 'start_index_test' as const, label: 'Test slice', show: Number(n_test) > 0, defaultStart: Number(n_train) + Number(n_valid) },
+                        ].map(({ startName, label, show, defaultStart }) => {
+                          const currentStart = Number(watch(startName)) || defaultStart;
+                          const size = startName === 'start_index_val' ? Number(n_valid) : Number(n_test);
+                          const valStart = Number(watch('start_index_val')) || Number(n_train);
+                          const isTest = startName === 'start_index_test';
+                          const valEnd = valStart + Number(n_valid);
+
+                          return (
+                            <div key={startName} className={`slice-item${show ? '' : ' slice-item--disabled'}`}>
+                              <p className="slice-item__title">{label}</p>
+                              {show ? (
+                                <div className="slice-item__fields">
+                                  <div>
+                                    <label className="field-sublabel">Start row</label>
+                                    <NumericStepper
+                                      value={currentStart}
+                                      onChange={(v) => {
+                                        if (v + size > lengthData) {
+                                          notify({ type: 'warning', message: `${label}: start ${v} + size ${size} exceeds dataset length ${lengthData}` });
+                                          return;
+                                        }
+                                        if (isTest && v < valEnd && Number(n_valid) > 0) {
+                                          notify({ type: 'warning', message: `Test slice overlaps with validation slice (ends at row ${valEnd})` });
+                                          return;
+                                        }
+                                        setValue(startName, v);
+                                      }}
+                                      min={isTest ? (Number(n_valid) > 0 ? valEnd : Number(n_train)) : Number(n_train)}
+                                      max={Math.max(Number(n_train), lengthData - size)}
+                                      disabled={creatingProject || !show}
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="field-sublabel">Size: <b>{size.toLocaleString()}</b> rows (from split sizes above)</label>
+                                    <p className="field-sublabel">
+                                      Rows {currentStart.toLocaleString()} → {(currentStart + size).toLocaleString()}
+                                      {currentStart + size > lengthData && (
+                                        <span className="field-sublabel"> Warning : it exceeds dataset</span>
+                                      )}
+                                    </p>
+                                  </div>
                                 </div>
-                                <input
-                                  type="range" min={0} max={lengthData} step={1}
-                                  disabled={creatingProject || !show}
-                                  {...register(startName, { valueAsNumber: true })}
-                                  className="slice-field__range"
-                                />
-                              </div>
-                              <div>
-                                <div className="slice-field__header">
-                                  <span>Size</span>
-                                  <span>{Number(watch(sizeName)).toLocaleString()}</span>
-                                </div>
-                                <input
-                                  type="range" min={0} max={lengthData} step={1}
-                                  disabled={creatingProject || !show}
-                                  {...register(sizeName, { valueAsNumber: true })}
-                                  className="slice-field__range"
-                                />
-                              </div>
+                              ) : (
+                                <p className="slice-item__empty-hint">Set size &gt; 0 above to configure</p>
+                              )}
                             </div>
-                            {!show && <p className="slice-item__empty-hint">Set size &gt; 0 above to configure</p>}
-                          </div>
-                        ))}
-                      </div>
+                          );
+                        })}
+                      </div>)}
                     </div>
                   )}
                   {/* Stratified column picker */}
                   {train_selection === 'stratify' && (
                     <div className="stratify-picker">
-                      <label className="stratify-picker__label">Stratification column(s)</label>
+                      <label className="stratify-picker__label">Stratification column(s) <span style={{ color: 'red' }}>*</span></label>
                       <Controller
                         name="cols_stratify"
                         control={control}
-                        render={({ field: { value, onChange } }) => (
-                          <ReactSelect
-                            options={availableFields}
-                            isMulti
-                            isDisabled={creatingProject}
-                            value={(value ?? []).map((v) => availableFields?.find((o) => o.value === v)).filter(Boolean) as Option[]}
-                            onChange={(sel) => onChange(sel ? sel.map((o) => o?.value ?? '') : [])}
-                            classNamePrefix="rs"
-                            placeholder="Select column(s) to stratify by..."
-                            styles={{ control: (base) => ({ ...base, borderColor: '#e5e7eb', borderRadius: '0.5rem', fontSize: '14px' }) }}
-                          />
+                        rules={{ validate: (v) => (v && v.length > 0) || 'At least one stratification column is required.' }}
+                        render={({ field: { value, onChange }, fieldState: { error } }) => (
+                          <>
+                            <ReactSelect
+                              options={availableFields}
+                              isMulti
+                              isDisabled={creatingProject}
+                              value={(value ?? []).map((v) => availableFields?.find((o) => o.value === v)).filter(Boolean) as Option[]}
+                              onChange={(sel) => onChange(sel ? sel.map((o) => o?.value ?? '') : [])}
+                              classNamePrefix="rs"
+                              placeholder="Select column(s) to stratify by..."
+                              styles={{
+                                control: (base) => ({
+                                  ...base,
+                                  borderColor: error ? '#ef4444' : '#e5e7eb',
+                                  borderRadius: '0.5rem',
+                                  fontSize: '14px',
+                                }),
+                              }}
+                            />
+                            {error && <p style={{ color: '#ef4444', fontSize: '12px', marginTop: '4px' }}>{error.message}</p>}
+                          </>
                         )}
                       />
                     </div>
@@ -803,7 +813,14 @@ const colsLabelSuggestions = availableFields?.filter((f) => {
                 </div>
                 {(Number(n_valid) > 0 || Number(n_test) > 0) && (
                   <div className="form-section">
-                    <p className="section-title">Holdout selection strategy</p>
+                    <p className="section-title">Holdout selection strategy</p>  
+                    <p className="slice-panel__desc">
+                        {train_selection === 'sequential' && (
+                          <> For sequential train, holdout positions are defined by the start indices above  
+                          After training rows are set aside, the remaining rows form a <b>holdout pool</b>.
+                          This setting controls how validation and test rows are drawn from that pool.</>
+                        )}
+                      </p>
                     <div className="holdout-grid">
                       {(['random', 'stratify'] as HoldoutSelection[]).map((s) => (
                         <button
@@ -821,10 +838,12 @@ const colsLabelSuggestions = availableFields?.filter((f) => {
                     {holdout_selection === 'stratify' && (
                       <div className="stratify-picker">
                         <label className="stratify-picker__label">Stratification column(s) for holdout</label>
-                        <Controller
-                          name="cols_stratify"
-                          control={control}
-                          render={({ field: { value, onChange } }) => (
+                      <Controller
+                        name="cols_stratify"
+                        control={control}
+                        rules={{ validate: (v) => (v && v.length > 0) || 'At least one stratification column is required.' }}
+                        render={({ field: { value, onChange }, fieldState: { error } }) => (
+                          <>
                             <ReactSelect
                               options={availableFields}
                               isMulti
@@ -832,16 +851,24 @@ const colsLabelSuggestions = availableFields?.filter((f) => {
                               value={(value ?? []).map((v) => availableFields?.find((o) => o.value === v)).filter(Boolean) as Option[]}
                               onChange={(sel) => onChange(sel ? sel.map((o) => o?.value ?? '') : [])}
                               classNamePrefix="rs"
-                              placeholder="Select column(s)..."
-                              styles={{ control: (base) => ({ ...base, borderColor: '#e5e7eb', borderRadius: '0.5rem', fontSize: '14px' }) }}
+                              placeholder="Select column(s) to stratify by..."
+                              styles={{
+                                control: (base) => ({
+                                  ...base,
+                                  borderColor: error ? '#ef4444' : '#e5e7eb',
+                                  borderRadius: '0.5rem',
+                                  fontSize: '14px',
+                                }),
+                              }}
                             />
-                          )}
-                        />
+                            {error && <p style={{ color: '#ef4444', fontSize: '12px', marginTop: '4px' }}>{error.message}</p>}
+                          </>
+                        )}
+                      />
                       </div>
                     )}
                   </div>
                 )}
-
                 {/*Drop annotations for test (only when n_test > 0) */}
                 {Number(n_test) > 0 && (
                   <div className="drop-annotations">
@@ -913,7 +940,6 @@ const colsLabelSuggestions = availableFields?.filter((f) => {
                   <button type="submit" disabled={creatingProject} className="submit-btn">
                     {creatingProject ? 'Creating project…' : 'Create project'}
                   </button>
-                  {/* Upload progress rendered separately, outside the button */}
                   {data && creatingProject && (
                     <UploadProgressBar progression={progression} cancel={cancel} />
                   )}

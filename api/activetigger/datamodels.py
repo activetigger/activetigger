@@ -79,15 +79,10 @@ class ProjectBaseModel(BaseModel):
     n_total: int | None = None
     clear_test: bool = False
     clear_valid: bool = False
-    #random_selection: bool = False
     train_selection: Literal['random', 'stratify', 'sequential', 'force_label'] = 'random'
     holdout_selection: Optional[Literal['random', 'stratify']] = None
     cols_stratify: list[str] = []
-    #stratify_train: bool = False
-    #stratify_test: bool = False
-    #force_label: bool = False
     force_computation: bool = False
-    #detect_candidates_col:bool =False
     start_index_val: int | None = None
     start_index_test: int | None = None
     num_rows_val:int|None=None
