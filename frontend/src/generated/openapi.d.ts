@@ -2182,18 +2182,12 @@ export interface components {
         };
         /** Body_upload_file_dataset_files_add_dataset_post */
         Body_upload_file_dataset_files_add_dataset_post: {
-            /**
-             * File
-             * Format: binary
-             */
+            /** File */
             file: string;
         };
         /** Body_upload_file_project_files_add_project_post */
         Body_upload_file_project_files_add_project_post: {
-            /**
-             * File
-             * Format: binary
-             */
+            /** File */
             file: string;
         };
         /**
@@ -2980,35 +2974,31 @@ export interface components {
              */
             clear_valid: boolean;
             /**
-             * Random Selection
-             * @default false
+             * Train Selection
+             * @default random
+             * @enum {string}
              */
-            random_selection: boolean;
+            train_selection: "random" | "stratify" | "sequential" | "force_label";
+            /** Holdout Selection */
+            holdout_selection?: ("random" | "stratify") | null;
             /**
              * Cols Stratify
              * @default []
              */
             cols_stratify: string[];
             /**
-             * Stratify Train
-             * @default false
-             */
-            stratify_train: boolean;
-            /**
-             * Stratify Test
-             * @default false
-             */
-            stratify_test: boolean;
-            /**
-             * Force Label
-             * @default false
-             */
-            force_label: boolean;
-            /**
              * Force Computation
              * @default false
              */
             force_computation: boolean;
+            /** Start Index Val */
+            start_index_val?: number | null;
+            /** Start Index Test */
+            start_index_test?: number | null;
+            /** Num Rows Val */
+            num_rows_val?: number | null;
+            /** Num Rows Test */
+            num_rows_test?: number | null;
             /**
              * Seed
              * @default 42
@@ -3133,35 +3123,31 @@ export interface components {
              */
             clear_valid: boolean;
             /**
-             * Random Selection
-             * @default false
+             * Train Selection
+             * @default random
+             * @enum {string}
              */
-            random_selection: boolean;
+            train_selection: "random" | "stratify" | "sequential" | "force_label";
+            /** Holdout Selection */
+            holdout_selection?: ("random" | "stratify") | null;
             /**
              * Cols Stratify
              * @default []
              */
             cols_stratify: string[];
             /**
-             * Stratify Train
-             * @default false
-             */
-            stratify_train: boolean;
-            /**
-             * Stratify Test
-             * @default false
-             */
-            stratify_test: boolean;
-            /**
-             * Force Label
-             * @default false
-             */
-            force_label: boolean;
-            /**
              * Force Computation
              * @default false
              */
             force_computation: boolean;
+            /** Start Index Val */
+            start_index_val?: number | null;
+            /** Start Index Test */
+            start_index_test?: number | null;
+            /** Num Rows Val */
+            num_rows_val?: number | null;
+            /** Num Rows Test */
+            num_rows_test?: number | null;
             /**
              * Seed
              * @default 42
@@ -3659,6 +3645,10 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+            /** Input */
+            input?: unknown;
+            /** Context */
+            ctx?: Record<string, never>;
         };
         /**
          * WaitingModel
