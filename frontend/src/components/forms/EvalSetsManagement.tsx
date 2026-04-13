@@ -3,17 +3,17 @@ import DataTable from 'react-data-table-component';
 import { Controller, SubmitHandler, useForm, useWatch } from 'react-hook-form';
 import Select from 'react-select';
 
-import { omit, set} from 'lodash';
+import { omit } from 'lodash';
 import { unparse } from 'papaparse';
-import { useCreateValidSet, useDropEvalSet ,useStopProcesses } from '../../core/api';
+import { useCreateValidSet, useDropEvalSet,useStopProcesses } from '../../core/api';
 import { useNotifications } from '../../core/notifications';
 import { loadFile } from '../../core/utils';
 
 import { Modal } from 'react-bootstrap';
 import { useNavigate } from 'react-router-dom';
 import { EvalSetModel } from '../../types';
-import { UploadProgressBar} from '../UploadProgressBar';
 
+import {UploadProgressBar} from '../UploadProgressBar';
 
 // format of the data table
 export interface DataType {
@@ -44,41 +44,81 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
     },
   );
 
-  const {progression,cancel,createValidSet,id} = useCreateValidSet(); // API call
+  const { progression,createValidSet,cancel} = useCreateValidSet(); // API call
   const { notify } = useNotifications();
-  const { stopProcesses}=useStopProcesses(projectSlug); // API call to stop processes if needed
 
   const dropEvalSet = useDropEvalSet(projectSlug); // API call to drop existing test set
+  const {stopProcesses}=useStopProcesses(projectSlug); //API call to stop the current process of adding evalset
   const navigate = useNavigate(); // for navigation after drop
 
   const [alertDrop, setAlertDrop] = useState<boolean>(false);
-
+  
+ 
   const [data, setData] = useState<DataType | null>(null);
-
   const files = useWatch({ control, name: 'files' });
-
-  const [uploading , setUploading]=useState<boolean>( () =>sessionStorage.getItem('evalset-uploading') ==='true');
-
-  const [isCancelling, setIsCancelling] = useState<boolean>(false);
-
+  //Local storage variables
+  const storageKey = `add-evalset-${dataset}-${projectSlug}`; //will be unused
+  const processIdKey = `evalset-process-id-${dataset}-${projectSlug}`;
+  //
+  const [uploading,setUploading]=useState<boolean>(() => sessionStorage.getItem(storageKey)==='true');
+  const uploadingRef=useRef(uploading);
   const cancelRef=useRef(cancel);
+  //Controller state
+  const [displayCancel, setDisplayCancel] = useState<AbortController | undefined>(undefined);
+
+  //handle uploading
+  const isUploading=(val:boolean)=>{
+    console.trace('isUploading', val);
+    if (!val) cancelRef.current = undefined;
+    val?sessionStorage.setItem(storageKey,'true'):sessionStorage.removeItem(storageKey);
+    setUploading(val);
+  };
 
 
-  const [restoredCancel, setRestoredCancel] = useState<AbortController | null>(null);
+  console.log(dataset,exist);
+  //Upload
+  useEffect(()=>{
+    uploadingRef.current=uploading;
+  },[uploading]);
 
-  useEffect(() => {
-    if (uploading && !cancel) {
-      const controller = new AbortController();
-      controller.signal.addEventListener('abort', async () => {
-        setIsCancelling(true);
-        const storedId = sessionStorage.getItem(`evalset-process-id_${dataset}`);
-        const ok = await stopProcesses('add_evalset', storedId ?? undefined);
-        if (ok) setUploadingPersisted(false);
-        setIsCancelling(false);
-      });
-      setRestoredCancel(controller);
+   useEffect(()=>{
+    if (exist && uploadingRef.current){
+      isUploading(false);
     }
-  }, []);
+  },[exist]);
+
+  //setting the id 
+  //useEffect(() => {if (id) sessionStorage.setItem(processIdKey, id);}, [id]);
+
+  //Cancel
+  useEffect(()=>{
+    cancelRef.current=cancel;
+    setDisplayCancel(cancel);
+  },[cancel])
+
+  //cancel signal
+  useEffect(() => {
+  if (!uploading) {
+    return;
+  }
+  const stop = () => {
+    //const currentId = sessionStorage.getItem(processIdKey);
+    stopProcesses("add_evalset");
+    //sessionStorage.removeItem(processIdKey);
+    isUploading(false);};
+  if (cancel?.signal) {
+    const signal = cancel.signal;
+    signal.addEventListener('abort',stop);
+    return () => { signal.removeEventListener('abort',stop); };
+  }
+  const n_cancel=new AbortController();
+  cancelRef.current=n_cancel;
+  setDisplayCancel(n_cancel);
+  n_cancel.signal.addEventListener('abort',stop);
+  return () => { n_cancel.signal.removeEventListener('abort',stop); };
+},[cancel,uploading]);
+
+
   // available columns
   const columns = data?.headers.map((h) => (
     <option key={`${h}`} value={`${h}`}>
@@ -100,81 +140,32 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
         setValue('n_eval', data.data.length - 1);
       });
     }
-
   }, [files, setValue, notify]);
-
-
-  const setUploadingPersisted = (val: boolean) => {
-    val
-      ? sessionStorage.setItem('evalset-uploading', 'true')
-      : sessionStorage.removeItem('evalset-uploading');
-    setUploading(val);
-  };
 
   // action when form validated
   const onSubmit: SubmitHandler<EvalSetModel & { files: FileList }> = async (formData) => {
-    if (uploading || isCancelling) return;
-
     if (data) {
       if (!formData.col_id || !formData.cols_text || !formData.n_eval) {
         notify({ type: 'error', message: 'Please fill all the fields.' });
         return;
       }
-      
       const csv = data ? unparse(data.data, { header: true, columns: data.headers }) : '';
       formData.scheme = currentScheme;
-      try {
-        setUploadingPersisted(true);
-        const req=await createValidSet(projectSlug, dataset, {
-          ...omit(formData, 'files'),
-          csv,
-          filename: data.filename,
-        });
-        
-        console.log('uploadinf file :' , uploading);
-        if (req){navigate(`/projects/${projectSlug}/settings`);}
-        else{setUploadingPersisted(false)}
-      } catch(err) {
-        console.error(err);
-        notify({ type: 'error', message: "error with adding a new eval set" });
-        
-      }
+      isUploading(true);
+      const res =await createValidSet(projectSlug, dataset, {
+        ...omit(formData, 'files'),
+        csv,
+        filename: data.filename,
+      });
+      if(!res){setUploading(false);}//sessionStorage.removeItem(processIdKey);}
     }
   };
 
   const capFirstLetter = (word: string) => {
     return word.charAt(0).toUpperCase() + word.slice(1);
   };
-
-  useEffect(() => {
-    cancelRef.current = cancel;
-  }, [cancel]);
-
-
-  useEffect(()=>{
-    if (exist){setUploadingPersisted(false);}
-   },[exist]);
-
-  useEffect(() => {
-  if (id) sessionStorage.setItem('evalset-process-id', id);
-   }, [id]);
-
-
-  useEffect(() => {
-    if (!cancel?.signal) return;
-    const onAbort = async () => {
-      setIsCancelling(true);
-      console.log(id);
-      const ok= await stopProcesses('add_evalset',id);
-      if(ok)
-        {setUploadingPersisted(false);}
-      setIsCancelling(false);
-    };
-
-    cancel.signal.addEventListener('abort', onAbort);
-    return () => cancel.signal.removeEventListener('abort', onAbort);
-  }, [cancel?.signal]);
-
+  console.log(dataset,exist);
+  console.log('uploading',uploading);
   return (
     <div>
       <h4 className="subsection">{capFirstLetter(dataset)} set</h4>
@@ -191,17 +182,15 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
 
       {!exist && (
         <form onSubmit={handleSubmit(onSubmit)}>
-          <div className="col-lg-6" >
+          <div className="col-lg-6">
             <div className="explanations">
               No {datasetCleanForPrinting} data set has been created. You can upload a{' '}
               {datasetCleanForPrinting} set. Careful : all features will be dropped and need to be
               computed again, and id will be modified with "imported-". You are responsible to check
               that the elements are not already in the train set.
             </div>
-
-              <label htmlFor="csvFile">File to upload</label>
-               <input id="csvFile" className="form-control" type="file" {...register('files')} />
-         
+            <label htmlFor="csvFile">File to upload</label>
+            <input id="csvFile" className="form-control" type="file" {...register('files')} />
             {
               // display datable if data available
               data !== null && (
@@ -211,12 +200,13 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
                     Size of the dataset : <b>{data.data.length - 1}</b>
                   </div>
                   <DataTable<Record<DataType['headers'][number], string | number>>
-                      customStyles={{responsiveWrapper: {
-                                                         style: {
-                                                          maxWidth: '600px',
-                                                          overflowX: 'auto',},
-                                                                      },
-                                                                  }}
+                    customStyles={{responsiveWrapper: {
+                      style: {
+                              maxWidth: '600px',
+                              overflowX: 'auto',
+                            },
+                          },
+                        }}
                     columns={data.headers.map((h) => ({
                       name: h,
                       selector: (row) => row[h],
@@ -224,8 +214,7 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
                         const v = row[h];
                         return typeof v === 'bigint' ? Number(v) : v;
                       },
-                      width:'200px',
-                      //`calc(100% / ${data.headers.length})`,,
+                      width: '200px',
                       wrap:true,
                     }))}
                     data={
@@ -238,7 +227,7 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
             {
               // only display if data
               data != null && (
-                <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+                <div>
                   <label htmlFor="col_id">ID column (IDs must be unique)</label>
                   <select id="col_id" disabled={data === null} {...register('col_id')}>
                     {columns}
@@ -276,20 +265,19 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
                   <label htmlFor="n_test">Number of rows to import</label>
                   <input id="n_test" type="number" {...register('n_eval')} />
 
-                  <button type="submit" className="btn-submit" disabled={uploading||isCancelling}>
-                    {uploading || isCancelling ? 'Processing...' : 'Create'}
+                  <button type="submit" className="btn-submit" disabled={uploading}>
+                    {uploading?'Uploading File ...' : 'Create'}
                   </button>
                 </div>
-                
               )
             }
-            {uploading && (
-                    <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 10 }}>
-                      <UploadProgressBar progression={progression} cancel={cancel ?? restoredCancel ?? undefined} />
-                    </div>
-            )}
-           </div>
+          </div>
         </form>
+      )}
+      {uploading && (
+        <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 10 }}>
+          <UploadProgressBar progression={progression} cancel={cancel||displayCancel} />
+        </div>
       )}
       <Modal show={alertDrop} onHide={() => setAlertDrop(false)}>
         <Modal.Header closeButton>

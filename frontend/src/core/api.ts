@@ -258,7 +258,7 @@ export function useCreateValidSet(){
   const { authenticatedUser } = useAuth();
   const [controller, setController] = useState<AbortController | undefined>(undefined);
   const [progression, setProgression] = useState<{ loaded?: number; total?: number }>({});
-   const [id, setId] = useState<string | null>(null);
+  //const [id, setId] = useState<string | null>(null);
   //const [status,setStatus]=useState<'inactive'|'adding'|'done'| 'aborted' | 'error'>('inactive')
   const createValidSet=useCallback(async(projectSlung:string,dataset:string,testset:EvalSetDataModel)=>{   
     const controller = new AbortController();
@@ -273,7 +273,8 @@ export function useCreateValidSet(){
         onUploadProgress:({loaded,total})=>setProgression({loaded,total}),
 
       });
-      setId(res.data)
+      //setId(res.data);
+      console.log("res.data",res.data);
       return true;
     }catch(error:any){
       notify({ type: 'error', message: formatApiError(error) });
@@ -282,7 +283,7 @@ export function useCreateValidSet(){
     
   },[notify,authenticatedUser],
 );
-  return { createValidSet, progression, cancel: controller,id};
+  return { createValidSet, progression, cancel: controller};
 }
 
 /**
