@@ -32,7 +32,6 @@ services:
       - ${PROJECT_PATH}/docker/api/entrypoint.sh:/entrypoint.sh
       - ${PROJECT_PATH}/api:/api
       - ${DATA_PATH}:/data
-      - ${PROJECT_PATH}/docker/api/venv:/home/python/venv
     env_file: ".env"
     environment:
       - DATA_PATH=/data
