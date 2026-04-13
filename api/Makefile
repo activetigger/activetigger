@@ -18,3 +18,6 @@ format-fix:
 typecheck:
 	uv run mypy .
 
+.PHONY: test
+test:
+	uv run pytest -v
