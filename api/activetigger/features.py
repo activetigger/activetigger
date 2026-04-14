@@ -202,10 +202,16 @@ class Features:
         errors = []
         for f in predictions:
             try:
-                # load the prediction probabilities minus one
+                # load and keep only label probability columns
                 df = pd.read_parquet(predictions[f])
-                df = df.drop(columns=["entropy", "prediction", "dataset", "GS-label"])
-                df = df[df.columns[0:-1]]
+                cols_to_drop = [c for c in df.columns if c.startswith("entropy")]
+                cols_to_drop += [
+                    c
+                    for c in df.columns
+                    if c in ("prediction", "text", "GS-label", "GS-label-non-dichotomized")
+                    or df[c].dtype == "object"
+                ]
+                df = df.drop(columns=set(cols_to_drop), errors="ignore")
                 name = f.replace("__", "_")  # avoid __ in the name for features
                 # if the feature already exists, delete it first
                 if self.exists(name):
