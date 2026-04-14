@@ -2,9 +2,17 @@
 install:
 	uv sync
 
+.PHONY: ci
+ci:
+	uv sync --locked --all-extras --dev
+
 .PHONY: lint
 lint:
 	uv run ruff check .
+
+.PHONY: lint-fix
+lint-fix:
+	uv run ruff check . --fix
 
 .PHONY: format
 format:

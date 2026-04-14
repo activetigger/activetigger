@@ -34,6 +34,7 @@ from activetigger.app.routers import (
     schemes,
     users,
 )
+from activetigger.config import config
 from activetigger.datamodels import (
     ServerStateModel,
     TableOutModel,
@@ -41,7 +42,6 @@ from activetigger.datamodels import (
     UserInDBModel,
 )
 from activetigger.orchestrator import get_orchestrator
-from activetigger.config import config
 
 
 @asynccontextmanager

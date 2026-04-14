@@ -16,7 +16,6 @@ from activetigger.datamodels import (
 from activetigger.orchestrator import get_orchestrator
 from activetigger.project import Project
 
-
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 # per-project locks to avoid duplicate loading without blocking unrelated projects
