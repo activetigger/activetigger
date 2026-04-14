@@ -911,8 +911,14 @@ class Project:
         if next.selection == "active" and proba is not None:
             if next.label_prob is not None:
                 # active LABEL: use entropy-LABEL defined as the entropy for the probabilities p(A)/1-p(A)
+                entropy_col = f"entropy-{next.label_prob}"
+                if entropy_col not in proba.columns:
+                    raise ValueError(
+                        f"Column '{entropy_col}' not found in model predictions. "
+                        "The model may need to be retrained to support this selection method."
+                    )
                 ss_active = (
-                    proba[f'entropy-{next.label_prob}']
+                    proba[f][entropy_col]
                     .drop(next.history, errors="ignore")
                     .sort_values(ascending=False)
                 )
