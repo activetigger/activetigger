@@ -21,3 +21,9 @@ typecheck:
 .PHONY: test
 test:
 	uv run pytest -v
+
+.PHONY: test-coverage
+test-coverage:
+	uv run coverage run -m pytest
+	uv run coverage report -m
+	uv run coverage html

@@ -73,6 +73,12 @@ dependencies = [
 		"regex>=2024.0.0",
 ]
 
+[dependency-groups]
+dev = [
+    "coverage>=7.13.5",
+    "pytest>=9.0.3",
+]
+
 [tool.ruff]
 line-length = 100
 
@@ -138,7 +144,13 @@ environments = [
 fr-core-news-sm = { url = "https://github.com/explosion/spacy-models/releases/download/fr_core_news_sm-3.8.0/fr_core_news_sm-3.8.0.tar.gz" }
 en-core-web-sm = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0.tar.gz" }
 
-[dependency-groups]
-dev = [
-    "pytest>=9.0.3",
-]
+
+[tool.coverage.run]
+source = ["activetigger"]
+
+[tool.coverage.report]
+show_missing = true
+sort = "-Cover"
+
+[tool.coverage.html]
+show_contexts = true
