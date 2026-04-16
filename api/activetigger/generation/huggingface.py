@@ -1,5 +1,5 @@
-from huggingface_hub import InferenceClient, InferenceTimeoutError  # type: ignore[import]
-from huggingface_hub.errors import HTTPError  # type: ignore[import]
+from huggingface_hub import InferenceClient, InferenceTimeoutError
+from huggingface_hub.errors import HTTPError
 
 from activetigger.generation.client import GenerationModelClient
 

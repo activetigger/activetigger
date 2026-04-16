@@ -1,6 +1,6 @@
 from typing import Annotated
 
-import pandas as pd  # type: ignore[import]
+import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from activetigger.app.dependencies import ProjectAction, get_project, test_rights, verified_user
@@ -10,7 +10,7 @@ from activetigger.datamodels import (
     ComputeBertopicModel,
     UserInDBModel,
 )
-from activetigger.orchestrator import orchestrator
+from activetigger.orchestrator import get_orchestrator
 from activetigger.project import Project
 
 router = APIRouter(tags=["BERTopic"])
@@ -50,7 +50,7 @@ def compute_bertopic(
             force_compute_embeddings=bertopic.force_compute_embeddings,
             scheme=bertopic.scheme,
         )
-        orchestrator.log_action(
+        get_orchestrator().log_action(
             current_user.username, f"COMPUTE BERTopic MODEL: {bertopic.name}", project.name
         )
         project.monitoring.register_process(
@@ -108,7 +108,7 @@ def delete_bertopic_model(
     """
     try:
         project.bertopic.delete(name=name)
-        orchestrator.log_action(
+        get_orchestrator().log_action(
             current_user.username, f"DELETE BERTopic MODEL: {name}", project.name
         )
     except Exception as e:
@@ -124,6 +124,7 @@ def export_bertopic_to_scheme(
     """
     Export the topic model as a scheme for the train set
     """
+    orchestrator = get_orchestrator()
     try:
         test_rights(ProjectAction.ADD, current_user.username, project.name)
 
@@ -172,6 +173,7 @@ def export_bertopic_to_feature(
     """
     Export the topic model as a feature for quick models
     """
+    orchestrator = get_orchestrator()
     try:
         test_rights(ProjectAction.ADD, current_user.username, project.name)
 

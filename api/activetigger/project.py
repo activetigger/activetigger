@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, cast
 
-import pandas as pd  # type: ignore[import]
+import pandas as pd
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse
 from pandas import DataFrame
@@ -899,12 +899,16 @@ class Project:
             and next.dataset == "train"
         ):
             predict = self.get_prediction_element(
-                next.model_active.type, next.model_active.value, element_id
+                next.model_active.type,
+                next.model_active.value,
+                element_id,  # ty: ignore[possibly-unresolved-reference]
             )
 
         # get all tags already existing for the element selected
         previous = self.schemes.projects_service.get_annotations_by_element(
-            self.params.project_slug, next.scheme, element_id
+            self.params.project_slug,
+            next.scheme,
+            element_id,  # ty: ignore[possibly-unresolved-reference]
         )
 
         if next.dataset in ["test", "valid"]:
@@ -914,15 +918,15 @@ class Project:
                 raise Exception("Train dataset is not defined")
             # get context for the single selected element
             context = dict(
-                self.data.train.loc[element_id, self.params.cols_context].fillna("NA").apply(str)
+                self.data.train.loc[element_id, self.params.cols_context].fillna("NA").apply(str)  # ty: ignore[possibly-unresolved-reference]
             )
 
-        text = df.loc[element_id, "text"]
+        text = df.loc[element_id, "text"]  # ty: ignore[possibly-unresolved-reference]
         if pd.isna(text):
             text = "NA"
 
         return ElementOutModel(
-            element_id=element_id,
+            element_id=element_id,  # ty: ignore[possibly-unresolved-reference]
             text=text,
             context=context,
             selection=next.selection,
@@ -998,7 +1002,7 @@ class Project:
             # extract context
             context = cast(
                 dict[str, Any],
-                self.data.train.loc[element.element_id, self.params.cols_context]  # type: ignore[index,union-attr] # ty: ignore[invalid-argument-type]
+                self.data.train.loc[element.element_id, self.params.cols_context]  # ty: ignore[invalid-argument-type]
                 .fillna("NA")
                 .astype(str)
                 .to_dict(),

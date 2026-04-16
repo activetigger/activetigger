@@ -1,7 +1,7 @@
 """Baseline
 
 Revision ID: 938383c31205
-Revises: 
+Revises:
 Create Date: 2025-01-20 12:00:59.856363
 
 """
@@ -88,9 +88,7 @@ def upgrade() -> None:
             name=op.f("fk_auth_project_id_projects"),
             ondelete="CASCADE",
         ),
-        sa.ForeignKeyConstraint(
-            ["user_id"], ["users.id"], name=op.f("fk_auth_user_id_users")
-        ),
+        sa.ForeignKeyConstraint(["user_id"], ["users.id"], name=op.f("fk_auth_user_id_users")),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_auth")),
     )
     op.create_table(
@@ -114,9 +112,7 @@ def upgrade() -> None:
             name=op.f("fk_features_project_id_projects"),
             ondelete="CASCADE",
         ),
-        sa.ForeignKeyConstraint(
-            ["user_id"], ["users.id"], name=op.f("fk_features_user_id_users")
-        ),
+        sa.ForeignKeyConstraint(["user_id"], ["users.id"], name=op.f("fk_features_user_id_users")),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_features")),
     )
     op.create_table(
@@ -164,9 +160,7 @@ def upgrade() -> None:
             name=op.f("fk_logs_project_id_projects"),
             ondelete="CASCADE",
         ),
-        sa.ForeignKeyConstraint(
-            ["user_id"], ["users.id"], name=op.f("fk_logs_user_id_users")
-        ),
+        sa.ForeignKeyConstraint(["user_id"], ["users.id"], name=op.f("fk_logs_user_id_users")),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_logs")),
     )
     op.create_table(
@@ -194,9 +188,7 @@ def upgrade() -> None:
             name=op.f("fk_schemes_project_id_projects"),
             ondelete="CASCADE",
         ),
-        sa.ForeignKeyConstraint(
-            ["user_id"], ["users.id"], name=op.f("fk_schemes_user_id_users")
-        ),
+        sa.ForeignKeyConstraint(["user_id"], ["users.id"], name=op.f("fk_schemes_user_id_users")),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_schemes")),
     )
     op.create_table(
@@ -263,9 +255,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(
             ["scheme_id"], ["schemes.id"], name=op.f("fk_models_scheme_id_schemes")
         ),
-        sa.ForeignKeyConstraint(
-            ["user_id"], ["users.id"], name=op.f("fk_models_user_id_users")
-        ),
+        sa.ForeignKeyConstraint(["user_id"], ["users.id"], name=op.f("fk_models_user_id_users")),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_models")),
     )
     # ### end Alembic commands ###

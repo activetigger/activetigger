@@ -5,7 +5,7 @@ from typing import Tuple
 
 import pandas as pd
 from pandas import DataFrame
-from sklearn.metrics import cohen_kappa_score  # type: ignore[import-untyped]
+from sklearn.metrics import cohen_kappa_score
 
 from activetigger.data import Data
 from activetigger.datamodels import (

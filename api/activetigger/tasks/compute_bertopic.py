@@ -6,20 +6,20 @@ from datetime import timezone
 from pathlib import Path
 from string import punctuation
 
-import hdbscan  # type: ignore[import]
-import nltk  # type: ignore[import]
+import hdbscan
+import nltk
 import numpy as np
-import pandas as pd  # type: ignore[import]
-import plotly.graph_objects as go  # type: ignore[import]
+import pandas as pd
+import plotly.graph_objects as go
 import torch
-import umap  # type: ignore[import]
-from bertopic import BERTopic  # type: ignore[import]
+import umap
+from bertopic import BERTopic
 from great_tables import GT, loc, style
 from jinja2 import Template
-from nltk.corpus import stopwords as nltk_stopwords  # type: ignore[import]
-from simplemma import lemmatize  # type: ignore[import]
-from sklearn.feature_extraction.text import CountVectorizer  # type: ignore[import]
-from slugify import slugify  # type: ignore[import]
+from nltk.corpus import stopwords as nltk_stopwords
+from simplemma import lemmatize
+from sklearn.feature_extraction.text import CountVectorizer
+from slugify import slugify
 
 from activetigger.config import config
 from activetigger.datamodels import BertopicParamsModel, EventsModel
@@ -31,7 +31,7 @@ nltk.download("stopwords", quiet=True)
 
 # accelerate UMAP
 try:
-    import cuml  # type: ignore[import-not-found] # ty: ignore[unresolved-import]
+    import cuml  # ty: ignore[unresolved-import]
 
     CUMl_AVAILABLE = True
 except Exception:
@@ -292,7 +292,7 @@ class ComputeBertopic(BaseTask):
                 )
             case "complete":
                 df = pd.read_parquet(self.path_data.joinpath(config.data_all))
-        return df
+        return df  # ty: ignore[possibly-unresolved-reference]
 
     def __check_text_data(self, df) -> pd.DataFrame:
         """Check the validity of the dataframe (contains necessary data, index,
@@ -764,7 +764,7 @@ class ComputeBertopic(BaseTask):
                         f"{str(e)}"
                         "\n"
                         f"[Found array with 0 sample(s)] errors are likely due to"
-                        f"your dataset being to small ({len(df)}). We advise you "
+                        f"your dataset being to small ({len(df)}). We advise you "  # ty: ignore[possibly-unresolved-reference]
                         f"to add more elements to your dataset."
                     )
                 )

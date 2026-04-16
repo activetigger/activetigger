@@ -8,18 +8,13 @@ from fastapi import (
     Request,
 )
 from fastapi.security import OAuth2PasswordBearer
-from jose import JWTError  # type: ignore[import]
+from jose import JWTError
 
 from activetigger.datamodels import (
     UserInDBModel,
 )
-from activetigger.orchestrator import orchestrator
+from activetigger.orchestrator import get_orchestrator
 from activetigger.project import Project
-
-
-def get_orchestrator():
-    return orchestrator
-
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
@@ -39,6 +34,7 @@ async def get_project(project_slug: str) -> Project:
     - if already loaded, return it
     - if not loaded, load it first (in a thread to avoid blocking the event loop)
     """
+    orchestrator = get_orchestrator()
 
     # test if project exists
     if not orchestrator.exists(project_slug):
@@ -67,6 +63,7 @@ def verified_user(request: Request, token: Annotated[str, Depends(oauth2_scheme)
     """
     Dependency to test if the user is authentified with its token
     """
+    orchestrator = get_orchestrator()
     # decode token
     try:
         payload = orchestrator.decode_access_token(token)
@@ -94,7 +91,7 @@ def check_auth_exists(
     Check if a user is associated to a project
     """
     try:
-        auth = orchestrator.users.auth(current_user.username, project_slug)
+        auth = get_orchestrator().users.auth(current_user.username, project_slug)
         if not auth:
             raise HTTPException(status_code=403, detail="Forbidden: Invalid rights")
     except Exception as e:
@@ -141,6 +138,7 @@ def test_rights(
     Existing rights : manager, contributor
     Not implemented : rights specific to scheme
     """
+    orchestrator = get_orchestrator()
     try:
         user = orchestrator.users.get_user(name=username)
     except Exception as e:

@@ -10,14 +10,14 @@ from logging import Logger
 from pathlib import Path
 from typing import Any, Optional, Tuple
 
-import datasets  # type: ignore[import]
-import pandas as pd  # type: ignore[import]
+import datasets
+import pandas as pd
 import torch
-from pandas import DataFrame  # type: ignore[import]
+from pandas import DataFrame
 from torch import nn
-from transformers import (  # type: ignore[import]
+from transformers import (
     AutoModelForSequenceClassification,
-    AutoTokenizer,
+    AutoTokenizer,  # ty: ignore[possibly-missing-import]
     Trainer,
     TrainerCallback,
     TrainerControl,
@@ -112,9 +112,7 @@ class CustomTrainer(Trainer):
         self.class_weights = class_weights
         print("CustomTrainer initialized with class weights:", self.class_weights)
 
-    def compute_loss(
-        self, model, inputs, return_outputs=False, **kwargs
-    ):  # ty: ignore[invalid-method-override]
+    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):  # ty: ignore[invalid-method-override]
         labels = inputs.get("labels")
         outputs = model(**inputs)
         logits = outputs.get("logits")
@@ -307,7 +305,7 @@ class TrainBert(BaseTask):
             labels_as_matrix = annotations_to_matrix(df[col_label], list(label2id.keys())).tolist()
 
         return datasets.Dataset.from_dict(
-            {"id": ids, "text": texts, "labels": torch.Tensor(labels_as_matrix)}
+            {"id": ids, "text": texts, "labels": torch.Tensor(labels_as_matrix)}  # ty: ignore[possibly-unresolved-reference]
         ).with_format("torch")
 
     def __load_tokenizer(self, base_model: str):
@@ -560,22 +558,18 @@ class TrainBert(BaseTask):
             task_timer.stop("setup")
 
             task_timer.start("train")
-            trainer.train()  # type: ignore[attr-defined]
+            trainer.train()
             self.logger.info(f"Model trained {current_path}")
             task_timer.stop("train")
 
             # predict on the data (separation validation set and training set)
             task_timer.start("evaluate")
-            predictions_train = trainer.predict(self.ds["train"])  # type: ignore[attr-defined] # ty: ignore[invalid-argument-type]
+            predictions_train = trainer.predict(self.ds["train"])  # ty: ignore[invalid-argument-type]
 
             # Compute the metrics
-            df_train_results = (
-                self.ds["train"].to_pandas().set_index("id")  # ty: ignore[unresolved-attribute]
-            )
+            df_train_results = self.ds["train"].to_pandas().set_index("id")  # ty: ignore[unresolved-attribute]
 
-            df_train_results["true_label-matrix"] = (
-                predictions_train.label_ids.tolist()  # ty: ignore[unresolved-attribute]
-            )
+            df_train_results["true_label-matrix"] = predictions_train.label_ids.tolist()  # ty: ignore[unresolved-attribute]
             df_train_results["true_label"] = [
                 "|".join(matrix_to_label(row, id2label))  # ty: ignore[invalid-argument-type]
                 for row in predictions_train.label_ids  # ty: ignore[not-iterable]
@@ -605,7 +599,8 @@ class TrainBert(BaseTask):
 
             df_train_results["predicted_label-matrix"] = y_prob_pred.tolist()
             df_train_results["predicted_label"] = [
-                "|".join(matrix_to_label(row, id2label)) for row in labels_predicted
+                "|".join(matrix_to_label(row, id2label))
+                for row in labels_predicted  # ty: ignore[possibly-unresolved-reference]
             ]
 
             if self.training_kind == "multiclass":
@@ -618,20 +613,16 @@ class TrainBert(BaseTask):
             elif self.training_kind == "multilabel":
                 metrics_train = get_metrics_multilabel(
                     Y_true=predictions_train.label_ids,  # ty: ignore[invalid-argument-type]
-                    Y_pred=labels_predicted,
+                    Y_pred=labels_predicted,  # ty: ignore[possibly-unresolved-reference]
                     texts=df_train_results["text"],
                     id2label=id2label,
                 )
 
             if "test" in self.ds:
-                predictions_test = trainer.predict(self.ds["test"])  # type: ignore[attr-defined] # ty: ignore[invalid-argument-type]
-                df_test_results = (
-                    self.ds["test"].to_pandas().set_index("id")  # ty: ignore[unresolved-attribute]
-                )
+                predictions_test = trainer.predict(self.ds["test"])  # ty: ignore[invalid-argument-type]
+                df_test_results = self.ds["test"].to_pandas().set_index("id")  # ty: ignore[unresolved-attribute]
 
-                df_test_results["true_label-matrix"] = (
-                    predictions_test.label_ids.tolist()  # ty: ignore[unresolved-attribute]
-                )
+                df_test_results["true_label-matrix"] = predictions_test.label_ids.tolist()  # ty: ignore[unresolved-attribute]
                 df_test_results["true_label"] = [
                     "|".join(matrix_to_label(row, id2label))  # ty: ignore[invalid-argument-type]
                     for row in predictions_test.label_ids  # ty: ignore[not-iterable]
@@ -646,7 +637,7 @@ class TrainBert(BaseTask):
                         y_prob_pred, strategy="max", force_max_1_per_row=True
                     )
                 else:
-                    y_label_pred = activate_probs(y_prob_pred, threshold, strategy="threshold")
+                    y_label_pred = activate_probs(y_prob_pred, threshold, strategy="threshold")  # ty: ignore[possibly-unresolved-reference]
                 df_test_results["predicted_label-matrix"] = y_prob_pred.tolist()
                 df_test_results["predicted_label"] = [
                     "|".join(matrix_to_label(row, id2label)) for row in y_label_pred
@@ -678,7 +669,7 @@ class TrainBert(BaseTask):
                 {
                     "training_kind": self.training_kind,
                     "test_size": self.test_size,
-                    "threshold": threshold if self.training_kind == "multilabel" else None,
+                    "threshold": threshold if self.training_kind == "multilabel" else None,  # ty: ignore[possibly-unresolved-reference]
                     "use_dichotomization": self.use_dichotomization,
                     "label_for_dichotomization": self.label_for_dichotomization,
                     "base_model": self.base_model,
@@ -700,8 +691,8 @@ class TrainBert(BaseTask):
                 training_data=self.df[[self.col_text, self.col_label]],
                 bert_model=bert_model,
                 params_to_save=params_to_save,
-                metrics_train=metrics_train,
-                metrics_test=metrics_test,
+                metrics_train=metrics_train,  # ty: ignore[possibly-unresolved-reference]
+                metrics_test=metrics_test,  # ty: ignore[possibly-unresolved-reference]
             )
             task_timer.stop("save_files")
 

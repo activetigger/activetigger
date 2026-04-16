@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends
 
 from activetigger.app.dependencies import ServerAction, test_rights, verified_user
 from activetigger.datamodels import MonitoringMetricsModel, UserInDBModel
-from activetigger.orchestrator import orchestrator
+from activetigger.orchestrator import get_orchestrator
 
 router = APIRouter(tags=["monitoring"])
 
@@ -17,7 +17,7 @@ def get_monitoring_metrics(
     Get monitoring metrics
     """
     test_rights(ServerAction.MANAGE_SERVER, current_user.username)
-    metrics = orchestrator.monitoring.get_metrics()
+    metrics = get_orchestrator().monitoring.get_metrics()
     return metrics
 
 
@@ -29,5 +29,5 @@ def get_monitoring_data(
     Get monitoring data
     """
     test_rights(ServerAction.MANAGE_SERVER, current_user.username)
-    data = orchestrator.monitoring.get_data(kind)
+    data = get_orchestrator().monitoring.get_data(kind)
     return data.to_dict(orient="records")

@@ -25,7 +25,7 @@ from activetigger.datamodels import (
 )
 from activetigger.generation.generations import Generations
 from activetigger.generation.ollama import Ollama
-from activetigger.orchestrator import orchestrator
+from activetigger.orchestrator import get_orchestrator
 from activetigger.project import Project
 
 router = APIRouter(tags=["generation"])
@@ -117,7 +117,7 @@ def postgenerate(
     try:
         project.generations.check_prompts(request.prompt, project.params.cols_context)
         project.start_generation(request, current_user.username)
-        orchestrator.log_action(
+        get_orchestrator().log_action(
             current_user.username,
             "START GENERATE",
             project.params.project_slug,

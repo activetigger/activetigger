@@ -7,7 +7,7 @@ from typing import Optional
 
 import numpy as np
 import torch
-from pandas import DataFrame, Series  # type: ignore[import]
+from pandas import DataFrame, Series
 from sentence_transformers import SentenceTransformer
 
 from activetigger.config import config

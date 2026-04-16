@@ -1,6 +1,6 @@
 from typing import Annotated
 
-import pandas as pd  # type: ignore[import]
+import pandas as pd
 from fastapi import (
     APIRouter,
     Depends,
@@ -19,7 +19,7 @@ from activetigger.datamodels import (
     FeatureModel,
     UserInDBModel,
 )
-from activetigger.orchestrator import orchestrator
+from activetigger.orchestrator import get_orchestrator
 from activetigger.project import Project
 
 router = APIRouter(tags=["features"])
@@ -59,7 +59,7 @@ def post_embeddings(
             feature.parameters,
             current_user.username,
         )
-        orchestrator.log_action(
+        get_orchestrator().log_action(
             current_user.username, f"COMPUTE FEATURE: {feature.type}", project.name
         )
     except Exception as e:
@@ -78,7 +78,9 @@ def delete_feature(
     test_rights(ProjectAction.DELETE, current_user.username, project.name)
     try:
         project.features.delete(name)
-        orchestrator.log_action(current_user.username, f"DELETE FEATURE: {name}", project.name)
+        get_orchestrator().log_action(
+            current_user.username, f"DELETE FEATURE: {name}", project.name
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -94,7 +96,7 @@ def reset_features(
     test_rights(ProjectAction.DELETE, current_user.username, project.name)
     try:
         project.features.reset_features_file()
-        orchestrator.log_action(current_user.username, "RESET FEATURES", project.name)
+        get_orchestrator().log_action(current_user.username, "RESET FEATURES", project.name)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

@@ -8,13 +8,13 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
-import pandas as pd  # type: ignore[import]
+import pandas as pd
 import torch
-from pandas import DataFrame  # type: ignore[import]
-from scipy.stats import entropy  # type: ignore[import]
-from transformers import (  # type: ignore[import]
+from pandas import DataFrame
+from scipy.stats import entropy
+from transformers import (
     AutoModelForSequenceClassification,
-    AutoTokenizer,
+    AutoTokenizer,  # ty: ignore[possibly-missing-import]
 )
 
 from activetigger.data import Data
@@ -347,7 +347,7 @@ class PredictBertMultiClass(BaseTask):
                     outputs = model(**chunk)
                 logits = outputs[0].detach().cpu().numpy()
                 proba = logits_to_probs(logits, kind=self.training_kind)
-                proba_predictions = np.append(proba_predictions, proba, axis=0)  # type: ignore[assignment]
+                proba_predictions = np.append(proba_predictions, proba, axis=0)
                 self.__write_progress(100 * (i + self.batch) / self.df.shape[0])
 
             # transform predictions to clean dataframe

@@ -4,9 +4,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-import pandas as pd  # type: ignore[import]
+import pandas as pd
 from fastapi.responses import FileResponse
-from slugify import slugify  # type: ignore[import]
+from slugify import slugify
 
 from activetigger.config import config
 from activetigger.datamodels import (
@@ -243,7 +243,7 @@ class Bertopic:
             df = pd.read_csv(path_model.joinpath("bertopic_topics.csv"), index_col=0)
             df.columns = df.columns.astype(str)
             df_list = df.reset_index().to_dict(orient="records")
-            return [TopicsOutModel(**item) for item in df_list]  # type: ignore[misc] # ty: ignore[invalid-argument-type]
+            return [TopicsOutModel(**item) for item in df_list]  # ty: ignore[invalid-argument-type]
         else:
             raise FileNotFoundError(f"Model {name} does not exist.")
 

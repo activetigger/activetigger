@@ -11,7 +11,7 @@ import uuid
 from datetime import timezone
 
 # manage the executor
-from loky import get_reusable_executor  # type: ignore[import]
+from loky import get_reusable_executor
 
 from activetigger.datamodels import QueueStateTaskModel, QueueTaskModel
 from activetigger.tasks.base_task import BaseTask
@@ -236,7 +236,8 @@ class Queue:
         self.current = [
             i
             for i in self.current
-            if (datetime.datetime.now(timezone.utc) - i.starting_time).total_seconds() / 3600 < timeout
+            if (datetime.datetime.now(timezone.utc) - i.starting_time).total_seconds() / 3600
+            < timeout
         ]
         if n != len(self.current):
             print(f"Cleaned {n - len(self.current)} processes")

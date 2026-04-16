@@ -3,7 +3,7 @@ from collections.abc import Callable
 from enum import StrEnum
 from pathlib import Path
 
-import pytz  # type: ignore[import-untyped]
+import pytz
 import yaml
 from dotenv import load_dotenv
 

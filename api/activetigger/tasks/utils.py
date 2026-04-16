@@ -1,5 +1,5 @@
 import numpy as np
-from transformers import AutoConfig  # type: ignore[import]
+from transformers import AutoConfig  # ty: ignore[possibly-missing-import]
 
 
 def retrieve_model_max_length(base_model) -> int:

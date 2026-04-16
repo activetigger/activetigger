@@ -10,22 +10,22 @@ from urllib.parse import quote
 
 import bcrypt
 import numpy as np
-import pandas as pd  # type: ignore[import]
+import pandas as pd
 import pandas._libs.missing  # noqa: F401
-import regex  # type: ignore[import]
+import regex
 import spacy
 import torch
 from cryptography.fernet import Fernet
 from pandas import Series
-from sklearn.metrics import (  # type: ignore[import]
+from sklearn.metrics import (
     accuracy_score,
     confusion_matrix,
     f1_score,
     precision_score,
     recall_score,
 )
-from sklearn.preprocessing import OneHotEncoder  # type: ignore[import]
-from slugify import slugify as python_slugify  # type: ignore[import]
+from sklearn.preprocessing import OneHotEncoder
+from slugify import slugify as python_slugify
 from torch import Tensor
 from torch.nn import Sigmoid
 

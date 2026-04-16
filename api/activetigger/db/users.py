@@ -83,7 +83,9 @@ class UsersService:
 
     def get_current_users(self, timespan: int = 600):
         with self.SessionMaker() as session:
-            time_threshold = datetime.datetime.now(timezone.utc) - datetime.timedelta(seconds=timespan)
+            time_threshold = datetime.datetime.now(timezone.utc) - datetime.timedelta(
+                seconds=timespan
+            )
             users = (
                 session.query(Logs.user_name).filter(Logs.time > time_threshold).distinct().all()
             )

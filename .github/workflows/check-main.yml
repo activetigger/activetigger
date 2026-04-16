@@ -24,14 +24,20 @@ jobs:
       - name: Set up Python
         run: uv python install 3.13
 
-      - name: Install the project
-        run: uv sync --locked --all-extras --dev
+      - name: Install dependencies
+        run: make ci
+
+      - name: code format check
+        run: make format
 
       - name: lint check
-        run: uv run ruff check
+        run: make lint
 
       - name: type check
-        run: uv run --with ty ty check
+        run: make typecheck
+
+      - name: run tests
+        run: make test-coverage
 
   check-frontend:
     runs-on: ubuntu-latest

@@ -61,7 +61,9 @@ class ProjectsService:
 
     def add_token(self, token: str, status: str):
         with self.Session.begin() as session:
-            new_token = Tokens(token=token, status=status, time_created=datetime.datetime.now(timezone.utc))
+            new_token = Tokens(
+                token=token, status=status, time_created=datetime.datetime.now(timezone.utc)
+            )
             session.add(new_token)
 
     def get_token_status(self, token: str):

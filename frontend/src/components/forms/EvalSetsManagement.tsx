@@ -130,13 +130,14 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
                     Size of the dataset : <b>{data.data.length - 1}</b>
                   </div>
                   <DataTable<Record<DataType['headers'][number], string | number>>
-                    customStyles={{responsiveWrapper: {
-                      style: {
-                              maxWidth: '600px',
-                              overflowX: 'auto',
-                            },
-                          },
-                        }}
+                    customStyles={{
+                      responsiveWrapper: {
+                        style: {
+                          maxWidth: '600px',
+                          overflowX: 'auto',
+                        },
+                      },
+                    }}
                     columns={data.headers.map((h) => ({
                       name: h,
                       selector: (row) => row[h],
@@ -145,7 +146,7 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
                         return typeof v === 'bigint' ? Number(v) : v;
                       },
                       width: '200px',
-                      wrap:true,
+                      wrap: true,
                     }))}
                     data={
                       data.data.slice(0, 5) as Record<keyof DataType['headers'], string | number>[]

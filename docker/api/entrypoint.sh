@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 set -e
 
 if [ "$MODE" = "dev" ]; then
@@ -8,6 +8,16 @@ else
 fi
 echo "(i) Python version is $(python3 --version)"
 echo "(i) uv version is $(uv --version)"
+
+if [ ! -d "${UV_PROJECT_ENVIRONMENT}/bin" ]; then
+  echo
+  echo " ~"
+  echo " ~ Creating python venv"
+  echo " ~"
+  echo
+  uv venv ${UV_PROJECT_ENVIRONMENT} --clear
+fi
+source ${UV_PROJECT_ENVIRONMENT}/bin/activate
 
 echo
 echo " ~"
@@ -29,10 +39,10 @@ else
 fi
 
 # Check for a config.yaml file in the api directory
-if [ ! -f activetigger/api/config.yaml ]; then
-    if [ -f activetigger/api/config.yaml.sample ]; then
+if [ ! -f /api/config.yaml ]; then
+    if [ -f /api/config.yaml.sample ]; then
         echo "No config.yaml found. Copying config.yaml.sample to config.yaml..."
-        cp activetigger/api/config.yaml.sample activetigger/api/config.yaml
+        cp /api/config.yaml.sample /api/config.yaml
         echo "You can now edit activetigger/api/config.yaml to modify paths for static files and database."
     else
         echo "No config.yaml.sample found in activetigger/api. Please ensure your configuration is set as needed."

@@ -1,20 +1,20 @@
-from pandas import DataFrame  # type: ignore[import]
+from pandas import DataFrame
 
 from activetigger.tasks.base_task import BaseTask
 
 # accelerate UMAP
 try:
-    import cuml  # type: ignore[import-not-found] # ty: ignore[unresolved-import]
+    import cuml  # ty: ignore[unresolved-import]
 
     CUMl_AVAILABLE = True
 except Exception:
     print("CuML not available")
-    cuml = None  # type: ignore[assignment]
+    cuml = None
     CUMl_AVAILABLE = False
-import pandas as pd  # type: ignore[import]
-import umap  # type: ignore[import]
-from sklearn.manifold import TSNE  # type: ignore[import]
-from sklearn.preprocessing import StandardScaler  # type: ignore[import]
+import pandas as pd
+import umap
+from sklearn.manifold import TSNE
+from sklearn.preprocessing import StandardScaler
 
 from activetigger.datamodels import TsneModel, UmapModel
 

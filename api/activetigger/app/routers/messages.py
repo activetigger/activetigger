@@ -12,7 +12,7 @@ from activetigger.app.dependencies import (
     verified_user,
 )
 from activetigger.datamodels import MessagesInModel, MessagesOutModel, UserInDBModel
-from activetigger.orchestrator import orchestrator
+from activetigger.orchestrator import get_orchestrator
 
 router = APIRouter(tags=["messages"])
 
@@ -31,6 +31,7 @@ def get_messages(
     - only for oneself
     """
     try:
+        orchestrator = get_orchestrator()
         if current_user.username == "root":
             return orchestrator.messages.get_messages(kind, from_user, for_user, for_project)
         else:
@@ -51,7 +52,7 @@ def post_message(
     """
     test_rights(ServerAction.MANAGE_SERVER, current_user.username)
     try:
-        orchestrator.messages.add_message(
+        get_orchestrator().messages.add_message(
             user_name=current_user.username, kind=message.kind, content=message.content
         )
     except Exception as e:
@@ -68,6 +69,6 @@ def delete_message(
     """
     test_rights(ServerAction.MANAGE_SERVER, current_user.username)
     try:
-        orchestrator.messages.delete_message(message_id)
+        get_orchestrator().messages.delete_message(message_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

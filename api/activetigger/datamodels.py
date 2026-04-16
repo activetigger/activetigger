@@ -3,9 +3,9 @@ from enum import Enum, StrEnum
 from pathlib import Path
 from typing import Annotated, Any, Callable, Literal, Optional
 
-from pandas import DataFrame  # type: ignore[import]
+from pandas import DataFrame
 from pydantic import BaseModel, BeforeValidator, ConfigDict  # for dataframe
-from sklearn.base import BaseEstimator  # type: ignore[import]
+from sklearn.base import BaseEstimator
 
 # Data model to use of the API
 

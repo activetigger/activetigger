@@ -40,7 +40,14 @@ docker/api/venv/
 docker/api/models/
 docker/api/postgresql/
 
+api/.coverage
 api/.env
+api/.mypy_cache
+api/.pytest_cache
+api/.ruff_cache
+api/.venv
+api/htmlcov
+api/test-data
 
 ## CLAUDE
 CLAUDE.md

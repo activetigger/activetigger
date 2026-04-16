@@ -22,7 +22,7 @@ from activetigger.datamodels import (
     UserModel,
     UserStatistics,
 )
-from activetigger.orchestrator import orchestrator
+from activetigger.orchestrator import get_orchestrator
 
 router = APIRouter(tags=["users"])
 
@@ -33,7 +33,7 @@ def disconnect_user(token: Annotated[str, Depends(oauth2_scheme)]) -> None:
     Revoke user connexion
     """
     try:
-        orchestrator.revoke_access_token(token)
+        get_orchestrator().revoke_access_token(token)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
@@ -59,7 +59,7 @@ def existing_users(
     Get existing users
     """
     try:
-        return orchestrator.users.existing_users(current_user.username)
+        return get_orchestrator().users.existing_users(current_user.username)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
@@ -69,7 +69,7 @@ def recent_users() -> int:
     """
     Get the number of recently connected users
     """
-    return len(orchestrator.db_manager.users_service.get_current_users(300))
+    return len(get_orchestrator().db_manager.users_service.get_current_users(300))
 
 
 @router.post("/users/create", dependencies=[Depends(verified_user)], tags=["users"])
@@ -82,7 +82,7 @@ def create_user(
     """
     test_rights(ServerAction.MANAGE_USERS, current_user.username)
     try:
-        orchestrator.users.add_user(new_user, current_user.username)
+        get_orchestrator().users.add_user(new_user, current_user.username)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
@@ -98,7 +98,7 @@ def delete_user(
     """
     test_rights(ServerAction.MANAGE_USERS, current_user.username)
     try:
-        orchestrator.users.delete_user(user_to_delete, current_user.username)
+        get_orchestrator().users.delete_user(user_to_delete, current_user.username)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
@@ -112,7 +112,7 @@ def change_password(
     Change our own password for an account
     """
     try:
-        orchestrator.users.change_password(
+        get_orchestrator().users.change_password(
             current_user.username, changepwd.pwdold, changepwd.pwd1, changepwd.pwd2
         )
     except Exception as e:
@@ -133,6 +133,7 @@ def set_auth(
         if not auth.status:
             raise HTTPException(status_code=400, detail="Missing status")
         try:
+            orchestrator = get_orchestrator()
             orchestrator.users.set_auth(auth)
             orchestrator.log_action(current_user.username, f"ADD AUTH USER: {auth.username}", "all")
         except Exception as e:
@@ -142,6 +143,7 @@ def set_auth(
 
     if action == "delete":
         try:
+            orchestrator = get_orchestrator()
             orchestrator.users.delete_auth(auth.username, auth.project_slug)
             orchestrator.log_action(
                 current_user.username, f"DELETE AUTH USER: {auth.username}", "all"
@@ -163,7 +165,7 @@ def get_statistics(
     """
     test_rights(ServerAction.MANAGE_USERS, current_user.username)
     try:
-        return orchestrator.users.get_statistics(username)
+        return get_orchestrator().users.get_statistics(username)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
@@ -171,6 +173,6 @@ def get_statistics(
 @router.post("/users/resetpwd", tags=["users"])
 def reset_password(mail: str) -> None:
     try:
-        orchestrator.users.reset_password(mail)
+        get_orchestrator().users.reset_password(mail)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e

@@ -4,9 +4,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import pandas as pd  # type: ignore[import]
-import pyarrow.parquet as pq  # type: ignore[import]
-import regex  # type: ignore[import]
+import pandas as pd
+import pyarrow.parquet as pq
+import regex
 from pandas import DataFrame, Series
 
 from activetigger.config import config
@@ -223,7 +223,7 @@ class Features:
             new_content = pd.DataFrame(new_content)
 
         # change column name with a prefix
-        new_content.columns = [f"{name}__{i}" for i in new_content.columns]  # type: ignore[assignment,union-attr] # ty: ignore[invalid-assignment]
+        new_content.columns = [f"{name}__{i}" for i in new_content.columns]  # ty: ignore[invalid-assignment]
 
         # read data, add the feature to the dataset and save
         content = pd.read_parquet(self.path_features)
@@ -465,7 +465,7 @@ class Features:
                 column = column.apply(str)
                 column_encoded = pd.get_dummies(
                     column, prefix=parameters["dataset_col"], drop_first=True
-                )  # type: ignore[misc]
+                )
 
             # add the feature to the project
             parameters = {

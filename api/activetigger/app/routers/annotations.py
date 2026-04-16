@@ -21,7 +21,7 @@ from activetigger.datamodels import (
     UserInDBModel,
     WaitingModel,
 )
-from activetigger.orchestrator import orchestrator
+from activetigger.orchestrator import get_orchestrator
 from activetigger.project import Project
 
 router = APIRouter(tags=["annotations"])
@@ -92,7 +92,7 @@ def compute_projection(
             features=features,
             normalize_features=projection.normalize_features,
         )
-        orchestrator.log_action(
+        get_orchestrator().log_action(
             current_user.username,
             f"COMPUTE PROJECTION: {projection.method}",
             project.project_slug,
@@ -131,7 +131,7 @@ def post_list_elements(
     test_rights(ProjectAction.UPDATE, current_user.username, project.name)
     try:
         errors = project.schemes.push_annotations_table(table, current_user.username)
-        orchestrator.log_action(
+        get_orchestrator().log_action(
             current_user.username,
             f"UPDATE BATCH ANNOTATIONS in project {project.name} N={len(table.annotations)} annotations ({len(errors or [])} errors)",
             project.name,
@@ -157,7 +157,7 @@ def post_annotation_file(
         project.schemes.add_file_annotations(
             annotationsdata=annotationsdata, user=current_user.username
         )
-        orchestrator.log_action(
+        get_orchestrator().log_action(
             current_user.username,
             f"LOAD ANNOTATION FROM FILE: scheme {annotationsdata.scheme}",
             project.name,
@@ -222,7 +222,7 @@ def post_reconciliation(
     test_rights(ProjectAction.ADD, current_user.username, project.name)
     try:
         project.schemes.reconciliate_element(element, current_user.username)
-        orchestrator.log_action(
+        get_orchestrator().log_action(
             current_user.username,
             f"RECONCILIATE ANNOTATION: in {element.scheme} element {element.element_id} as {element.label}",
             project.name,
@@ -262,7 +262,7 @@ def post_annotation(
                 annotation.selection,
             )
 
-            orchestrator.log_action(
+            get_orchestrator().log_action(
                 current_user.username,
                 f"ADD ANNOTATION: in {annotation.scheme} element {annotation.element_id} as {annotation.label} ({annotation.dataset})",
                 project.name,
@@ -281,7 +281,7 @@ def post_annotation(
                 current_user.username,
             )
 
-            orchestrator.log_action(
+            get_orchestrator().log_action(
                 current_user.username,
                 f"DELETE ANNOTATION: in {annotation.scheme} id {annotation.element_id}",
                 project.name,

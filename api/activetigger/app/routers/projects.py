@@ -26,7 +26,7 @@ from activetigger.datamodels import (
     UserInDBModel,
 )
 from activetigger.functions import slugify
-from activetigger.orchestrator import orchestrator
+from activetigger.orchestrator import get_orchestrator
 from activetigger.project import Project
 
 router = APIRouter(tags=["projects"])
@@ -42,7 +42,7 @@ def close_project(
     """
     test_rights(ServerAction.CREATE_PROJECT, current_user.username)
     try:
-        orchestrator.stop_project(project_slug)
+        get_orchestrator().stop_project(project_slug)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -70,6 +70,7 @@ def get_project_auth(
     """
     Users auth on a project
     """
+    orchestrator = get_orchestrator()
     if not orchestrator.exists(project_slug):
         raise HTTPException(status_code=404, detail="Project doesn't exist")
     test_rights(ProjectAction.MONITOR, current_user.username, project_slug)
@@ -87,6 +88,7 @@ def new_project(
     """
     Start the creation of a new project
     """
+    orchestrator = get_orchestrator()
     test_rights(ServerAction.CREATE_PROJECT, current_user.username)
     try:
         project_slug = orchestrator.starting_project_creation(
@@ -122,7 +124,7 @@ def update_project(
     test_rights(ProjectAction.UPDATE, current_user.username, project.project_slug)
     try:
         project.start_update_project(update, current_user.username)
-        orchestrator.log_action(
+        get_orchestrator().log_action(
             current_user.username,
             f"INFO UPDATE PROJECT: {project.project_slug}",
             project.project_slug,
@@ -144,6 +146,7 @@ def delete_project(
     """
     test_rights(ServerAction.DELETE_PROJECT, current_user.username, project_slug)
     try:
+        orchestrator = get_orchestrator()
         orchestrator.delete_project(project_slug)
         orchestrator.log_action(
             current_user.username, f"DELETE PROJECT: {project_slug}", project_slug
@@ -163,6 +166,7 @@ def get_project_status(
     - existing
     """
     try:
+        orchestrator = get_orchestrator()
         slug = slugify(project_name)
         # if project is in creation
         if slug in orchestrator.project_creation_ongoing:
@@ -191,7 +195,7 @@ def delete_evalset(
     test_rights(ProjectAction.UPDATE, current_user.username, project.project_slug)
     try:
         project.drop_evalset(dataset=dataset)
-        orchestrator.log_action(
+        get_orchestrator().log_action(
             current_user.username, f"DELETE EVALSET {dataset}", project.project_slug
         )
     except Exception as e:
@@ -214,7 +218,7 @@ def add_testdata(
         if evalset is None:
             raise Exception("No evalset sent")
         project.add_evalset(dataset, evalset, current_user.username, project.project_slug)
-        orchestrator.log_action(
+        get_orchestrator().log_action(
             current_user.username, f"ADD EVALSET {dataset}", project.project_slug
         )
         return None
@@ -231,6 +235,7 @@ def get_projects(
     depending of the status of connected user
     """
     try:
+        orchestrator = get_orchestrator()
         return AvailableProjectsModel(
             projects=orchestrator.users.get_user_projects(current_user.username),
             storage_used=orchestrator.users.get_storage(current_user.username),
@@ -249,6 +254,7 @@ def get_project_datasets(
     Get all datasets already available for a specific user
     """
     try:
+        orchestrator = get_orchestrator()
         toy_datasets = orchestrator.get_toy_datasets() if include_toy_datasets else []
         auth_datasets = orchestrator.users.get_auth_datasets(current_user.username)
         return auth_datasets, toy_datasets

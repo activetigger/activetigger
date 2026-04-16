@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional, Tuple, cast
 
-import pandas as pd  # type: ignore[import]
+import pandas as pd
 from fastapi.responses import FileResponse
 from pandas import DataFrame
 

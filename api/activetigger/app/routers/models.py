@@ -20,7 +20,7 @@ from activetigger.datamodels import (
     TextDatasetModel,
     UserInDBModel,
 )
-from activetigger.orchestrator import orchestrator
+from activetigger.orchestrator import get_orchestrator
 from activetigger.project import Project
 
 router = APIRouter(tags=["models"])
@@ -38,7 +38,7 @@ def train_quickmodel(
     test_rights(ProjectAction.ADD, current_user.username, project.name)
     try:
         project.train_quickmodel(quickmodel, current_user.username)
-        orchestrator.log_action(
+        get_orchestrator().log_action(
             current_user.username, f"TRAIN SIMPLE MODEL {quickmodel.name}", project.name
         )
     except Exception as e:
@@ -58,7 +58,9 @@ def retrain_quickmodel(
     test_rights(ProjectAction.GET, current_user.username, project.name)
     try:
         project.retrain_quickmodel(name, scheme, current_user.username)
-        orchestrator.log_action(current_user.username, f"RETRAIN SIMPLE MODEL {name}", project.name)
+        get_orchestrator().log_action(
+            current_user.username, f"RETRAIN SIMPLE MODEL {name}", project.name
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -75,7 +77,7 @@ def delete_quickmodel(
     test_rights(ProjectAction.DELETE, current_user.username, project.name)
     try:
         project.quickmodels.delete(name)
-        orchestrator.log_action(
+        get_orchestrator().log_action(
             current_user.username, f"DELETE SIMPLE MODEL + FEATURES: {name}", project.name
         )
     except Exception as e:
@@ -95,7 +97,7 @@ def rename_quickmodel(
     test_rights(ProjectAction.UPDATE, current_user.username, project.name)
     try:
         project.quickmodels.rename(former_name, new_name)
-        orchestrator.log_action(
+        get_orchestrator().log_action(
             current_user.username,
             f"INFO RENAME QUICK MODEL: {former_name} -> {new_name}",
             project.name,
@@ -226,7 +228,7 @@ def predict(
                 scheme_name=scheme,
                 model_name=model_name,
             )
-        orchestrator.log_action(
+        get_orchestrator().log_action(
             current_user.username,
             f"PREDICT MODEL: {model_name} - {kind} DATASET: {dataset_type}",
             project.name,
@@ -247,6 +249,7 @@ def post_bert(
     """
     test_rights(ProjectAction.ADD, current_user.username, project.name)
     try:
+        orchestrator = get_orchestrator()
         if not orchestrator.available_storage(current_user.username):
             raise HTTPException(
                 status_code=403,
@@ -281,7 +284,7 @@ def delete_bert(
         # delete the features associated with the model
         for f in [i for i in project.features.map.keys() if bert_name.replace("__", "_") in i]:
             project.features.delete(f)
-        orchestrator.log_action(
+        get_orchestrator().log_action(
             current_user.username, f"DELETE MODEL + FEATURES: {bert_name}", project.name
         )
     except Exception as e:
@@ -301,7 +304,7 @@ def rename_bert(
     test_rights(ProjectAction.UPDATE, current_user.username, project.name)
     try:
         project.languagemodels.rename(former_name, new_name)
-        orchestrator.log_action(
+        get_orchestrator().log_action(
             current_user.username,
             f"INFO RENAME MODEL: {former_name} -> {new_name}",
             project.name,
