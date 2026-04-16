@@ -208,7 +208,7 @@ def add_testdata(
     current_user: Annotated[UserInDBModel, Depends(verified_user)],
     dataset: str,
     evalset: EvalSetDataModel,
-) -> None:
+) -> str | None:
     """
     Delete existing eval/test dataset or
     Add a dataset for eval/test when there is none available
@@ -217,11 +217,11 @@ def add_testdata(
     try:
         if evalset is None:
             raise Exception("No evalset sent")
-        project.add_evalset(dataset, evalset, current_user.username, project.project_slug)
+        id = project.add_evalset(dataset, evalset, current_user.username, project.project_slug)
         get_orchestrator().log_action(
             current_user.username, f"ADD EVALSET {dataset}", project.project_slug
         )
-        return None
+        return id
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
