@@ -1,17 +1,20 @@
-import { FC, useEffect, useState } from 'react';
+import { FC, useCallback, useEffect, useRef, useState } from 'react';
 import DataTable from 'react-data-table-component';
 import { Controller, SubmitHandler, useForm, useWatch } from 'react-hook-form';
 import Select from 'react-select';
 
 import { omit } from 'lodash';
 import { unparse } from 'papaparse';
-import { useCreateValidSet, useDropEvalSet } from '../../core/api';
+import { useCreateValidSet, useDropEvalSet, useStopProcesses } from '../../core/api';
 import { useNotifications } from '../../core/notifications';
 import { loadFile } from '../../core/utils';
+import { useAppContext } from '../../core/useAppContext';
 
 import { Modal } from 'react-bootstrap';
 import { useNavigate } from 'react-router-dom';
 import { EvalSetModel } from '../../types';
+
+import { UploadProgressBar } from '../UploadProgressBar';
 
 // format of the data table
 export interface DataType {
@@ -41,17 +44,118 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
       defaultValues: { scheme: currentScheme },
     },
   );
+  const { appContext: { currentProject } } = useAppContext();
+  const proj_errors = currentProject?.errors || [];
 
-  const createValidSet = useCreateValidSet(); // API call
+  const { progression, createValidSet, cancel } = useCreateValidSet(); // API call
   const { notify } = useNotifications();
 
   const dropEvalSet = useDropEvalSet(projectSlug); // API call to drop existing test set
+  const { stopProcesses } = useStopProcesses(projectSlug); //API call to stop the current process of adding evalset
   const navigate = useNavigate(); // for navigation after drop
 
   const [alertDrop, setAlertDrop] = useState<boolean>(false);
 
+
   const [data, setData] = useState<DataType | null>(null);
   const files = useWatch({ control, name: 'files' });
+  //Local storage variables
+  const add_eval_storageKey = `add-evalset-${dataset}-${projectSlug}`; //
+  //const processIdKey = `evalset-process-id-${dataset}-${projectSlug}`;//will be unused
+
+  //Uploading State
+  const [uploading, setUploading] = useState<boolean>(() => sessionStorage.getItem(add_eval_storageKey) === 'true');
+  const uploadingRef = useRef(uploading);
+  const cancelRef = useRef(cancel);
+  //Controller state
+  const [displayCancel, setDisplayCancel] = useState<AbortController | undefined>(undefined);
+  //Task Errors Management 
+  const errorCountAtSubmit = useRef(0);
+  //Set Max Duration
+  const maxDuration = 5 * 60 * 1000; // 5 minutes in milliseconds
+
+  //no old error that may block the workflow
+  console.log("proj", proj_errors)
+
+  //handle uploading
+  const isUploading = useCallback((val: boolean) => {
+    console.trace('isUploading', val);
+    if (!val) { cancelRef.current = undefined; errorCountAtSubmit.current = 0; }
+    val ? sessionStorage.setItem(add_eval_storageKey, 'true') : sessionStorage.removeItem(add_eval_storageKey);
+    setUploading(val);
+  }, [add_eval_storageKey]);
+
+  //sync uploadref with state
+  useEffect(() => { uploadingRef.current = uploading; }, [uploading]);
+
+  //case set exist :
+  console.log(dataset, exist);
+  useEffect(() => {
+    if (exist && uploadingRef.current) {
+      isUploading(false);
+    }
+  }, [exist]);
+
+  //Error Management : handle errors from backend
+  useEffect(() => {
+    if (!uploading) return;
+    const newErrors = proj_errors.slice(errorCountAtSubmit.current);
+    const evalsetError = [...newErrors].reverse().find((e) => Array.isArray(e) && (e[0] as string).includes(`add_evalset_${dataset}`));
+    if (evalsetError) {
+      notify({ type: 'error', message: (evalsetError as string[]).join('-') });
+      isUploading(false);
+      setTimeout(() => { navigate(0); }, 750);
+    }
+  }, [proj_errors, uploading]);
+
+  //handle Timeout :if task surpasses 5 minutes (Case of server resrtart or shut down)
+  useEffect(() => {
+    if (!uploading) return;
+
+    const timer = setTimeout(() => {
+      console.warn('Upload timeout reached');
+      isUploading(false);
+    }, maxDuration);
+
+    return () => clearTimeout(timer);
+  }, [uploading, isUploading, maxDuration]
+  );
+
+  //setting the id 
+  //useEffect(() => {if (id) sessionStorage.setItem(processIdKey, id);}, [id]);
+
+  //Cancel
+  useEffect(() => {
+    cancelRef.current = cancel;
+    setDisplayCancel(cancel);
+  }, [cancel])
+
+  //Handle cancel signal
+  useEffect(() => {
+    if (!uploading) {
+      return;
+    }
+    const stop = () => {
+      //const currentId = sessionStorage.getItem(processIdKey);
+      stopProcesses(`add_evalset_${dataset}`);
+      //sessionStorage.removeItem(processIdKey);
+      isUploading(false);
+      //refresh
+      setTimeout(() => { navigate(0); }, 750);
+    };
+    if (cancel?.signal) {
+      const signal = cancel.signal;
+      signal.addEventListener('abort', stop);
+      return () => { signal.removeEventListener('abort', stop); };
+    }
+    const n_cancel = new AbortController();
+    cancelRef.current = n_cancel;
+    setDisplayCancel(n_cancel);
+    n_cancel.signal.addEventListener('abort', stop);
+    return () => { n_cancel.signal.removeEventListener('abort', stop); };
+  }, [cancel, uploading]);
+
+
   // available columns
   const columns = data?.headers.map((h) => (
     <option key={`${h}`} value={`${h}`}>
@@ -84,18 +188,26 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
       }
       const csv = data ? unparse(data.data, { header: true, columns: data.headers }) : '';
       formData.scheme = currentScheme;
-      await createValidSet(projectSlug, dataset, {
-        ...omit(formData, 'files'),
-        csv,
-        filename: data.filename,
-      });
+      errorCountAtSubmit.current = proj_errors.length;
+      isUploading(true);
+      try {
+        const res = await createValidSet(projectSlug, dataset, {
+          ...omit(formData, 'files'),
+          csv,
+          filename: data.filename,
+        });
+        if (!res) { isUploading(false); }//sessionStorage.removeItem(processIdKey);}
+      }
+      catch (e) {
+        isUploading(false);
+        notify({ type: 'error', message: 'Failed to start the process' });
+      }
     }
   };
 
   const capFirstLetter = (word: string) => {
     return word.charAt(0).toUpperCase() + word.slice(1);
   };
-
   return (
     <div>
       <h4 className="subsection">{capFirstLetter(dataset)} set</h4>
@@ -196,14 +308,19 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
                   <label htmlFor="n_test">Number of rows to import</label>
                   <input id="n_test" type="number" {...register('n_eval')} />
 
-                  <button type="submit" className="btn-submit">
-                    Create
+                  <button type="submit" className="btn-submit" disabled={uploading}>
+                    {uploading ? 'Uploading File ...' : 'Create'}
                   </button>
                 </div>
               )
             }
           </div>
         </form>
+      )}
+      {uploading && (
+        <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 10 }}>
+          <UploadProgressBar progression={progression} cancel={cancel || displayCancel} />
+        </div>
       )}
       <Modal show={alertDrop} onHide={() => setAlertDrop(false)}>
         <Modal.Header closeButton>

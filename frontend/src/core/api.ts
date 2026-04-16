@@ -252,19 +252,30 @@ export function useCreateProject() {
  */
 export function useCreateValidSet() {
   const { notify } = useNotifications();
-  const createTestSet = useCallback(
-    async (projectSlug: string, dataset: string, testset: EvalSetDataModel) => {
-      const res = await api.POST('/projects/evalset/add', {
-        params: {
-          query: { project_slug: projectSlug, dataset: dataset },
-        },
-        body: testset,
+  const { authenticatedUser } = useAuth();
+  const [controller, setController] = useState<AbortController | undefined>(undefined);
+  const [progression, setProgression] = useState<{ loaded?: number; total?: number }>({});
+  const createValidSet = useCallback(async (projectSlung: string, dataset: string, testset: EvalSetDataModel) => {
+    const controller = new AbortController();
+    setController(controller);
+    const URL = config.api.url.replace(/\/$/, '');
+    const base = { headers: getAuthHeaders(authenticatedUser)?.headers, params: { project_slug: projectSlung, dataset } };
+    try {
+      const res = await axios.post(`${URL}/projects/evalset/add`, testset, {
+        ...base,
+        signal: controller.signal,
+        onUploadProgress: ({ loaded, total }) => setProgression({ loaded, total }),
       });
-      if (!res.error) notify({ type: 'success', message: 'Test data set uploaded!' });
-    },
-    [notify],
+      //setId(res.data);
+      console.log("res.data", res.data);
+      return true;
+    } catch (error: any) {
+      notify({ type: 'error', message: formatApiError(error) });
+      return false;
+    }
+  }, [notify, authenticatedUser],
   );
-  return createTestSet;
+  return { createValidSet, progression, cancel: controller };
 }
 
 /**
