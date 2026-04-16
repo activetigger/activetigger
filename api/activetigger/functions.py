@@ -377,16 +377,16 @@ def get_metrics_multiclass(
     recall_label = [round(score, decimals) for score in recall_label]
 
     # Compute score averaged (micro, macro, weighted) --- --- --- --- --- --- --
-    f1_weighted = f1_score(Y_true, Y_pred, average="weighted", zero_division=1)
+    f1_weighted = f1_score(Y_true, Y_pred, average="weighted", labels=labels, zero_division=1)
     f1_weighted = round(f1_weighted, decimals)
 
-    f1_macro = f1_score(Y_true, Y_pred, average="macro", zero_division=1)
+    f1_macro = f1_score(Y_true, Y_pred, average="macro", labels=labels, zero_division=1)
     f1_macro = round(f1_macro, decimals)
 
-    f1_micro = f1_score(Y_true, Y_pred, average="micro", zero_division=1)
+    f1_micro = f1_score(Y_true, Y_pred, average="micro", labels=labels, zero_division=1)
     f1_micro = round(f1_micro, decimals)
 
-    precision_micro = precision_score(Y_true, Y_pred, average="micro", zero_division=1)
+    precision_micro = precision_score(Y_true, Y_pred, average="micro", labels=labels, zero_division=1)
     precision_micro = round(precision_micro, decimals)
 
     accuracy = accuracy_score(Y_true, Y_pred)
