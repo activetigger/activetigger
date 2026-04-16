@@ -468,6 +468,7 @@ class Project:
                         for t in self.queue.current
                         if t.kind == "add_evalset"
                         and t.project_slug == project_slug
+                        and isinstance(t.task, AddEvalSet)
                         and t.task.dataset == dataset
                     ),
                     None,
