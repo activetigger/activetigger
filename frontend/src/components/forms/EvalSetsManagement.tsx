@@ -97,7 +97,6 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
   //sync uploadref with state
   useEffect(() => {
     uploadingRef.current = uploading;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uploading]);
 
   //case set exist :
