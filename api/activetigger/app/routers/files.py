@@ -24,7 +24,7 @@ from activetigger.config import config
 from activetigger.datamodels import (
     UserInDBModel,
 )
-from activetigger.orchestrator import orchestrator
+from activetigger.orchestrator import get_orchestrator
 from activetigger.project import Project
 
 router = APIRouter(tags=["files"])
@@ -42,6 +42,7 @@ def upload_file_project(
     use: type de file
     """
     test_rights(ServerAction.CREATE_PROJECT, current_user.username)
+    orchestrator = get_orchestrator()
 
     # add a delay if projects are already being created
     if len(orchestrator.project_creation_ongoing) >= 3:
@@ -84,8 +85,8 @@ def upload_file_project(
 
     except Exception as e:
         # if failed, remove the project folder
-        if project_path.exists():
-            shutil.rmtree(project_path)
+        if project_path.exists():  # ty: ignore[possibly-unresolved-reference]
+            shutil.rmtree(project_path)  # ty: ignore[possibly-unresolved-reference]
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -131,6 +132,8 @@ def copy_existing_data(
     """
     test_rights(ServerAction.CREATE_PROJECT, current_user.username)
 
+    orchestrator = get_orchestrator()
+
     # check if the project does not already exist
     if orchestrator.exists(project_name):
         raise HTTPException(
@@ -155,6 +158,6 @@ def copy_existing_data(
 
     except Exception as e:
         # if failed, remove the project folder
-        if project_path.exists():
-            shutil.rmtree(project_path)
+        if project_path.exists():  # ty: ignore[possibly-unresolved-reference]
+            shutil.rmtree(project_path)  # ty: ignore[possibly-unresolved-reference]
         raise HTTPException(status_code=500, detail=str(e))

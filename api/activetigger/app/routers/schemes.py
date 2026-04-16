@@ -14,7 +14,7 @@ from activetigger.datamodels import (
     SchemeModel,
     UserInDBModel,
 )
-from activetigger.orchestrator import orchestrator
+from activetigger.orchestrator import get_orchestrator
 from activetigger.project import Project
 
 router = APIRouter()
@@ -35,7 +35,7 @@ def rename_label(
 
     try:
         project.schemes.rename_label(former_label, new_label, scheme, current_user.username)
-        orchestrator.log_action(
+        get_orchestrator().log_action(
             current_user.username,
             f"RENAME LABEL: scheme:{scheme} before:{former_label} after:{new_label}",
             project.name,
@@ -61,7 +61,7 @@ def add_label(
         try:
             project.schemes.add_label(label, scheme, current_user.username)
 
-            orchestrator.log_action(
+            get_orchestrator().log_action(
                 current_user.username,
                 f"ADD LABEL: scheme:{scheme} label:{label}",
                 project.name,
@@ -74,7 +74,7 @@ def add_label(
         test_rights(ProjectAction.DELETE, current_user.username, project.name)
         try:
             project.schemes.delete_label(label, scheme, current_user.username)
-            orchestrator.log_action(
+            get_orchestrator().log_action(
                 current_user.username,
                 f"DELETE LABEL: scheme:{scheme} label:{label}",
                 project.name,
@@ -99,7 +99,7 @@ def post_codebook(
 
     try:
         project.schemes.add_codebook(codebook.scheme, codebook.content, codebook.time)
-        orchestrator.log_action(
+        get_orchestrator().log_action(
             current_user.username,
             f"MODIFY CODEBOOK: scheme {codebook.scheme}",
             project.name,
@@ -138,7 +138,7 @@ def rename_scheme(
     test_rights(ProjectAction.UPDATE, current_user.username, project.name)
     try:
         project.schemes.rename_scheme(old_name, new_name)
-        orchestrator.log_action(
+        get_orchestrator().log_action(
             current_user.username,
             f"RENAME SCHEME: {old_name} to {new_name}",
             project.name,
@@ -160,7 +160,7 @@ def duplicate_scheme(
     test_rights(ProjectAction.ADD, current_user.username, project.name)
     try:
         project.schemes.duplicate_scheme(scheme_name, scheme_name + "_copy", current_user.username)
-        orchestrator.log_action(
+        get_orchestrator().log_action(
             current_user.username,
             f"DUPLICATE SCHEME: {scheme_name}",
             project.name,
@@ -198,6 +198,7 @@ def post_schemes(
     """
     Add, Update or Delete scheme
     """
+    orchestrator = get_orchestrator()
     if action == "add":
         test_rights(ProjectAction.ADD, current_user.username, project.name)
         try:

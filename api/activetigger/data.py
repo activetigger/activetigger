@@ -61,7 +61,7 @@ class Data:
         """
         Strips any leading/trailing white spaces in columns
         """
-        cols = cast(list[str], df.select_dtypes(include="str"))  # type: ignore[assignment]
+        cols = cast(list[str], df.select_dtypes(include="str"))
         for col in cols:
             df[col] = df[col].str.strip()
         return df

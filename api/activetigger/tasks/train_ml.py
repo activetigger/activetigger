@@ -8,10 +8,10 @@ from datetime import timezone
 from pathlib import Path
 
 import numpy as np
-import pandas as pd  # type: ignore[import]
-from scipy.stats import entropy  # type: ignore[import]
-from sklearn.base import BaseEstimator  # type: ignore[import]
-from sklearn.model_selection import (  # type: ignore[import]
+import pandas as pd
+from scipy.stats import entropy
+from sklearn.base import BaseEstimator
+from sklearn.model_selection import (
     KFold,
     cross_val_predict,
 )
@@ -233,7 +233,9 @@ class TrainMLMultiClass(BaseTask):
 
         X_for_training, Y_for_training = self.__check_data(self.X, self.Y, self.exclude_labels)
 
-        X_train, X_test, Y_train, Y_test = self.__split_set(X_for_training, Y_for_training, self.test_size)
+        X_train, X_test, Y_train, Y_test = self.__split_set(
+            X_for_training, Y_for_training, self.test_size
+        )
         task_timer.stop("setup")
 
         self._check_cancelled()
@@ -254,7 +256,9 @@ class TrainMLMultiClass(BaseTask):
             Y_pred_test = pd.Series(self.model.predict(X_test), index=X_test.index)  # ty: ignore[unresolved-attribute]
         except Exception as e:
             raise Exception(
-                (f"Problem computing predictions after fitting (TrainMLMultiClass.__call__)\nError: {e}")
+                (
+                    f"Problem computing predictions after fitting (TrainMLMultiClass.__call__)\nError: {e}"
+                )
             )
 
         # compute probabilities for all data
@@ -269,7 +273,9 @@ class TrainMLMultiClass(BaseTask):
                 prob_A_not_A = np.column_stack([proba[label], 1 - proba[label]])
                 proba[f"entropy-{label}"] = entropy(prob_A_not_A, axis=1)
         except Exception as e:
-            raise Exception((f"Problem calculating the entropy (TrainMLMultiClass.__call__)\nError: {e}"))
+            raise Exception(
+                (f"Problem calculating the entropy (TrainMLMultiClass.__call__)\nError: {e}")
+            )
 
         self._check_cancelled()
 
@@ -279,7 +285,9 @@ class TrainMLMultiClass(BaseTask):
             metrics_test = self.__compute_metrics(y_true=Y_test, y_pred=Y_pred_test)
             task_timer.stop("evaluate")
         except Exception as e:
-            raise Exception((f"Problem computing the metrics (TrainMLMultiClass.__call__)\nError: {e}"))
+            raise Exception(
+                (f"Problem computing the metrics (TrainMLMultiClass.__call__)\nError: {e}")
+            )
 
         self._check_cancelled()
 
@@ -290,7 +298,9 @@ class TrainMLMultiClass(BaseTask):
                 task_timer.stop("cv10")
             except Exception as e:
                 raise Exception(
-                    (f"Problem computing the cross valisation (TrainMLMultiClass.__compute_cv10)\nError: {e}")
+                    (
+                        f"Problem computing the cross valisation (TrainMLMultiClass.__compute_cv10)\nError: {e}"
+                    )
                 )
         else:
             statistics_cv10 = None

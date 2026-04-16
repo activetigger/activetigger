@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi.responses import FileResponse
-from pandas import DataFrame  # type: ignore[import]
+from pandas import DataFrame
 
 from activetigger.datamodels import (
     ProjectionComputing,

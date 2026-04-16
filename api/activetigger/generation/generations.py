@@ -1,7 +1,7 @@
 import re
 from typing import cast
 
-import pandas as pd  # type: ignore[import]
+import pandas as pd
 from pandas import DataFrame
 
 from activetigger.datamodels import (  # ignore[import]

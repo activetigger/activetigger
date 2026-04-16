@@ -1,9 +1,9 @@
 import os
 from pathlib import Path
 
-import fasttext  # type: ignore[import]
-import pandas as pd  # type: ignore[import]
-from fasttext.util import download_model  # type: ignore[import]
+import fasttext
+import pandas as pd
+from fasttext.util import download_model
 from pandas import DataFrame, Series
 
 from activetigger.functions import tokenize
@@ -78,5 +78,5 @@ class ComputeFasttext(BaseTask):
         # emb = [ft.get_sentence_vector(t.replace("\n", " ")) for t in texts_tk]
         df = pd.DataFrame(emb, index=self.texts.index)
         # WARN: this seems strange. Maybe replace with a more explicit syntax
-        df.columns = ["ft%03d" % (x + 1) for x in range(len(df.columns))]  # type: ignore[assignment]
+        df.columns = ["ft%03d" % (x + 1) for x in range(len(df.columns))]
         return df

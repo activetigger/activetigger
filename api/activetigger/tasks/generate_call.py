@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from pandas import DataFrame, Series  # type: ignore[import]
+from pandas import DataFrame, Series
 
 from activetigger.datamodels import (
     GenerationModel,

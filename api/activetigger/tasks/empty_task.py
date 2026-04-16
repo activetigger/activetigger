@@ -4,7 +4,6 @@ from activetigger.tasks.base_task import BaseTask
 
 
 class EmptyTask(BaseTask):
-
     def __init__(self, timeout: int = 60):
         self.timeout = timeout
         super().__init__()

@@ -8,13 +8,13 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-import pandas as pd  # type: ignore[import]
+import pandas as pd
 from pandas import DataFrame
-from sklearn.ensemble import RandomForestClassifier  # type: ignore[import]
-from sklearn.linear_model import LogisticRegression  # type: ignore[import]
-from sklearn.naive_bayes import MultinomialNB  # type: ignore[import]
-from sklearn.neighbors import KNeighborsClassifier  # type: ignore[import]
-from sklearn.preprocessing import StandardScaler  # type: ignore[import]
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.preprocessing import StandardScaler
 
 from activetigger.config import config
 from activetigger.datamodels import (
@@ -182,7 +182,7 @@ class QuickModels:
 
         # launch the compuation (model + statistics) as a future process
         args = {
-            "model": model,
+            "model": model,  # ty: ignore[possibly-unresolved-reference]
             "X": X,
             "Y": Y,
             "labels": labels,

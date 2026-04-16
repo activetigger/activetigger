@@ -1,6 +1,6 @@
-import pandas as pd  # type: ignore[import]
-from pandas import DataFrame, Series  # type: ignore[import]
-from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer  # type: ignore[import]
+import pandas as pd
+from pandas import DataFrame, Series
+from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
 from spacy.lang.de import German
 from spacy.lang.en import English
 from spacy.lang.es import Spanish

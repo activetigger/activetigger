@@ -16,10 +16,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import cast
 
-import pandas as pd  # type: ignore[import]
-import psutil  # type: ignore[import]
-import pyarrow.parquet as pq  # type: ignore[import]
-from jose import jwt  # type: ignore[import-untyped]
+import pandas as pd
+import psutil
+import pyarrow.parquet as pq
+from jose import jwt
 
 from activetigger import __version__
 from activetigger.config import config
@@ -616,5 +616,11 @@ class Orchestrator:
         return toy_datasets
 
 
-# launch the instance
-orchestrator = Orchestrator()
+orchestrator = None
+
+
+def get_orchestrator():
+    global orchestrator
+    if orchestrator is None:
+        orchestrator = Orchestrator()
+    return orchestrator

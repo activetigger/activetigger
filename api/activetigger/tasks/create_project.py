@@ -4,7 +4,7 @@ import sys
 import zipfile
 from pathlib import Path
 
-import pandas as pd  # type: ignore[import]
+import pandas as pd
 
 from activetigger.datamodels import ProjectBaseModel, ProjectModel
 from activetigger.functions import slugify
@@ -88,7 +88,7 @@ class CreateProject(BaseTask):
         # if no already processed
         if not processed_corpus:
             # rename columns both for data & params to avoid confusion (use internal dataset_ prefix)
-            content.columns = ["dataset_" + i for i in content.columns]  # type: ignore[assignment]
+            content.columns = ["dataset_" + i for i in content.columns]
             if self.params.col_id is not None:
                 self.params.col_id = "dataset_" + self.params.col_id
 

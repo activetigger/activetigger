@@ -52,7 +52,6 @@ dependencies = [
 		"openpyxl>=3.1.5",
 		"ruff>=0.15.5",
 		"black>=26.3.0",
-		"mypy>=1.19.1",
 		"types-python-jose>=3.5.0.20250531",
 		"types-psutil>=7.2.2.20260130",
 		"pandas-stubs>=3.0.0.260204",
@@ -72,6 +71,13 @@ dependencies = [
 		"peft>=0.18.1",
 		"regex>=2024.0.0",
 		"open-clip-torch>=3.3.0",
+]
+
+[dependency-groups]
+dev = [
+    "coverage>=7.13.5",
+    "pytest>=9.0.3",
+    "ty>=0.0.31",
 ]
 
 [tool.ruff]
@@ -118,14 +124,8 @@ unfixable = [
 [tool.ty.src]
 exclude = ["migrations/"]
 
-[tool.mypy]
-python_version = "3.11"
-files = [
-	"activetigger/db/*.py", # Add files each time one is cleaned
-	"activetigger/generation/*.py",
-	"activetigger/projections.py"
-]
-incremental = true
+[tool.ty.rules]
+all = "error"
 
 [tool.uv]
 environments = [
@@ -136,3 +136,14 @@ environments = [
 [tool.uv.sources]
 fr-core-news-sm = { url = "https://github.com/explosion/spacy-models/releases/download/fr_core_news_sm-3.8.0/fr_core_news_sm-3.8.0.tar.gz" }
 en-core-web-sm = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0.tar.gz" }
+
+
+[tool.coverage.run]
+source = ["activetigger"]
+
+[tool.coverage.report]
+show_missing = true
+sort = "-Cover"
+
+[tool.coverage.html]
+show_contexts = true

@@ -29,9 +29,7 @@ class ModelsService:
         """
         with self.SessionMaker() as session:
             models = session.execute(
-                select(
-                    Models.name, Models.parameters, Models.path, Models.scheme_name, Models.time
-                )
+                select(Models.name, Models.parameters, Models.path, Models.scheme_name, Models.time)
                 .filter_by(
                     project_slug=project_slug,
                     status="trained",

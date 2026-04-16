@@ -94,7 +94,7 @@ class Monitoring:
         """
         Start a new monitored process
         """
-        events = {"global":{"start": datetime.now(timezone.utc).isoformat()}}
+        events = {"global": {"start": datetime.now(timezone.utc).isoformat()}}
         self.db_manager.monitoring_service.add_process(
             process_name=process_name,
             kind=kind,
@@ -111,7 +111,7 @@ class Monitoring:
         start_entry = self.db_manager.monitoring_service.get_element_by_process(process_name)
         if start_entry is None:
             raise ValueError(f"Process {process_name} not found")
-        
+
         # Save the duration of the global process
         events = start_entry.events
         end = datetime.now(timezone.utc)
@@ -134,9 +134,7 @@ class Monitoring:
             if ("start" in additional_events.keys()) or ("end" in additional_events.keys()):
                 # We do not want to overwrite the "global"; keys, so we remove them prior to merging
                 additional_events = {
-                    key: value
-                    for key, value in additional_events.items()
-                    if key != "global"
+                    key: value for key, value in additional_events.items() if key != "global"
                 }
             # Merge the events with the additional events
             events.update(additional_events)
