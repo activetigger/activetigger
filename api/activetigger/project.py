@@ -431,7 +431,7 @@ class Project:
         self.db_manager.projects_service.update_project(
             self.params.project_slug, jsonable_encoder(self.params)
         )
-        #add reload 
+        # add reload
         self.data.load_dataset("all")
         # reset the features file
         self.features.reset_features_file()
@@ -444,30 +444,39 @@ class Project:
         Add a eval dataset (test or valid)
         """
         if evalset.cols_text is None or len(evalset.cols_text) == 0:
-            raise Exception ("No text column selected for the evalset")
-        #check the valid directory
+            raise Exception("No text column selected for the evalset")
+        # check the valid directory
         if self.params.dir is None:
-            raise Exception ("Cannot add eval data without a valid dir")
-        #check the labels
-        if evalset.col_label =="":
+            raise Exception("Cannot add eval data without a valid dir")
+        # check the labels
+        if evalset.col_label == "":
             evalset.col_label = None
         if dataset not in ["test", "valid"]:
             raise Exception("Dataset should be test or valid")
-        
+
         if dataset == "test" and self.params.test:
             raise Exception("There is already a test dataset")
-        
+
         if dataset == "valid" and self.params.valid:
             raise Exception("There is already a valid dataset")
         try:
-            #check existing task in the queue → if there is already an add_evalset task for this project and this dataset, we return the status of the task without adding a new one
+            # check existing task in the queue → if there is already an add_evalset task for this project and this dataset, we return the status of the task without adding a new one
             if self.queue.current:
-                add_eval_task= next((t for t in self.queue.current if t.kind=="add_evalset" and t.project_slug == project_slug and t.task.dataset==dataset),None)
+                add_eval_task = next(
+                    (
+                        t
+                        for t in self.queue.current
+                        if t.kind == "add_evalset"
+                        and t.project_slug == project_slug
+                        and t.task.dataset == dataset
+                    ),
+                    None,
+                )
                 if add_eval_task:
-                    raise Exception('this set is already being added')
-                
-            #call task
-            unique_id=self.queue.add_task(
+                    raise Exception("this set is already being added")
+
+            # call task
+            unique_id = self.queue.add_task(
                 "add_evalset",
                 project_slug,
                 AddEvalSet(
@@ -477,7 +486,9 @@ class Project:
                     username=username,
                     index=self.data.get_full_id().index,
                     project_slug=project_slug,
-                    scheme=self.schemes.available()[evalset.scheme].labels if evalset.scheme else None,
+                    scheme=self.schemes.available()[evalset.scheme].labels
+                    if evalset.scheme
+                    else None,
                 ),
                 queue="cpu",
             )
@@ -489,10 +500,10 @@ class Project:
                     kind=f"add_evalset_{dataset}",
                 )
             )
-            if  username=="root":
+            if username == "root":
                 return unique_id
             else:
-                None   
+                None
         except Exception as e:
             raise e
 
@@ -1716,15 +1727,21 @@ class Project:
                         self.bertopic.add(bertopic_model)
                         self.monitoring.close_process(bertopic_model.unique_id, events)
                     case kind if kind.startswith("add_evalset_"):
-                        e=cast(ProcessComputing,e)
+                        e = cast(ProcessComputing, e)
                         if results is not None and len(results) > 0:
                             self.db_manager.projects_service.add_annotations(*results[0])
-                            #update params with the new evalset
-                            eval_dataset=results[0][0]
-                            setattr(self.params,eval_dataset, getattr(results[1],eval_dataset))
-                            setattr(self.params, f"n_{eval_dataset}", getattr(results[1], f"n_{eval_dataset}"))
-                            self.db_manager.projects_service.update_project(self.params.project_slug, jsonable_encoder(self.params))
-                            #reset the features file and load the dataset again
+                            # update params with the new evalset
+                            eval_dataset = results[0][0]
+                            setattr(self.params, eval_dataset, getattr(results[1], eval_dataset))
+                            setattr(
+                                self.params,
+                                f"n_{eval_dataset}",
+                                getattr(results[1], f"n_{eval_dataset}"),
+                            )
+                            self.db_manager.projects_service.update_project(
+                                self.params.project_slug, jsonable_encoder(self.params)
+                            )
+                            # reset the features file and load the dataset again
                             self.features.reset_features_file()
                             self.quickmodels.drop_models(which="all")
                             self.data.load_dataset(eval_dataset)

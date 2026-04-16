@@ -44,7 +44,9 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
       defaultValues: { scheme: currentScheme },
     },
   );
-  const { appContext: { currentProject } } = useAppContext();
+  const {
+    appContext: { currentProject },
+  } = useAppContext();
   const proj_errors = currentProject?.errors || [];
 
   const { progression, createValidSet, cancel } = useCreateValidSet(); // API call
@@ -56,7 +58,6 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
 
   const [alertDrop, setAlertDrop] = useState<boolean>(false);
 
-
   const [data, setData] = useState<DataType | null>(null);
   const files = useWatch({ control, name: 'files' });
   //Local storage variables
@@ -64,29 +65,39 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
   //const processIdKey = `evalset-process-id-${dataset}-${projectSlug}`;//will be unused
 
   //Uploading State
-  const [uploading, setUploading] = useState<boolean>(() => sessionStorage.getItem(add_eval_storageKey) === 'true');
+  const [uploading, setUploading] = useState<boolean>(
+    () => sessionStorage.getItem(add_eval_storageKey) === 'true',
+  );
   const uploadingRef = useRef(uploading);
   const cancelRef = useRef(cancel);
   //Controller state
   const [displayCancel, setDisplayCancel] = useState<AbortController | undefined>(undefined);
-  //Task Errors Management 
+  //Task Errors Management
   const errorCountAtSubmit = useRef(0);
   //Set Max Duration
   const maxDuration = 5 * 60 * 1000; // 5 minutes in milliseconds
 
   //no old error that may block the workflow
 
-
   //handle uploading
-  const isUploading = useCallback((val: boolean) => {
-    console.trace('isUploading', val);
-    if (!val) { cancelRef.current = undefined; }
-    val ? sessionStorage.setItem(add_eval_storageKey, 'true') : sessionStorage.removeItem(add_eval_storageKey);
-    setUploading(val);
-  }, [add_eval_storageKey]);
+  const isUploading = useCallback(
+    (val: boolean) => {
+      console.trace('isUploading', val);
+      if (!val) {
+        cancelRef.current = undefined;
+      }
+      val
+        ? sessionStorage.setItem(add_eval_storageKey, 'true')
+        : sessionStorage.removeItem(add_eval_storageKey);
+      setUploading(val);
+    },
+    [add_eval_storageKey],
+  );
 
   //sync uploadref with state
-  useEffect(() => { uploadingRef.current = uploading; }, [uploading]);
+  useEffect(() => {
+    uploadingRef.current = uploading;
+  }, [uploading]);
 
   //case set exist :
   console.log(dataset, exist);
@@ -103,7 +114,9 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
     const len_new_errors = proj_errors.length - errorCountAtSubmit.current;
     if (len_new_errors > 0) {
       const newErrors = proj_errors.slice(-len_new_errors);
-      const evalsetError = [...newErrors].reverse().find((e) => Array.isArray(e) && (e[0] as string).includes(`add_evalset_${dataset}`));
+      const evalsetError = [...newErrors]
+        .reverse()
+        .find((e) => Array.isArray(e) && (e[0] as string).includes(`add_evalset_${dataset}`));
       if (evalsetError) {
         notify({ type: 'error', message: (evalsetError as string[]).join('-') });
         isUploading(false);
@@ -122,17 +135,16 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
     }, maxDuration);
 
     return () => clearTimeout(timer);
-  }, [uploading, isUploading, maxDuration]
-  );
+  }, [uploading, isUploading, maxDuration]);
 
-  //setting the id 
+  //setting the id
   //useEffect(() => {if (id) sessionStorage.setItem(processIdKey, id);}, [id]);
 
   //Cancel
   useEffect(() => {
     cancelRef.current = cancel;
     setDisplayCancel(cancel);
-  }, [cancel])
+  }, [cancel]);
 
   //Handle cancel signal
   useEffect(() => {
@@ -145,20 +157,25 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
       //sessionStorage.removeItem(processIdKey);
       isUploading(false);
       //refresh
-      setTimeout(() => { navigate(0); }, 750);
+      setTimeout(() => {
+        navigate(0);
+      }, 750);
     };
     if (cancel?.signal) {
       const signal = cancel.signal;
       signal.addEventListener('abort', stop);
-      return () => { signal.removeEventListener('abort', stop); };
+      return () => {
+        signal.removeEventListener('abort', stop);
+      };
     }
     const n_cancel = new AbortController();
     cancelRef.current = n_cancel;
     setDisplayCancel(n_cancel);
     n_cancel.signal.addEventListener('abort', stop);
-    return () => { n_cancel.signal.removeEventListener('abort', stop); };
+    return () => {
+      n_cancel.signal.removeEventListener('abort', stop);
+    };
   }, [cancel, uploading]);
-
 
   // available columns
   const columns = data?.headers.map((h) => (
@@ -200,9 +217,10 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
           csv,
           filename: data.filename,
         });
-        if (!res) { isUploading(false); }//sessionStorage.removeItem(processIdKey);}
-      }
-      catch (e) {
+        if (!res) {
+          isUploading(false);
+        } //sessionStorage.removeItem(processIdKey);}
+      } catch (e) {
         isUploading(false);
         notify({ type: 'error', message: 'Failed to start the process' });
       }
@@ -322,7 +340,16 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
         </form>
       )}
       {uploading && (
-        <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 10 }}>
+        <div
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+            zIndex: 10,
+          }}
+        >
           <UploadProgressBar progression={progression} cancel={cancel || displayCancel} />
         </div>
       )}
