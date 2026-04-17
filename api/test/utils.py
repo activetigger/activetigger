@@ -103,3 +103,14 @@ def create_project(
     response_project = client.get(f"/api/projects/{project_slug}", headers=superuser_header)
 
     return response_project.json()["params"]
+
+
+def delete_project(client: TestClient, superuser_header: dict[str, str], project_slug: str) -> None:
+    """
+    Helper function to delete a project.
+    """
+    response = client.post(
+        f"/api/projects/delete?project_slug={project_slug}",
+        headers=superuser_header,
+    )
+    assert response.status_code == 200, response.text

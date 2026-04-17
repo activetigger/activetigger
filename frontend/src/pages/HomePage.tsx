@@ -4,7 +4,7 @@ import { FaGithub } from 'react-icons/fa';
 import { IoMdLogOut } from 'react-icons/io';
 import { Link, useNavigate } from 'react-router-dom';
 import { Tooltip } from 'react-tooltip';
-import logo from '../assets/at.png';
+import logo from '../assets/at.svg';
 import { LoginForm } from '../components/forms/LoginForm';
 import Notifications from '../components/layout/Notifications';
 import { useGetActiveUsers, useGetServer } from '../core/api';
@@ -90,22 +90,14 @@ export const HomePage: FC = () => {
           <div className="col-0 col-lg-3" />
           <div className="col-12 col-lg-6">
             <center>
-              <div className="text-center">
-                <h1
-                  className="mb-1 fs-2 activetigger"
-                  style={{
-                    color: '#ff9a3c',
-                  }}
-                >
-                  Active Tigger
-                </h1>
-                <h3 className="m-0 fs-5 text-muted fw-normal">Explore & Annotate Text</h3>
-                <img
-                  src={logo}
-                  alt="ActiveTigger"
-                  className="d-block mx-auto"
-                  style={{ width: '200px' }}
-                />
+              <div className="d-flex align-items-center justify-content-center gap-3 my-3">
+                <img src={logo} alt="ActiveTigger" style={{ width: '80px', height: '80px' }} />
+                <div className="text-start">
+                  <h1 className="mb-0 fs-2 activetigger" style={{ color: '#ff9a3c' }}>
+                    Active Tigger
+                  </h1>
+                  <h3 className="m-0 fs-5 text-muted fw-normal">Explore & Annotate Text</h3>
+                </div>
               </div>
               {n_users == null && (
                 <div className="alert alert-danger mt-3">
@@ -156,7 +148,7 @@ export const HomePage: FC = () => {
                           e.currentTarget.style.boxShadow = '0 4px 6px rgba(0,0,0,0.1)';
                         }}
                       >
-                        🐯 Go to your projects
+                        Go to your projects
                       </Link>
                     </div>
                     {(messages || []).length > 0 && (

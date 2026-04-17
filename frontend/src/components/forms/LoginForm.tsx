@@ -54,10 +54,22 @@ export const LoginForm: FC<{ redirectTo?: string }> = ({ redirectTo }) => {
   return (
     <>
       {!reset && (
-        <form onSubmit={handleSubmit(onSubmit)}>
-          <input type="text" {...register('username')} placeholder="Username" />
-          <input type="password" {...register('password')} placeholder="Password" />
-          <button className="btn-submit">Login</button>
+        <form onSubmit={handleSubmit(onSubmit)} style={{ maxWidth: '300px', margin: '0 auto' }}>
+          <input
+            type="text"
+            {...register('username')}
+            placeholder="Username"
+            style={{ fontSize: '0.85rem', padding: '0.35rem 0.5rem' }}
+          />
+          <input
+            type="password"
+            {...register('password')}
+            placeholder="Password"
+            style={{ fontSize: '0.85rem', padding: '0.35rem 0.5rem' }}
+          />
+          <button className="btn-submit" style={{ fontSize: '0.85rem', padding: '0.35rem 0.75rem' }}>
+            Login
+          </button>
         </form>
       )}
       {mail_available && (
