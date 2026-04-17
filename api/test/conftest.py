@@ -15,7 +15,11 @@ def client() -> Generator[TestClient, None, None]:
 
 
 @pytest.fixture(scope="module")
-def superuser_token_headers(client: TestClient) -> dict[str, str]:
+def superuser_headers(client: TestClient) -> dict[str, str]:
+    """
+    Fixture to get the headers for the superuser.
+    """
+
     login_data = {
         "username": config.default_user,
         "password": os.environ.get("ROOT_PASSWORD", "l3tm31n!"),
