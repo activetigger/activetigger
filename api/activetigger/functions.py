@@ -386,7 +386,9 @@ def get_metrics_multiclass(
     f1_micro = f1_score(Y_true, Y_pred, average="micro", labels=labels, zero_division=1)
     f1_micro = round(f1_micro, decimals)
 
-    precision_micro = precision_score(Y_true, Y_pred, average="micro", labels=labels, zero_division=1)
+    precision_micro = precision_score(
+        Y_true, Y_pred, average="micro", labels=labels, zero_division=1
+    )
     precision_micro = round(precision_micro, decimals)
 
     accuracy = accuracy_score(Y_true, Y_pred)

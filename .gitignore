@@ -33,6 +33,8 @@ api/activetigger/tasks/__pycache__/
 **/__pycache__/
 api/activetigger/.dmypy.json
 api/embeddings.yaml
+api/.coverage
+api/test-data
 
 # DOCKER
 docker/api/projects/
