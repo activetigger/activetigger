@@ -26,7 +26,7 @@ import {
   newBertModel,
 } from '../types';
 import config from './config';
-import { formatApiError, HttpError } from './HTTPError';
+import { HttpError, formatApiError } from './HTTPError';
 import { useNotifications } from './notifications';
 import { useAppContext } from './useAppContext';
 import { getAsyncMemoData, useAsyncMemo } from './useAsyncMemo';
@@ -265,7 +265,7 @@ export function useCreateValidSet() {
         params: { project_slug: projectSlug, dataset },
       };
       try {
-        const res = await axios.post(`${URL}/projects/evalset/add`, testset, {
+        await axios.post(`${URL}/projects/evalset/add`, testset, {
           ...base,
           signal: controller.signal,
           onUploadProgress: ({ loaded, total }) => setProgression({ loaded, total }),
