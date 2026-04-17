@@ -256,13 +256,13 @@ export function useCreateValidSet() {
   const [controller, setController] = useState<AbortController | undefined>(undefined);
   const [progression, setProgression] = useState<{ loaded?: number; total?: number }>({});
   const createValidSet = useCallback(
-    async (projectSlung: string, dataset: string, testset: EvalSetDataModel) => {
+    async (projectSlug: string, dataset: string, testset: EvalSetDataModel) => {
       const controller = new AbortController();
       setController(controller);
       const URL = config.api.url.replace(/\/$/, '');
       const base = {
         headers: getAuthHeaders(authenticatedUser)?.headers,
-        params: { project_slug: projectSlung, dataset },
+        params: { project_slug: projectSlug, dataset },
       };
       try {
         const res = await axios.post(`${URL}/projects/evalset/add`, testset, {
@@ -270,8 +270,6 @@ export function useCreateValidSet() {
           signal: controller.signal,
           onUploadProgress: ({ loaded, total }) => setProgression({ loaded, total }),
         });
-        //setId(res.data);
-        console.log('res.data', res.data);
         return true;
       } catch (error: unknown) {
         notify({ type: 'error', message: formatApiError(error) });

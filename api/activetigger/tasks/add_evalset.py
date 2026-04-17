@@ -1,4 +1,5 @@
 import io
+import uuid
 from typing import Tuple
 
 import pandas as pd  # type: ignore[import]
@@ -88,8 +89,9 @@ class AddEvalSet(BaseTask):
             plain_full_index = {str(x).removeprefix("imported-") for x in self.index_all}
             overlapping_ids = set(df["id"]).intersection(set(plain_full_index))
             if overlapping_ids and len(overlapping_ids) > 0:
+                prefix = f"c-ev-{uuid.uuid4().hex[:6]}-"
                 df.loc[df["id"].isin(overlapping_ids), "id"] = [
-                    "c-ev-" + str(i) for i in range(len(overlapping_ids))
+                    prefix + str(i) for i in range(len(overlapping_ids))
                 ]
                 print(
                     f"{len(overlapping_ids)} IDs in the eval set already exist in the main dataset changed"

@@ -82,7 +82,6 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
   //handle uploading
   const isUploading = useCallback(
     (val: boolean) => {
-      console.trace('isUploading', val);
       if (!val) {
         cancelRef.current = undefined;
       }
@@ -98,9 +97,6 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
   useEffect(() => {
     uploadingRef.current = uploading;
   }, [uploading]);
-
-  //case set exist :
-  console.log(dataset, exist);
 
   useEffect(() => {
     if (exist && uploadingRef.current) {
@@ -188,7 +184,6 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
 
   // convert paquet file in csv if needed when event on files
   useEffect(() => {
-    console.log('checking file', files);
     if (files && files.length > 0) {
       const file = files[0];
       loadFile(file).then((data) => {

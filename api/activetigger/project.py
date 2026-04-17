@@ -459,53 +459,50 @@ class Project:
 
         if dataset == "valid" and self.params.valid:
             raise Exception("There is already a valid dataset")
-        try:
-            # check existing task in the queue → if there is already an add_evalset task for this project and this dataset, we return the status of the task without adding a new one
-            if self.queue.current:
-                add_eval_task = next(
-                    (
-                        t
-                        for t in self.queue.current
-                        if t.kind == "add_evalset"
-                        and t.project_slug == project_slug
-                        and t.task.dataset == dataset  # ty: ignore[unresolved-attribute]
-                    ),
-                    None,
-                )
-                if add_eval_task:
-                    raise Exception("this set is already being added")
-
-            # call task
-            unique_id = self.queue.add_task(
-                "add_evalset",
-                project_slug,
-                AddEvalSet(
-                    dataset=dataset,
-                    evalset=evalset,
-                    project=self.params,
-                    username=username,
-                    index=self.data.get_full_id().index,
-                    project_slug=project_slug,
-                    scheme=self.schemes.available()[evalset.scheme].labels
-                    if evalset.scheme
-                    else None,
+        # check existing task in the queue → if there is already an add_evalset task for this project and this dataset, we return the status of the task without adding a new one
+        if self.queue.current:
+            add_eval_task = next(
+                (
+                    t
+                    for t in self.queue.current
+                    if t.kind == "add_evalset"
+                    and t.project_slug == project_slug
+                    and t.task.dataset == dataset  # ty: ignore[unresolved-attribute]
                 ),
-                queue="cpu",
+                None,
             )
-            self.computing.append(
-                ProcessComputing(
-                    user=username,
-                    unique_id=unique_id,
-                    time=datetime.now(timezone.utc),
-                    kind=f"add_evalset_{dataset}",
-                )
+            if add_eval_task:
+                raise Exception("this set is already being added")
+
+        # call task
+        unique_id = self.queue.add_task(
+            "add_evalset",
+            project_slug,
+            AddEvalSet(
+                dataset=dataset,
+                evalset=evalset,
+                project=self.params,
+                username=username,
+                index=self.data.get_full_id().index,
+                project_slug=project_slug,
+                scheme=self.schemes.available()[evalset.scheme].labels
+                if evalset.scheme
+                else None,
+            ),
+            queue="cpu",
+        )
+        self.computing.append(
+            ProcessComputing(
+                user=username,
+                unique_id=unique_id,
+                time=datetime.now(timezone.utc),
+                kind=f"add_evalset_{dataset}",
             )
-            if username == "root":
-                return unique_id
-            else:
-                None
-        except Exception as e:
-            raise e
+        )
+        if username == "root":
+            return unique_id
+        else:
+            return None
 
     def train_quickmodel(
         self,
@@ -1729,7 +1726,8 @@ class Project:
                     case kind if kind.startswith("add_evalset_"):
                         e = cast(ProcessComputing, e)
                         if results is not None and len(results) > 0:
-                            self.db_manager.projects_service.add_annotations(*results[0])
+                            if results[0][4]:  # elements list is non-empty
+                                self.db_manager.projects_service.add_annotations(*results[0])
                             # update params with the new evalset
                             eval_dataset = results[0][0]
                             setattr(self.params, eval_dataset, getattr(results[1], eval_dataset))
