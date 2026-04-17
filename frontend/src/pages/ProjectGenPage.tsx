@@ -409,7 +409,7 @@ export const GenPage: FC = () => {
                   <div>
                     <button
                       className="btn btn-secondary mt-3"
-                      onClick={() => stopProcesses('generate')}
+                      onClick={() => stopProcesses('generation')}
                     >
                       <PulseLoader className="mx-2" />
                       Stop (
