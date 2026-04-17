@@ -220,8 +220,6 @@ export async function fetchUserProjects(): Promise<AvailableProjectsModel[]> {
  * @returns void
  */
 export function useCreateProject() {
-  const { notify } = useNotifications();
-
   // POST method hook generates an async function which will do the API call
   // the component using this hook will decide when to use this method  in its lifecycle
   // (typically in a form submit handler)
@@ -237,11 +235,10 @@ export function useCreateProject() {
         body: project,
       });
       if (!res.error) {
-        notify({ type: 'warning', message: 'Project in creation.' });
         return res['data'];
       } else throw new Error(formatApiError(res.error));
     },
-    [notify],
+    [],
   );
   // this POST hook returns a function ready to be used by a component
   return createProject;
@@ -2444,7 +2441,6 @@ export function useAddProjectFile() {
             },
           },
         );
-        notify({ type: 'success', message: 'File uploaded.' });
       } catch (error) {
         notify({ type: 'error', message: `Upload failed: ${error}` });
       } finally {

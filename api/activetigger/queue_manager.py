@@ -53,7 +53,7 @@ class Queue:
 
         # create the executor
         self.executor = get_reusable_executor(
-            max_workers=self.nb_workers, timeout=14400
+            max_workers=self.nb_workers, timeout=600
         )  # 4 hours timeout for hung workers
 
         # launch a regular update on the queue
