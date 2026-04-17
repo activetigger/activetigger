@@ -74,7 +74,7 @@ class Data:
         if not file_path.exists():
             raise FileNotFoundError(f"Data file not found: {file_path}")
         if file_path.suffix.lower() == ".csv":
-            return Data._sanitize_dataset(pd.read_csv(file_path))
+            return Data._sanitize_dataset(pd.read_csv(file_path, sep=None, engine="python"))
         elif file_path.suffix.lower() == ".parquet":
             return Data._sanitize_dataset(pd.read_parquet(file_path))
         elif file_path.suffix.lower() == ".xlsx":

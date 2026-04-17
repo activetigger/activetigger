@@ -73,9 +73,11 @@ class CreateProject(BaseTask):
 
         if str(file_path).endswith(".csv"):
             try:
-                content = pd.read_csv(file_path, low_memory=False, on_bad_lines="skip")
+                content = pd.read_csv(
+                    file_path, sep=None, low_memory=False, on_bad_lines="skip", engine="python"
+                )
             except Exception:
-                content = pd.read_csv(file_path, on_bad_lines="skip", engine="python")
+                content = pd.read_csv(file_path, sep=None, on_bad_lines="skip", engine="python")
         elif str(file_path).endswith(".parquet"):
             content = pd.read_parquet(file_path)
         elif str(file_path).endswith(".xlsx"):

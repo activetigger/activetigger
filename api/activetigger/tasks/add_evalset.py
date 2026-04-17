@@ -52,6 +52,8 @@ class AddEvalSet(BaseTask):
             csv_buffer = io.StringIO(self.evalset.csv)
             df = pd.read_csv(
                 csv_buffer,
+                sep=None,
+                engine="python",
                 dtype={self.evalset.col_id: str, **{col: str for col in self.evalset.cols_text}},
                 nrows=self.evalset.n_eval,
             )

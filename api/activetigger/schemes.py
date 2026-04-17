@@ -812,7 +812,7 @@ class Schemes:
             labels = self.available()[annotationsdata.scheme].labels
 
         # convert the data, match the external index, drop empty
-        df = pd.read_csv(StringIO(annotationsdata.csv))
+        df = pd.read_csv(StringIO(annotationsdata.csv), sep=None, engine="python")
 
         # test if the index is unique
         df[annotationsdata.col_id] = df[annotationsdata.col_id].astype(str)
