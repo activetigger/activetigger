@@ -1,61 +1,101 @@
-import { omit, random } from 'lodash';
-import { FC, useEffect, useState } from 'react';
-import DataTable from 'react-data-table-component';
-import { Controller, SubmitHandler, useForm, useWatch } from 'react-hook-form';
-import { useNavigate } from 'react-router-dom';
-import Select from 'react-select';
+import { omit,random } from 'lodash';
+import { FC, useEffect, useRef, useState } from 'react';
+import { Controller, useForm, useWatch,SubmitHandler } from 'react-hook-form';
 import { UploadProgressBar } from '../UploadProgressBar';
-
+import ReactSelect from 'react-select';
+import { useNavigate } from 'react-router-dom';
 import { CanceledError } from 'axios';
-import { HiOutlineQuestionMarkCircle } from 'react-icons/hi';
-import { Tooltip } from 'react-tooltip';
-import {
-  getProjectStatus,
-  useAddFeature,
-  useAddProjectFile,
-  useCopyExistingData,
-  useCreateProject,
-  useGetAvailableDatasets,
-  useProjectNameAvailable,
-} from '../../core/api';
+import { getProjectStatus, useAddFeature,useAddProjectFile,useCopyExistingData,useCreateProject, useGetAvailableDatasets, useProjectNameAvailable } from '../../core/api';
 import { useNotifications } from '../../core/notifications';
 import { useAppContext } from '../../core/useAppContext';
-import { getRandomName, loadFile } from '../../core/utils';
+import { getRandomName, loadFile } from '../../core/utils'; 
 import { ProjectModel } from '../../types';
+import { FiChevronDown, FiChevronUp, FiEye, FiEyeOff, FiUpload, FiFolder, FiPlus, FiMinus, FiHelpCircle, FiTag } from 'react-icons/fi';
 
-// format of the data table
+
 export interface DataType {
   headers: string[];
   data: Record<string, string | number | bigint>[];
   filename: string;
 }
 
-type Option = {
-  value: string;
-  label: string;
-};
+type Option = { value: string; label: string };
+type TrainSelection = 'sequential' | 'random' | 'stratify' | 'force_label';
+type HoldoutSelection = 'random' | 'stratify' | null;
 
-// component
+interface NumericStepperProps {
+  value: number;
+  onChange: (v: number) => void;
+  min?: number;
+  max?: number;
+  disabled?: boolean;
+}
+
+function NumericStepper({ value, onChange, min = 0, max = Infinity, disabled }: NumericStepperProps) {
+  const clamp = (v: number) => Math.max(min, Math.min(max, v));
+
+  const handleInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const parsed = parseInt(e.target.value, 10);
+    if (!isNaN(parsed)) onChange(clamp(parsed));
+  };
+
+  return (
+    <div className="stepper">
+      <button
+        type="button"
+        disabled={disabled || value <= min}
+        onClick={() => onChange(clamp(value - 1))}
+        className="stepper__btn"
+      >
+        <FiMinus size={12} />
+      </button>
+      <input
+        type="number"
+        value={value}
+        onChange={handleInput}
+        min={min}
+        max={max}
+        disabled={disabled}
+        className="stepper__input"
+      />
+      <button
+        type="button"
+        disabled={disabled || value >= max}
+        onClick={() => onChange(clamp(value + 1))}
+        className="stepper__btn"
+      >
+        <FiPlus size={12} />
+      </button>
+    </div>
+  );
+}
+
+const languages = [
+  { value: 'en', label: 'English' },
+  { value: 'fr', label: 'French' },
+  { value: 'es', label: 'Spanish' },
+  { value: 'de', label: 'German' },
+  { value: 'cn', label: 'Chinese' },
+  { value: 'ja', label: 'Japanese' },
+];
+
+const TRAIN_STRATEGIES: { value: TrainSelection; label: string; hint: string }[] = [
+  { value: 'random', label: 'Random', hint: 'Random sample from the full dataset' },
+  { value: 'sequential', label: 'Sequential', hint: 'First N rows in order' },
+  { value: 'stratify', label: 'Stratified', hint: 'Balanced by a column value' },
+  { value: 'force_label', label: 'Force label', hint: 'Prioritise labelled rows' },
+];
+const HOLDOUT_STRATEGIES: { value: HoldoutSelection; label: string; hint: string }[] = [
+  { value: 'random', label: 'Random', hint: 'Random sample from the full dataset,If chosen sequential for train those will be from ' },
+  { value: 'stratify', label: 'Stratified', hint: 'Balanced by a column value' },
+];
+
 export const ProjectCreationForm: FC = () => {
-  const { resetContext } = useAppContext();
-
-  // form management
   const maxSizeMB = 400;
-  const maxSize = maxSizeMB * 1024 * 1024; // 100 MB in bytes
+  const maxSize = maxSizeMB * 1024 * 1024;
+  const maxTrainSet = 100_000;
 
-  const maxTrainSet = 100000;
-  const langages = [
-    { value: 'en', label: 'English' },
-    { value: 'fr', label: 'French' },
-    { value: 'es', label: 'Spanish' },
-    { value: 'de', label: 'German' },
-    { value: 'cn', label: 'Chinese' },
-    { value: 'ja', label: 'Japanese' },
-  ];
-
-  const { register, control, handleSubmit, setValue, reset } = useForm<
-    ProjectModel & { files: FileList }
-  >({
+  const { register, control, handleSubmit, setValue, watch } = useForm<ProjectModel & { num_rows_val: number; num_rows_t: number }>({
     defaultValues: {
       project_name: getRandomName('Project'),
       n_train: 100,
@@ -63,717 +103,852 @@ export const ProjectCreationForm: FC = () => {
       n_valid: 0,
       language: 'en',
       clear_test: false,
-      random_selection: true,
       seed: random(0, 10000),
-      force_label: false,
+      train_selection: 'random',
+      holdout_selection: null,
+      start_index_val: null,
+      num_rows_val: 0,
+      start_index_test: null,
+      num_rows_t: 0,
     },
   });
-  const { notify } = useNotifications();
-  const { datasets } = useGetAvailableDatasets(true); // Include toy datasets
 
-  const [creatingProject, setCreatingProject] = useState<boolean>(false); // state for the data
-  const [dataset, setDataset] = useState<string | null>(null); // state for the data
-  const [data, setData] = useState<DataType | null>(null); // state for the data
-  const [computeFeatures, setComputeFeatures] = useState<boolean>(true);
-  const [featureBatchSize, setFeatureBatchSize] = useState<number>(32);
-  const navigate = useNavigate(); // rooting
-  const createProject = useCreateProject(); // API call
-  const availableProjectName = useProjectNameAvailable(); // check if the project name is available
-  const addFeature = useAddFeature();
-
-  const { addProjectFile, progression, cancel } = useAddProjectFile(); // API call
-  const copyExistingData = useCopyExistingData();
-  const files = useWatch({ control, name: 'files' }); // watch the files entry
-  const force_label = useWatch({ control, name: 'force_label' }); // watch the force label entry
-  const random_selection = useWatch({ control, name: 'random_selection' }); // watch the random selection entry
-  const stratify_train = useWatch({ control, name: 'stratify_train' });
-  const stratify_test = useWatch({ control, name: 'stratify_test' });
-
-  // When random_selection is unchecked, reset dependent fields
-  useEffect(() => {
-    if (!random_selection) {
-      setValue('n_valid', 0);
-      setValue('n_test', 0);
-      setValue('force_label', false);
-      setValue('stratify_train', false);
-      setValue('stratify_test', false);
-    }
-  }, [random_selection, setValue]);
-
-  // available columns to select, depending of the source
-  const [availableFields, setAvailableFields] = useState<Option[] | undefined>(undefined);
+  // local state
+  const [mode, setMode] = useState<'upload' | 'existing'>('upload');
+  const [data, setData] = useState<DataType | null>(null);
+  const [dataset, setDataset] = useState<string | null>(null);
+  const [lengthData, setLengthData] = useState(0);
   const [columns, setColumns] = useState<string[]>([]);
-  const [lengthData, setLengthData] = useState<number>(0);
+  const [availableFields, setAvailableFields] = useState<Option[] | undefined>(undefined);
+  const [previewVisible, setPreviewVisible] = useState(true);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [computeFeatures, setComputeFeatures] = useState(true);
+  //const [notification, setNotification] = useState<{ type: 'error' | 'success' | 'warning'; message: string } | null>(null);
+  const [creatingProject, setCreatingProject] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [featureBatchSize, setFeatureBatchSize] = useState<number>(32);
+  //----
+  //------
+  const { resetContext } = useAppContext();
+  const { notify } = useNotifications(); // replace your local notify state
+  const navigate = useNavigate();
+  const { datasets } = useGetAvailableDatasets(true);
+  const createProject = useCreateProject();
+  const availableProjectName = useProjectNameAvailable();
+  const addFeature = useAddFeature();
+  const { addProjectFile, progression, cancel } = useAddProjectFile();
+  const copyExistingData = useCopyExistingData();
+  // ── Watched values ──
+  const train_selection = useWatch({ control, name: 'train_selection' });
+  const holdout_selection = useWatch({ control, name: 'holdout_selection' });
+  const n_train = useWatch({ control, name: 'n_train' });
+  const n_valid = useWatch({ control, name: 'n_valid' });
+  const n_test = useWatch({ control, name: 'n_test' });
+  const cols_label = useWatch({ control, name: 'cols_label' });
+  //Derived max values
+  const maxTrain = Math.max(0, Math.min(maxTrainSet, lengthData - Number(n_valid) - Number(n_test)));
+  const maxValid = Math.max(0, lengthData - Number(n_train) - Number(n_test));
+  const maxTest = Math.max(0, lengthData - Number(n_train) - Number(n_valid));
+  const [slicePanelOpen,setSlicePanelOpen]=useState(true);
   useEffect(() => {
-    // case of loading external file
-    if (dataset === 'load' && data) {
-      setAvailableFields(data?.headers.filter((h) => !!h).map((e) => ({ value: e, label: e })));
-      setColumns(data.headers);
-      setLengthData(data.data.length - 1);
-      // case of existing project
-    } else if (dataset !== 'load' && datasets) {
-      const element =
-        dataset?.startsWith('-toy-dataset-') && datasets.toy_datasets
-          ? datasets.toy_datasets.find((e) => `-toy-dataset-${e.project_slug}` === dataset)
-          : datasets.projects.find((e) => e.project_slug === dataset);
-
-      setAvailableFields(element?.columns.filter((h) => !!h).map((e) => ({ value: e, label: e })));
-      setColumns(element?.columns || []);
-      setLengthData(element?.n_rows ?? 0);
-    } else {
-      setAvailableFields(undefined);
-      setColumns([]);
-      setLengthData(0);
+    if (train_selection==='sequential')setSlicePanelOpen(true);
+  }, [train_selection]);
+  //File load 
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > maxSize) {
+      notify({ type: 'error', message: `File is too large (max ${maxSizeMB} MB)` });
+      return;
     }
-  }, [data, dataset, datasets]);
-
-  // select the text on input on click
-  const handleClickOnText = (event: React.MouseEvent<HTMLInputElement>) => {
-    const target = event.target as HTMLInputElement;
-    target.select(); // Select the content of the input
+    const d = await loadFile(file);
+    if (!d) {
+      notify({ type: 'error', message: 'Could not read file. Supported formats: csv, xlsx.' });
+      return;
+    }
+    setData(d);
+    setDataset('load');
+    setColumns(d.headers);
+    setAvailableFields(d.headers.filter(Boolean).map((h) => ({ value: h, label: h })));
+    setLengthData(d.data.length - 1);
+    setValue('n_train', Math.min((d.data.length || 1) - 1, 100));
+    setPreviewVisible(true);
   };
-
-  // convert paquet file in csv if needed when event on files
+  //Mode switch resets
   useEffect(() => {
-    if (files && files.length > 0) {
-      const file = files[0];
-      if (file.size > maxSize) {
-        notify({
-          type: 'error',
-          message: `File is too large (maximum size: ${maxSizeMB} MB)`,
-        });
-        return;
-      }
-      loadFile(file).then((data) => {
-        if (data === null) {
-          notify({ type: 'error', message: 'Error reading the file.' });
-          return;
-        }
-        setData(data);
-        setValue('n_train', Math.min((data?.data.length || 1) - 1, 100));
-      });
-    }
-  }, [files, maxSize, notify, setValue]);
-
-  // action when form validated
-  const onSubmit: SubmitHandler<ProjectModel & { files?: FileList }> = async (formData) => {
-    if (data || dataset !== 'load') {
-      // check the form
-      if (formData.project_name === '') {
-        notify({ type: 'error', message: 'Enter a project name.' });
-        return;
-      }
-      if (formData.col_id == '') {
-        notify({ type: 'error', message: 'Select a column for ID.' });
-        return;
-      }
-      // check that the selected ID column contains unique values
-      if (formData.col_id !== 'row_number' && data) {
-        const idValues = data.data.map((row) => row[formData.col_id]);
-        const uniqueValues = new Set(idValues);
-        if (uniqueValues.size !== idValues.length) {
-          const nDuplicates = idValues.length - uniqueValues.size;
-          notify({
-            type: 'error',
-            message: `The selected ID column contains ${nDuplicates} duplicate values. Please choose a column with unique values or use 'Row number'.`,
-          });
-          return;
-        }
-      }
-      if (!formData.cols_text) {
-        notify({ type: 'error', message: 'Select a column for text.' });
-        return;
-      }
-      if (
-        Number(formData.n_train) + Number(formData.n_test) + Number(formData.n_valid) >
-        lengthData
-      ) {
-        notify({
-          type: 'warning',
-          message: 'You requested larger samples than your dataset, sizes were adjusted.',
-        });
-        setValue(
-          'n_train',
-          Math.max(0, lengthData - Number(formData.n_test) - Number(formData.n_valid)),
-        );
-        return;
-      }
-      // test if the project name is available
-      const available = await availableProjectName(formData.project_name);
-      if (!available) {
-        notify({ type: 'error', message: 'Project name already taken. Enter a new one.' });
-        return;
-      }
-
-      try {
-        setCreatingProject(true);
-
-        // manage the files
-        // case there is data to send
-        if (dataset === 'load' && files && files.length > 0) {
-          await addProjectFile(formData.project_name, files[0]);
-        }
-        // case to use a project existing
-        else if (dataset !== 'load' && dataset) {
-          const from_toy_dataset = dataset.startsWith('-toy-dataset-');
-          const source_project = from_toy_dataset ? dataset.slice(13) : dataset; // if from toy dataset remove prefix
-          await copyExistingData(formData.project_name, source_project, from_toy_dataset);
-        } else {
-          notify({ type: 'error', message: 'Unknown dataset.' });
-          throw new Error('Unknown dataset');
-        }
-
-        // launch the project creation (which can take a while)
-        const slug = await createProject({
-          ...omit(formData, 'files'),
-          filename: data ? data.filename : null,
-          from_project: dataset == 'load' ? null : dataset,
-          from_toy_dataset: dataset.startsWith('-toy-dataset-'),
-        });
-
-        // create a limit for waiting the project creation
-        const maxDuration = 5 * 60 * 1000; // 5 minutes in milliseconds
-        const startTime = Date.now();
-        // wait until the project is really available
-        const intervalId = setInterval(async () => {
-          try {
-            // watch the status of the project
-            const status = await getProjectStatus(slug);
-            console.log('Project status:', status);
-
-            // if an error happened or the process failed
-            if (status?.startsWith('error') || status === 'not existing') {
-              clearInterval(intervalId);
-              const errorDetail = status?.startsWith('error:')
-                ? status.slice('error:'.length).trim()
-                : null;
-              notify({
-                type: 'error',
-                message: errorDetail
-                  ? `Project creation failed: ${errorDetail}`
-                  : 'Project creation failed. Try to change the data format. Contact support if the error persits.',
-              });
-              navigate(`/projects`);
-              return;
-            }
-
-            // if the project has been created
-            if (status === 'existing') {
-              clearInterval(intervalId);
-              if (computeFeatures)
-                addFeature(slug, 'sentence-embeddings', 'default', true, {
-                  model: 'generic',
-                  batch_size: featureBatchSize,
-                });
-              resetContext();
-              navigate(`/projects/${slug}?fromCreatePage=true`);
-              return;
-            }
-
-            // set a timeout just in case to abort the waiting
-            const elapsedTime = Date.now() - startTime;
-            if (elapsedTime >= maxDuration) {
-              clearInterval(intervalId);
-              notify({
-                type: 'error',
-                message: 'Timeout during the creation of the project. Try again later.',
-              });
-              navigate(`/projects`);
-              return;
-            }
-          } catch (error) {
-            console.error('Error fetching projects:', error);
-            clearInterval(intervalId);
-          }
-        }, 1000);
-      } catch (error) {
-        setCreatingProject(false);
-        if (!(error instanceof CanceledError)) notify({ type: 'error', message: error + '' });
-        else notify({ type: 'success', message: 'Project creation aborted.' });
-      }
-    }
-  };
-
-  useEffect(() => {
-    reset({
-      col_id: 'row_number',
-      cols_text: [],
-      cols_context: [],
-      cols_label: [],
-      n_train: 100,
-      n_test: 0,
-      n_valid: 0,
-      language: 'en',
-      clear_test: false,
-      random_selection: true,
-      force_label: false,
-      seed: random(0, 10000),
-    });
     setData(null);
-    // reset data when changing dataset
-  }, [dataset, reset]);
+    setDataset(null);
+    setColumns([]);
+    setAvailableFields(undefined);
+    setLengthData(0);
+  }, [mode]);
+  useEffect(() => {
+  if (dataset === 'load' && data) {
+    setAvailableFields(data.headers.filter(Boolean).map((e) => ({ value: e, label: e })));
+    setColumns(data.headers);
+    setLengthData(data.data.length - 1);
+  } else if (dataset && dataset !== 'load' && datasets) {
+    const istoy = dataset.startsWith('-toy-dataset-');
+    const element = istoy
+      ? datasets.toy_datasets?.find((e) => `-toy-dataset-${e.project_slug}` === dataset)
+      : datasets.projects.find((e) => e.project_slug === dataset);
+    setAvailableFields(element?.columns.filter(Boolean).map((e) => ({ value: e, label: e })));
+    setColumns(element?.columns || []);
+    setLengthData(element?.n_rows ?? 0);
+  } else {
+    setAvailableFields(undefined);
+    setColumns([]);
+    setLengthData(0);
+  }
+}, [data, dataset, datasets]);
+const handleUseSuggested = async () => {
+  try {
+    const response = await fetch('/gwsd_train_test.csv');
+    if (!response.ok) throw new Error('Could not fetch example dataset');   
+    const blob = await response.blob();
+    const file = new File([blob], 'gwsd_train_test.csv', { type: 'text/csv' });
+    const d = await loadFile(file);
+    if (!d) {
+      notify({ type: 'error', message: 'Could not parse example dataset.' });
+      return;
+    }
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    if (fileInputRef.current) {
+      fileInputRef.current.files = dt.files;
+    }
+    setData(d);
+    setDataset('load');
+    setColumns(d.headers);
+    setAvailableFields(d.headers.filter(Boolean).map((h) => ({ value: h, label: h })));
+    setLengthData(d.data.length - 1);
+    setValue('n_train', Math.min((d.data.length || 1) - 1, 100));
+    setPreviewVisible(true);
+    setMode('upload');
+    notify({ type: 'success', message: 'Example dataset loaded.' });
+  } catch (e) {
+    notify({ type: 'error', message: `Failed to load example: ${e}` });
+  }
+};
+
+const onSubmit: SubmitHandler<ProjectModel> = async (formData) => {
+  if (!formData.project_name) { notify({ type: 'error', message: 'Enter a project name.' }); return; }
+  if (!formData.col_id) { notify({ type: 'error', message: 'Select an ID column.' }); return; }
+  if (!formData.cols_text?.length) { notify({ type: 'error', message: 'Select at least one text column.' }); return; }
+  if (Number(formData.n_train) + Number(formData.n_test) + Number(formData.n_valid) > lengthData) {
+    notify({ type: 'warning', message: 'Sizes exceed dataset length — please adjust.' });
+    return;}
+  if (formData.train_selection === 'stratify' && !formData.cols_stratify?.length) {
+    notify({ type: 'error', message: 'Please select at least one stratification column for train.' });
+    return;}
+  if (formData.holdout_selection === 'stratify' && !formData.cols_stratify?.length) {
+    notify({ type: 'error', message: 'Please select at least one stratification column for holdout.' });
+    return;}
+  const available = await availableProjectName(formData.project_name);
+  if (!available) { notify({ type: 'error', message: 'Project name already taken.' }); return; }
+
+  try {
+    setCreatingProject(true);
+    if (dataset === 'load' && data) {
+      const file = fileInputRef.current?.files?.[0];
+      if (file) await addProjectFile(formData.project_name, file);
+    } else if (dataset && dataset !== 'load') {
+      const from_toy_dataset = dataset.startsWith('-toy-dataset-');
+      const source_project = from_toy_dataset ? dataset.slice(13) : dataset;
+      await copyExistingData(formData.project_name, source_project, from_toy_dataset);
+    } else {
+      notify({ type: 'error', message: 'Unknown dataset.' });
+      return;
+    }
+    const slug = await createProject({
+      project_name: formData.project_name,
+      col_id: formData.col_id,
+      cols_text: formData.cols_text,
+      cols_label: formData.cols_label ?? [],
+      cols_context: formData.cols_context ?? [],
+      cols_stratify: formData.cols_stratify ?? [],
+      language: formData.language,
+      n_train: Number(formData.n_train),
+      n_valid: Number(formData.n_valid),
+      n_test: Number(formData.n_test),
+      seed: formData.seed,
+      clear_test: formData.clear_test,
+      train_selection: formData.train_selection,
+      holdout_selection: formData.holdout_selection,
+      filename: data ? data.filename : null,
+      from_project: dataset === 'load' ? null : dataset,
+      from_toy_dataset: dataset?.startsWith('-toy-dataset-') ?? false,
+      start_index_val: formData.train_selection === 'sequential' ? formData.start_index_val || null : null,
+      start_index_test: formData.train_selection === 'sequential' ? formData.start_index_test || null : null,
+      embeddings: [],
+      n_skip: 0,
+      default_scheme: [],
+      test: false,
+      valid: false,
+      clear_valid: false,
+      force_computation: false
+    });
+    const maxDuration = 5 * 60 * 1000;
+    const startTime = Date.now();
+    const intervalId = setInterval(async () => {
+      try {
+        const status = await getProjectStatus(slug);
+        console.log('Project status:', status);
+
+        if (status?.startsWith('error') || status === 'not existing') {
+          clearInterval(intervalId);
+          notify({ type: 'error', message: 'Project creation failed.' });
+          navigate('/projects');
+          return;
+        }
+
+        // if the project has been created
+        if (status === 'existing') {
+          clearInterval(intervalId);
+          if (computeFeatures)
+            await addFeature(slug, 'sentence-embeddings', 'default', true, {
+              model: 'generic',
+              batch_size: featureBatchSize,
+            });
+          setCreatingProject(false);
+          resetContext();
+          navigate(`/projects/${slug}?fromCreatePage=true`);
+          return;
+        }
+
+        if (Date.now() - startTime >= maxDuration) {
+          clearInterval(intervalId);
+          notify({ type: 'error', message: 'Timeout. Try again later.' });
+          navigate('/projects');
+        }
+      } catch (error) {
+        console.error('Polling error:', error);
+        clearInterval(intervalId);
+      }
+    }, 1000);
+
+  } catch (error) {
+    setCreatingProject(false);
+    if (!(error instanceof CanceledError)) notify({ type: 'error', message: error + '' });
+    else notify({ type: 'success', message: 'Project creation aborted.' });
+  }
+};
+
+  const colsLabelSuggestions = availableFields?.filter((f) => {
+    if ((cols_label || []).includes(f.value)) return false;
+    const nameMatch = /label|class|category|tag|type|sentiment|score|target/i.test(f.value);
+    const hasEmptyEntries = data
+      ? data.data.some((row) => {
+          const val = row[f.value];
+          return val === null || val === undefined || val === '' || val === 'null' || val === 'nan';
+        })
+      : false;
+    return nameMatch || hasEmptyEntries;
+  }) ?? [];
+
+  useEffect(() => {
+    if (train_selection !== 'sequential') return;
+    const valStart = Number(watch('start_index_val')) || Number(n_train);
+    const valEnd = valStart + Number(n_valid);
+    const testStart = Number(watch('start_index_test')) || 0;
+    if (Number(n_test) > 0 && Number(n_valid) > 0 && testStart < valEnd) {
+      setValue('start_index_test', valEnd);
+    }
+  }, [n_valid, watch('start_index_val')]);
+
+  useEffect(() => {
+    setValue('start_index_val', null);
+    setValue('start_index_test', null);
+  }, [holdout_selection, train_selection]);
 
   return (
-    <div>
-      <div className="explanations">Create a new project</div>
+    <div className="projectcontainer">
+      <div className="projectcard">
+        <div className="projectelement">
 
-      <form onSubmit={handleSubmit(onSubmit)}>
-        <label htmlFor="project_name">Project name</label>
-        <input
-          id="project_name"
-          placeholder="Name of the project (need to be unique in the system)"
-          type="text"
-          disabled={creatingProject}
-          {...register('project_name')}
-          onClick={handleClickOnText}
-        />
+          <h1 className="page-title">New Project</h1>
 
-        <div className="my-3">
-          <label style={{ cursor: 'pointer' }}>
-            <input type="radio" name="dataset-origin" onClick={() => setDataset('load')} />
-            Load Dataset from disk
-          </label>
-          <br />
-          <label style={{ cursor: 'pointer' }}>
-            <input type="radio" name="dataset-origin" onClick={() => setDataset('from-project')} />
-            Load Dataset from another project
-          </label>
-        </div>
+          <form onSubmit={handleSubmit(onSubmit)} className="project-form">
 
-        {dataset && (
-          <label>
-            Dataset{' '}
-            {dataset !== 'load' && (
-              <select
-                id="existingDataset"
-                value={dataset}
-                onChange={(e) => {
-                  setDataset(e.target.value);
-                }}
-              >
-                <option key="from-project" value="from-project"></option>
-                <optgroup label="Select project">
-                  {(datasets?.projects || []).map((d) => (
-                    <option key={d.project_slug} value={d.project_slug}>
-                      {d.project_slug}
-                    </option>
-                  ))}
-                </optgroup>
-                {datasets?.toy_datasets && datasets?.toy_datasets?.length > 0 && (
-                  <optgroup label="Select toy dataset">
-                    {(datasets?.toy_datasets || []).map((d) => (
-                      <option
-                        key={`-toy-dataset-${d.project_slug}`}
-                        value={`-toy-dataset-${d.project_slug}`}
-                      >
-                        {d.project_slug}
-                      </option>
-                    ))}
-                  </optgroup>
-                )}
-              </select>
-            )}
-            {dataset === 'load' && (
+            {/* ── Project name ── */}
+            <div className="form-section">
+              <label className="field-label" htmlFor="project_name">
+                Project name
+              </label>
+              <input
+                id="project_name"
+                type="text"
+                placeholder="Project name"
+                disabled={creatingProject}
+                {...register('project_name')}
+                onClick={(e) => (e.target as HTMLInputElement).select()}
+                className="form-input"
+              />
+            </div>
+
+            {/*Dataset source */}
+            <div className="form-section">
+              <label className="field-label">Dataset source</label>
+
+              {/* Toggle */}
+              <div className="mode-toggle">
+                <button
+                  type="button"
+                  onClick={() => setMode('upload')}
+                  className={`mode-toggle__btn${mode === 'upload' ? ' mode-toggle__btn--active' : ''}`}
+                >
+                  <FiUpload size={14} />
+                  Upload new file
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMode('existing')}
+                  className={`mode-toggle__btn${mode === 'existing' ? ' mode-toggle__btn--active' : ''}`}
+                >
+                  <FiFolder size={14} />
+                  Choose existing
+                </button>
+              </div>
+
+              {/* Upload panel */}
+              {mode === 'upload' && (
+                <div>
+                  <div
+                    onClick={() => fileInputRef.current?.click()}
+                    className={`upload-zone${data ? ' upload-zone--filled' : ''}`}
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      className="upload-icon"
+                      fill="currentColor"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        clipRule="evenodd"
+                        d="M10 1C9.73478 1 9.48043 1.10536 9.29289 1.29289L3.29289 7.29289C3.10536 7.48043 3 7.73478 3 8V20C3 21.6569 4.34315 23 6 23H7C7.55228 23 8 22.5523 8 22C8 21.4477 7.55228 21 7 21H6C5.44772 21 5 20.5523 5 20V9H10C10.5523 9 11 8.55228 11 8V3H18C18.5523 3 19 3.44772 19 4V9C19 9.55228 19.4477 10 20 10C20.5523 10 21 9.55228 21 9V4C21 2.34315 19.6569 1 18 1H10ZM9 7H6.41421L9 4.41421V7ZM14 15.5C14 14.1193 15.1193 13 16.5 13C17.8807 13 19 14.1193 19 15.5V16V17H20C21.1046 17 22 17.8954 22 19C22 20.1046 21.1046 21 20 21H13C11.8954 21 11 20.1046 11 19C11 17.8954 11.8954 17 13 17H14V16V15.5ZM16.5 11C14.142 11 12.2076 12.8136 12.0156 15.122C10.2825 15.5606 9 17.1305 9 19C9 21.2091 10.7909 23 13 23H20C22.2091 23 24 21.2091 24 19C24 17.1305 22.7175 15.5606 20.9844 15.122C20.7924 12.8136 18.858 11 16.5 11Z"
+                      />
+                    </svg>
+                    <span className="upload-filename">
+                      {data ? data.filename : 'Click to upload file'}
+                    </span>
+                    <span className="upload-meta">
+                      {data ? `${lengthData} rows` : `csv / xlsx · max ${maxSizeMB} MB`}
+                    </span>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".csv,.xlsx,.xls"
+                      style={{ display: 'none' }}
+                      disabled={creatingProject}
+                      onChange={handleFileChange}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  </div>
+
+                  <p className="upload-example">
+                    Try an example:{' '}
+                    <button
+                      type="button"
+                      className="upload-example__link"
+                      onClick={handleUseSuggested}
+                    >
+                      "Detecting Stance in Media on Global Warming" : use it
+                    </button>
+                  </p>
+                </div>
+              )}
+              {mode === 'existing' && (
+                <div className="existing-panel">
+                  <select
+                    className="form-select"
+                    value={dataset ?? ''}
+                    onChange={(e) => setDataset(e.target.value || null)}
+                    disabled={creatingProject}
+                  >
+                    <option value="">— select a project —</option>
+                    <optgroup label="Projects">
+                      {(datasets?.projects || []).map((d) => (
+                        <option key={d.project_slug} value={d.project_slug}>{d.project_slug}</option>
+                      ))}
+                    </optgroup>
+                    {datasets?.toy_datasets && datasets.toy_datasets.length > 0 && (
+                      <optgroup label="Example datasets">
+                        {datasets.toy_datasets.map((d) => (
+                          <option key={`-toy-dataset-${d.project_slug}`} value={`-toy-dataset-${d.project_slug}`}>
+                            {d.project_slug}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                  </select>
+                </div>
+              )}
+              {/* Data preview */}
+              {mode === 'upload' && data && (
+                <div className="data-preview">
+                  <div className="data-preview__header">
+                    <span className="data-preview__label">
+                      Data preview — {lengthData.toLocaleString()} rows
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setPreviewVisible((v) => !v)}
+                      className="data-preview__toggle"
+                    >
+                      {previewVisible ? <FiEyeOff size={12} /> : <FiEye size={12} />}
+                      {previewVisible ? 'Hide' : 'Show'}
+                    </button>
+                  </div>
+                  {previewVisible && (
+                    <div className="data-preview__table-wrap">
+                      <table className="data-preview__table">
+                        <thead>
+                          <tr>
+                            {data.headers.map((h) => (
+                              <th key={h}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {data.data.slice(0, 5).map((row, i) => (
+                            <tr key={i}>
+                              {data.headers.map((h) => (
+                                <td key={h} title={String(row[h])}>
+                                  {String(row[h])}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            {availableFields && (
               <>
-                <input
-                  className="form-control"
-                  disabled={creatingProject}
-                  id="csvFile"
-                  type="file"
-                  {...register('files')}
-                />
+                <div className="col-mapping">
+                  <p className="col-mapping__title">Column mapping</p>
+                  <div className="col-fields">
+                    {/* ID column */}
+                    <div>
+                      <label className="field-sublabel" htmlFor="col_id">
+                        ID column
+                      </label>
+                      <select
+                        id="col_id"
+                        disabled={creatingProject}
+                        {...register('col_id')}
+                        className="form-select"
+                      >
+                        <option value="row_number">Row number</option>
+                        {columns.filter(Boolean).map((h) => (
+                          <option key={h} value={h}>{h}</option>
+                        ))}
+                      </select>
+                    </div>
 
-                <div className="explanations" style={{ fontSize: 'smaller', fontWeight: 'normal' }}>
-                  File format : csv, xlsx or parquet &lt; {maxSizeMB} MB
-                  <br />
-                  Example dataset:{' '}
-                  <a href="./gwsd_train_test.csv" download>
-                    "Detecting Stance in Media On Global Warming" (download)
-                  </a>
+                    {/* Text columns */}
+                    <div>
+                      <label className="field-sublabel">
+                        Text column(s) <span className="field-sublabel__note">— will be concatenated</span>
+                      </label>
+                      <Controller
+                        name="cols_text"
+                        control={control}
+                        defaultValue={[]}
+                        render={({ field: { value, onChange } }) => (
+                          <ReactSelect
+                            options={availableFields}
+                            isMulti
+                            isDisabled={creatingProject}
+                            value={value?.map((v) => availableFields.find((o) => o.value === v)).filter(Boolean)}
+                            onChange={(sel) => onChange(sel ? sel.map((o) => o?.value ?? '') : [])}
+                            classNamePrefix="rs"
+                            placeholder="Select text column(s)..."
+                            styles={{ control: (base) => ({ ...base, borderColor: '#e5e7eb', borderRadius: '0.5rem', fontSize: '14px' }) }}
+                          />
+                        )}
+                      />
+                    </div>
+
+                    {/* Label columns */}
+                    <div>
+                      <div className="field-label-row">
+                        <label className="field-sublabel" style={{ marginBottom: 0 }}>
+                          Label column(s) <span className="field-sublabel__note">— optional</span>
+                        </label>
+                        {colsLabelSuggestions.length > 0 && (
+                          <div className="col-suggestions">
+                            <span className="col-suggestions__label">Suggestions:</span>
+                            {colsLabelSuggestions.slice(0, 3).map((s) => (
+                              <button
+                                key={s.value}
+                                type="button"
+                                onClick={() => {
+                                  const cur = watch('cols_label') || [];
+                                  if (!cur.includes(s.value)) setValue('cols_label', [...cur, s.value]);
+                                }}
+                                className="col-suggestion-btn"
+                              >
+                                <FiTag size={10} />
+                                {s.value}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <Controller
+                        name="cols_label"
+                        control={control}
+                        defaultValue={[]}
+                        render={({ field: { value, onChange } }) => (
+                          <ReactSelect
+                            options={availableFields}
+                            isMulti
+                            isDisabled={creatingProject}
+                            value={value?.map((v) => availableFields.find((o) => o.value === v)).filter(Boolean)}
+                            onChange={(sel) => onChange(sel ? sel.map((o) => o?.value ?? '') : [])}
+                            classNamePrefix="rs"
+                            placeholder="Select label column(s)..."
+                            styles={{ control: (base) => ({ ...base, borderColor: '#e5e7eb', borderRadius: '0.5rem', fontSize: '14px' }) }}
+                          />
+                        )}
+                      />
+                    </div>
+                    {/* Context columns */}
+                    <div>
+                      <label className="field-sublabel">
+                        Context column(s) <span className="field-sublabel__note">— optional</span>
+                      </label>
+                    
+                      <Controller
+                        name="cols_context"
+                        control={control}
+                        defaultValue={[]}
+                        render={({ field: { value, onChange } }) => (
+                          <ReactSelect
+                            options={availableFields}
+                            isMulti
+                            isDisabled={creatingProject}
+                            value={value?.map((v) => availableFields.find((o) => o.value === v)).filter(Boolean)}
+                            onChange={(sel) => onChange(sel ? sel.map((o) => o?.value ?? '') : [])}
+                            classNamePrefix="rs"
+                            placeholder="Select context column(s)..."
+                            styles={{ control: (base) => ({ ...base, borderColor: '#e5e7eb', borderRadius: '0.5rem', fontSize: '14px' }) }}
+                          />
+                        )}
+                      />
+                    </div>
+                    {/* Language */}
+                    <div>
+                      <label className="field-sublabel" htmlFor="language">
+                        Language
+                      </label>
+                      <select
+                        id="language"
+                        disabled={creatingProject}
+                        {...register('language')}
+                        className="form-select"
+                      >
+                        {languages.map((l) => (
+                          <option key={l.value} value={l.value}>{l.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+                {/*Split sizes*/}
+                <div className="form-section">
+                  <p className="section-title--mb">Split sizes</p>
+                  <div className="split-grid">
+                    <div>
+                      <label className="field-sublabel">Train</label>
+                      <NumericStepper value={Number(n_train)} onChange={(v) => setValue('n_train', v)} min={1} max={maxTrain} disabled={creatingProject} />
+                    </div>
+                    <div>
+                      <label className="field-sublabel">Validation</label>
+                      <NumericStepper value={Number(n_valid)} onChange={(v) => setValue('n_valid', v)} min={0} max={maxValid} disabled={creatingProject} />
+                    </div>
+                    <div>
+                      <label className="field-sublabel">Test</label>
+                      <NumericStepper value={Number(n_test)} onChange={(v) => setValue('n_test', v)} min={0} max={maxTest} disabled={creatingProject} />
+                    </div>
+                  </div>
+                  {lengthData > 0 && (
+                    <p className="split-total">
+                      Total used: {(Number(n_train) + Number(n_valid) + Number(n_test)).toLocaleString()} / {lengthData.toLocaleString()}
+                    </p>
+                  )}
+                </div>
+                {/*Train selection strategy */}
+                <div className="form-section">
+                  <div className="section-title-row">
+                    <p className="section-title">Train selection strategy</p>
+                    <FiHelpCircle size={14} className="help-icon" title="Controls how training rows are picked from your dataset" />
+                  </div>
+                  <div className="strategy-grid">
+                    {TRAIN_STRATEGIES.map((s) => (
+                      <button
+                        key={s.value}
+                        type="button"
+                        onClick={() => setValue('train_selection', s.value)}
+                        disabled={creatingProject}
+                        title={s.hint}
+                        className={`strategy-btn${train_selection === s.value ? ' strategy-btn--active' : ''}`}
+                      >
+                        {s.label}
+                      </button>
+                    ))}
+                  </div>
+                  {train_selection === 'sequential' && (
+                    <div className="slice-panel">
+                      <p className="slice-panel__desc">
+                        Define where validation/test slices start in your ordered data. Leave at 0 to auto-place after the train block
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (slicePanelOpen) {
+                              setValue('start_index_val', null);
+                              setValue('start_index_test', null);
+                              notify({ type: 'info', message: 'Slice configuration cleared. Start indices reset to auto-placement.' });
+                            }
+                            setSlicePanelOpen(v => !v);
+                          }}
+                          title={slicePanelOpen ? 'Hide and reset slice indices' : 'Show slice configuration'}
+                          className="data-preview__toggle"
+                        >
+                          {slicePanelOpen ? <FiEyeOff size={12} /> : <FiEye size={12} />}
+                        </button>
+                      </p>
+                      {slicePanelOpen &&(<div className="slice-panel__grid">
+                        {[
+                          { startName: 'start_index_val' as const, label: 'Validation slice', show: Number(n_valid) > 0, defaultStart: Number(n_train) },
+                          { startName: 'start_index_test' as const, label: 'Test slice', show: Number(n_test) > 0, defaultStart: Number(n_train) + Number(n_valid) },
+                        ].map(({ startName, label, show, defaultStart }) => {
+                          const currentStart = Number(watch(startName)) || defaultStart;
+                          const size = startName === 'start_index_val' ? Number(n_valid) : Number(n_test);
+                          const valStart = Number(watch('start_index_val')) || Number(n_train);
+                          const isTest = startName === 'start_index_test';
+                          const valEnd = valStart + Number(n_valid);
+
+                          return (
+                            <div key={startName} className={`slice-item${show ? '' : ' slice-item--disabled'}`}>
+                              <p className="slice-item__title">{label}</p>
+                              {show ? (
+                                <div className="slice-item__fields">
+                                  <div>
+                                    <label className="field-sublabel">Start row</label>
+                                    <NumericStepper
+                                      value={currentStart}
+                                      onChange={(v) => {
+                                        if (v + size > lengthData) {
+                                          notify({ type: 'warning', message: `${label}: start ${v} + size ${size} exceeds dataset length ${lengthData}` });
+                                          return;
+                                        }
+                                        if (isTest && v < valEnd && Number(n_valid) > 0) {
+                                          notify({ type: 'warning', message: `Test slice overlaps with validation slice (ends at row ${valEnd})` });
+                                          return;
+                                        }
+                                        setValue(startName, v);
+                                      }}
+                                      min={isTest ? (Number(n_valid) > 0 ? valEnd : Number(n_train)) : Number(n_train)}
+                                      max={Math.max(Number(n_train), lengthData - size)}
+                                      disabled={creatingProject || !show}
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="field-sublabel">Size: <b>{size.toLocaleString()}</b> rows (from split sizes above)</label>
+                                    <p className="field-sublabel">
+                                      Rows {currentStart.toLocaleString()} → {(currentStart + size).toLocaleString()}
+                                      {currentStart + size > lengthData && (
+                                        <span className="field-sublabel"> Warning : it exceeds dataset</span>
+                                      )}
+                                    </p>
+                                  </div>
+                                </div>
+                              ) : (
+                                <p className="slice-item__empty-hint">Set size &gt; 0 above to configure</p>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>)}
+                    </div>
+                  )}
+                  {/* Stratified column picker */}
+                  {train_selection === 'stratify' && (
+                    <div className="stratify-picker">
+                      <label className="stratify-picker__label">Stratification column(s) <span style={{ color: 'red' }}>*</span></label>
+                      <Controller
+                        name="cols_stratify"
+                        control={control}
+                        rules={{ validate: (v) => (v && v.length > 0) || 'At least one stratification column is required.' }}
+                        render={({ field: { value, onChange }, fieldState: { error } }) => (
+                          <>
+                            <ReactSelect
+                              options={availableFields}
+                              isMulti
+                              isDisabled={creatingProject}
+                              value={(value ?? []).map((v) => availableFields?.find((o) => o.value === v)).filter(Boolean) as Option[]}
+                              onChange={(sel) => onChange(sel ? sel.map((o) => o?.value ?? '') : [])}
+                              classNamePrefix="rs"
+                              placeholder="Select column(s) to stratify by..."
+                              styles={{
+                                control: (base) => ({
+                                  ...base,
+                                  borderColor: error ? '#ef4444' : '#e5e7eb',
+                                  borderRadius: '0.5rem',
+                                  fontSize: '14px',
+                                }),
+                              }}
+                            />
+                            {error && <p style={{ color: '#ef4444', fontSize: '12px', marginTop: '4px' }}>{error.message}</p>}
+                          </>
+                        )}
+                      />
+                    </div>
+                  )}
+                </div>
+                {(Number(n_valid) > 0 || Number(n_test) > 0) && (
+                  <div className="form-section">
+                    <p className="section-title">Holdout selection strategy</p>  
+                    <p className="slice-panel__desc">
+                        {train_selection === 'sequential' && (
+                          <> For sequential train, holdout positions are defined by the start indices above  
+                          After training rows are set aside, the remaining rows form a <b>holdout pool</b>.
+                          This setting controls how validation and test rows are drawn from that pool.</>
+                        )}
+                      </p>
+                    <div className="holdout-grid">
+                      {(['random', 'stratify'] as HoldoutSelection[]).map((s) => (
+                        <button
+                          key={s}
+                          type="button"
+                          onClick={() => setValue('holdout_selection', s)}
+                          disabled={creatingProject}
+                          className={`strategy-btn${holdout_selection === s ? ' strategy-btn--active' : ''}`}
+                          style={{ textTransform: 'capitalize' }}
+                        >
+                          {s}
+                        </button>
+                      ))}
+                    </div>
+                    {holdout_selection === 'stratify' && (
+                      <div className="stratify-picker">
+                        <label className="stratify-picker__label">Stratification column(s) for holdout</label>
+                      <Controller
+                        name="cols_stratify"
+                        control={control}
+                        rules={{ validate: (v) => (v && v.length > 0) || 'At least one stratification column is required.' }}
+                        render={({ field: { value, onChange }, fieldState: { error } }) => (
+                          <>
+                            <ReactSelect
+                              options={availableFields}
+                              isMulti
+                              isDisabled={creatingProject}
+                              value={(value ?? []).map((v) => availableFields?.find((o) => o.value === v)).filter(Boolean) as Option[]}
+                              onChange={(sel) => onChange(sel ? sel.map((o) => o?.value ?? '') : [])}
+                              classNamePrefix="rs"
+                              placeholder="Select column(s) to stratify by..."
+                              styles={{
+                                control: (base) => ({
+                                  ...base,
+                                  borderColor: error ? '#ef4444' : '#e5e7eb',
+                                  borderRadius: '0.5rem',
+                                  fontSize: '14px',
+                                }),
+                              }}
+                            />
+                            {error && <p style={{ color: '#ef4444', fontSize: '12px', marginTop: '4px' }}>{error.message}</p>}
+                          </>
+                        )}
+                      />
+                      </div>
+                    )}
+                  </div>
+                )}
+                {/*Drop annotations for test (only when n_test > 0) */}
+                {Number(n_test) > 0 && (
+                  <div className="drop-annotations">
+                    <label className="checkbox-label">
+                      <input
+                        type="checkbox"
+                        disabled={creatingProject}
+                        {...register('clear_test')}
+                      />
+                      Drop annotations for test set
+                    </label>
+                  </div>
+                )}
+                <div className="form-section">
+                  <button
+                    type="button"
+                    onClick={() => setAdvancedOpen((v) => !v)}
+                    className="advanced-toggle"
+                  >
+                    {advancedOpen ? <FiChevronUp size={14} /> : <FiChevronDown size={14} />}
+                    Advanced options
+                  </button>
+                  {advancedOpen && (
+                    <div className="advanced-panel">
+                      <label htmlFor="compute_feature" className="m-0">
+                        <input
+                          id="compute_feature"
+                          type="checkbox"
+                          disabled={creatingProject}
+                          checked={computeFeatures}
+                          onChange={() => {
+                            setComputeFeatures(!computeFeatures);
+                          }}
+                        />
+                        Compute sentence embeddings
+                      </label>
+                      {computeFeatures && (
+                        <label className="batch-size-label">
+                          batch
+                          <input
+                            type="number"
+                            min={1}
+                            max={512}
+                            value={featureBatchSize}
+                            onChange={(e) =>
+                              setFeatureBatchSize(Math.max(1, parseInt(e.target.value) || 1))
+                            }
+                            title="Batch size for embedding computation"
+                            disabled={creatingProject}
+                          />
+                        </label>
+                      )}
+                      <div className="seed-row">
+                        <span>Seed</span>
+                        <FiHelpCircle size={13} className="help-icon" title="Set for reproducibility" />
+                        <input
+                          type="number"
+                          disabled={creatingProject}
+                          {...register('seed', { valueAsNumber: true })}
+                          min={0}
+                          step={1}
+                          className="seed-input"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div className="form-section">
+                  <button type="submit" disabled={creatingProject} className="submit-btn">
+                    {creatingProject ? 'Creating project…' : 'Create project'}
+                  </button>
+                  {data && creatingProject && (
+                    <UploadProgressBar progression={progression} cancel={cancel} />
+                  )}
                 </div>
               </>
             )}
-          </label>
-        )}
-
-        {
-          // display datable if data available
-          dataset === 'load' && data !== null && (
-            <>
-              <div>
-                Size of the dataset : <b>{lengthData}</b>
-              </div>
-              <DataTable<Record<DataType['headers'][number], string | number>>
-                columns={data.headers.map((h) => ({
-                  name: h,
-                  selector: (row) => row[h],
-                  format: (row) => {
-                    const v = row[h];
-                    return typeof v === 'bigint' ? Number(v) : v;
-                  },
-                  width: '200px',
-                }))}
-                data={
-                  data.data
-                    .slice(0, 5)
-                    .map((row) =>
-                      Object.fromEntries(
-                        Object.entries(row).map(([key, value]) => [key, String(value)]),
-                      ),
-                    ) as Record<keyof DataType['headers'], string>[]
-                }
-              />
-            </>
-          )
-        }
-
-        {
-          // only display if data
-          availableFields && (
-            <>
-              <label htmlFor="col_id">Id column (must contain unique values)</label>
-              <select id="col_id" disabled={creatingProject} {...register('col_id')}>
-                <option key="row_number" value="row_number">
-                  Row number
-                </option>
-                {columns
-                  .filter((h) => !!h)
-                  .map((h) => (
-                    <option key={h} value={h}>
-                      {h}
-                    </option>
-                  ))}
-              </select>
-
-              <label htmlFor="cols_text">Text columns (selected fields will be concatenated)</label>
-
-              <Controller
-                name="cols_text"
-                control={control}
-                defaultValue={[]}
-                render={({ field: { value, onChange } }) => (
-                  <Select
-                    options={availableFields}
-                    isMulti
-                    isDisabled={creatingProject}
-                    value={
-                      value
-                        ? value
-                            .map((v: string) => availableFields?.find((opt) => opt.value === v))
-                            .filter(Boolean)
-                        : []
-                    }
-                    onChange={(selectedOptions) => {
-                      onChange(
-                        selectedOptions ? selectedOptions.map((option) => option?.value) : [],
-                      );
-                    }}
-                  />
-                )}
-              />
-
-              <label htmlFor="language">
-                Language of the corpus (for tokenization and word segmentation)
-              </label>
-              <select id="language" disabled={creatingProject} {...register('language')}>
-                {langages.map((lang) => (
-                  <option key={lang.value} value={lang.value}>
-                    {lang.label}
-                  </option>
-                ))}
-              </select>
-
-              <label htmlFor="col_label">Column(s) for existing annotations (optional)</label>
-              <Controller
-                name="cols_label"
-                control={control}
-                defaultValue={[]}
-                render={({ field: { value, onChange } }) => (
-                  <Select
-                    id="cols_label"
-                    options={availableFields}
-                    isMulti
-                    value={
-                      value
-                        ? value
-                            .map((v: string) => availableFields?.find((opt) => opt.value === v))
-                            .filter(Boolean)
-                        : []
-                    }
-                    isDisabled={creatingProject}
-                    onChange={(selectedOptions) => {
-                      onChange(
-                        selectedOptions ? selectedOptions.map((option) => option?.value) : [],
-                      );
-                    }}
-                  />
-                )}
-              />
-
-              <label htmlFor="cols_context">Column(s) for contextual information (optional)</label>
-              <Controller
-                name="cols_context"
-                control={control}
-                render={({ field: { onChange, value } }) => (
-                  <Select
-                    id="cols_context"
-                    options={availableFields}
-                    isMulti
-                    defaultValue={[]}
-                    isDisabled={creatingProject}
-                    value={
-                      value
-                        ? value
-                            .map((v: string) => availableFields?.find((opt) => opt.value === v))
-                            .filter(Boolean)
-                        : []
-                    }
-                    onChange={(selectedOptions) => {
-                      onChange(
-                        selectedOptions ? selectedOptions.map((option) => option?.value) : [],
-                      );
-                    }}
-                  />
-                )}
-              />
-
-              <label htmlFor="n_train">Number of rows in the train set (limit : 100,000)</label>
-              <input
-                id="n_train"
-                type="number"
-                disabled={creatingProject}
-                {...register('n_train')}
-                max={maxTrainSet}
-                min={1}
-              />
-
-              <div className="explanations">
-                For machine learning best practices, see the{' '}
-                <a target="_blank" href="https://activetigger.com/documentation/" rel="noreferrer">
-                  documentation
-                </a>
-              </div>
-
-              <label htmlFor="n_valid">
-                Number of rows in the validation set (optional)
-                <a className="n_valid">
-                  <HiOutlineQuestionMarkCircle />
-                </a>
-                <Tooltip anchorSelect=".n_valid" place="top">
-                  The validation is generally used for hyperparameter tuning
-                </Tooltip>
-              </label>
-              <input
-                id="n_valid"
-                type="number"
-                disabled={creatingProject || !random_selection}
-                {...register('n_valid')}
-                min={0}
-              />
-
-              <label htmlFor="n_test">
-                Number of rows in the test set (optional)
-                <a className="n_test">
-                  <HiOutlineQuestionMarkCircle />
-                </a>
-                <Tooltip anchorSelect=".n_test" place="top">
-                  The test set will be used for final evaluation
-                </Tooltip>
-              </label>
-              <input
-                id="n_test"
-                type="number"
-                disabled={creatingProject || !random_selection}
-                {...register('n_test')}
-                min={0}
-              />
-
-              <details>
-                <summary>Advanced options</summary>
-                <div className="explanations">
-                  Check the{' '}
-                  <a
-                    target="_blank"
-                    href="https://activetigger.com/documentation/"
-                    rel="noreferrer"
-                  >
-                    documentation
-                  </a>{' '}
-                  for further explanations
-                </div>
-                <div>
-                  <input
-                    id="random_selection"
-                    type="checkbox"
-                    disabled={creatingProject || force_label}
-                    {...register('random_selection')}
-                  />
-                  <label htmlFor="random_selection">
-                    Select rows at random{' '}
-                    <a className="rselect">
-                      <HiOutlineQuestionMarkCircle />
-                    </a>
-                    <Tooltip anchorSelect=".rselect" place="top">
-                      If unticked, will preserve order of the original dataset (note: rows without
-                      <br />
-                      text are dropped) only if no evaluation datasets (eval/test)
-                    </Tooltip>
-                  </label>
-                </div>
-                <div>
-                  <input
-                    id="force_label"
-                    type="checkbox"
-                    disabled={creatingProject || !random_selection}
-                    {...register('force_label')}
-                  />
-                  <label htmlFor="force_label">
-                    Prioritize rows with a label{' '}
-                    <a className="force_labelinfo">
-                      <HiOutlineQuestionMarkCircle />
-                    </a>
-                    <Tooltip anchorSelect=".force_labelinfo" place="top">
-                      If ticked, select rows with a label in priority for the trainset (no more
-                      random). Careful : valid/test set take priority and will still be random.
-                    </Tooltip>
-                  </label>
-                </div>
-
-                <div>
-                  <input
-                    id="stratify_train"
-                    type="checkbox"
-                    disabled={creatingProject || force_label || !random_selection}
-                    {...register('stratify_train')}
-                  />
-                  <label htmlFor="stratify_train">
-                    Stratify train set{' '}
-                    <a className="stratify_train">
-                      <HiOutlineQuestionMarkCircle />
-                    </a>
-                    <Tooltip anchorSelect=".stratify_train" place="top">
-                      If ticked, ensures balanced representation of each group in the train set. See
-                      documentation.
-                    </Tooltip>
-                  </label>
-                </div>
-                <div>
-                  <input
-                    id="stratify_test"
-                    type="checkbox"
-                    disabled={creatingProject || force_label || !random_selection}
-                    {...register('stratify_test')}
-                  />
-                  <label htmlFor="stratify_test">
-                    Stratify test set{' '}
-                    <a className="stratify_train">
-                      <HiOutlineQuestionMarkCircle />
-                    </a>
-                    <Tooltip anchorSelect=".stratify_train" place="top">
-                      If ticked, ensures balanced representation of each group in the train set. See
-                      documentation.
-                    </Tooltip>
-                  </label>
-                </div>
-
-                {(stratify_train || stratify_test) && (
-                  <>
-                    <label htmlFor="cols_stratify">Column(s) used for stratification</label>
-                    <Controller
-                      name="cols_stratify"
-                      control={control}
-                      render={({ field: { onChange } }) => (
-                        <Select
-                          id="cols_stratify"
-                          options={availableFields}
-                          isMulti
-                          isDisabled={creatingProject}
-                          onChange={(selectedOptions) => {
-                            onChange(
-                              selectedOptions ? selectedOptions.map((option) => option.value) : [],
-                            );
-                          }}
-                        />
-                      )}
-                    />
-                  </>
-                )}
-                <div>
-                  <input
-                    id="clear_test"
-                    type="checkbox"
-                    disabled={creatingProject || !random_selection}
-                    {...register('clear_test')}
-                  />
-                  <label htmlFor="clear_test">Drop annotations for the testset </label>
-                </div>
-                <div className="d-flex align-items-center gap-2">
-                  <label htmlFor="compute_feature" className="m-0">
-                    <input
-                      id="compute_feature"
-                      type="checkbox"
-                      disabled={creatingProject}
-                      checked={computeFeatures}
-                      onChange={() => {
-                        setComputeFeatures(!computeFeatures);
-                      }}
-                    />
-                    Compute sentence embeddings
-                  </label>
-                  {computeFeatures && (
-                    <label className="batch-size-label">
-                      batch
-                      <input
-                        type="number"
-                        min={1}
-                        max={512}
-                        value={featureBatchSize}
-                        onChange={(e) =>
-                          setFeatureBatchSize(Math.max(1, parseInt(e.target.value) || 1))
-                        }
-                        title="Batch size for embedding computation"
-                        disabled={creatingProject}
-                      />
-                    </label>
-                  )}
-                </div>
-                <label htmlFor="n_valid" className="d-flex align-items-center">
-                  Seed
-                  <a className="ref_seed">
-                    <HiOutlineQuestionMarkCircle />
-                  </a>
-                  <Tooltip anchorSelect=".ref_seed" place="top">
-                    Set it to ensure replicability.
-                  </Tooltip>
-                  <input
-                    id="seed"
-                    type="number"
-                    disabled={creatingProject}
-                    {...register('seed', { valueAsNumber: true })}
-                    min={0}
-                    step={1}
-                    className="w-25 ms-3"
-                    placeholder="0"
-                  />
-                </label>
-              </details>
-            </>
-          )
-        }
-        {/* 
-              Quasi Modal
-              overlay progression bar with cancel button 
-            */}
-        {data && creatingProject && <UploadProgressBar progression={progression} cancel={cancel} />}
-
-        {
-          <>
-            <button type="submit" className="btn-submit" disabled={creatingProject}>
-              Create
-            </button>
-          </>
-        }
-      </form>
+          </form>
+        </div>
+      </div>
     </div>
   );
 };

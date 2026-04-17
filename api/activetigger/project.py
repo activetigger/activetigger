@@ -434,6 +434,7 @@ class Project:
         )
 
         # reset the features file
+
         self.features.reset_features_file()
         self.quickmodels.drop_models(which="all")
 
