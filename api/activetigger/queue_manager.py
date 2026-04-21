@@ -53,7 +53,7 @@ class Queue:
 
         # create the executor
         self.executor = get_reusable_executor(
-            max_workers=self.nb_workers, timeout=14400
+            max_workers=self.nb_workers, timeout=600
         )  # 4 hours timeout for hung workers
 
         # launch a regular update on the queue
@@ -92,8 +92,8 @@ class Queue:
             and (nb_active_processes_gpu + nb_active_processes_cpu) < self.nb_workers
             and len(task_gpu) > 0
         ):
-            executor = get_reusable_executor(max_workers=(self.nb_workers), timeout=600)
-            task_gpu[0].future = executor.submit(task_gpu[0].task)
+            self.executor = get_reusable_executor(max_workers=(self.nb_workers), timeout=600)
+            task_gpu[0].future = self.executor.submit(task_gpu[0].task)
             task_gpu[0].state = "running"
 
         # a worker available and possible to have cpu
@@ -102,18 +102,18 @@ class Queue:
             and (nb_active_processes_gpu + nb_active_processes_cpu) < self.nb_workers
             and len(task_cpu) > 0
         ):
-            executor = get_reusable_executor(max_workers=(self.nb_workers), timeout=600)
-            task_cpu[0].future = executor.submit(task_cpu[0].task)
+            self.executor = get_reusable_executor(max_workers=(self.nb_workers), timeout=600)
+            task_cpu[0].future = self.executor.submit(task_cpu[0].task)
             task_cpu[0].state = "running"
 
         # if there is nothing in the queue, shutdown the executor to free GPU memory
-        if (
-            nb_active_processes_cpu + nb_active_processes_gpu == 0
-            and len(task_gpu) == 0
-            and len(task_cpu) == 0
-        ):
-            executor = get_reusable_executor(max_workers=(self.nb_workers), timeout=600)
-            executor.shutdown(wait=False)
+        # if (
+        #     nb_active_processes_cpu + nb_active_processes_gpu == 0
+        #     and len(task_gpu) == 0
+        #     and len(task_cpu) == 0
+        # ):
+        #     executor = get_reusable_executor(max_workers=(self.nb_workers), timeout=600)
+        #     executor.shutdown(wait=False)
 
     async def _update_queue(self, timeout: float = 1) -> None:
         """

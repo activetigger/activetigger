@@ -144,6 +144,7 @@ export interface GenerateConfig {
   promptId?: string;
   n_batch?: number;
   selectionMode?: string;
+  dataset?: string;
   selectedModel?: GenModel & { api: string };
 }
 

@@ -150,6 +150,7 @@ export const GenPage: FC = () => {
     generateConfig.n_batch || null,
     generateConfig.prompt || null,
     generateConfig.selectionMode || null,
+    generateConfig.dataset || 'train',
     generateConfig.token,
     promptName,
   );
@@ -303,7 +304,7 @@ export const GenPage: FC = () => {
             <div className="row mt-3">
               <div className="d-flex col-6">
                 <div className="me-3">
-                  <label htmlFor="batch">Elements </label>
+                  <label htmlFor="batch">Elements</label>
                   <input
                     type="number"
                     id="batch"
@@ -319,6 +320,24 @@ export const GenPage: FC = () => {
                   />
                 </div>
                 <div>
+                  <label htmlFor="dataset">Dataset </label>
+                  <select
+                    id="dataset"
+                    className="form-select"
+                    value={generateConfig.dataset || 'train'}
+                    onChange={(e) => {
+                      setAppContext((prev) => ({
+                        ...prev,
+                        generateConfig: { ...generateConfig, dataset: e.target.value },
+                      }));
+                    }}
+                  >
+                    <option key="train">train</option>
+                    {currentProject?.params.valid && <option key="valid">valid</option>}
+                    {currentProject?.params.test && <option key="test">test</option>}
+                  </select>
+                </div>
+                <div className="ms-3">
                   <label htmlFor="mode">From </label>
                   <select
                     id="mode"

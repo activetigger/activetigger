@@ -52,10 +52,13 @@ export async function loadCSVFile(file: File): Promise<DataType> {
       const csvContent = e.target?.result;
 
       if (typeof csvContent === 'string') {
-        // detect if this is coma or tab separated value
+        // detect separator: tab, semicolon, or comma
         const line = csvContent.split('\n')[0];
         const tabCount = (line.match(/\t/g) || []).length;
-        const separator = tabCount > 3 ? '\t' : ',';
+        const semicolonCount = (line.match(/;/g) || []).length;
+        const commaCount = (line.match(/,/g) || []).length;
+        const separator =
+          tabCount > 3 ? '\t' : semicolonCount > commaCount ? ';' : ',';
 
         Papa.parse<Record<string, string>>(csvContent, {
           header: true,

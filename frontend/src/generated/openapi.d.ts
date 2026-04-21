@@ -2544,6 +2544,11 @@ export interface components {
              * @default all
              */
             mode: string;
+            /**
+             * Dataset
+             * @default train
+             */
+            dataset: string;
             /** Prompt Name */
             prompt_name?: string | null;
         };

@@ -556,6 +556,7 @@ class GenerationRequest(BaseModel):
     n_batch: int = 1
     scheme: str
     mode: str = "all"
+    dataset: str = "train"
     prompt_name: str | None = None
 
 
@@ -621,6 +622,7 @@ class GenerationComputing(ProcessComputing):
     project: str
     number: int
     model_id: int
+    dataset: str = "train"
     get_progress: Callable[[], float | None] | None = None
     prompt_name: str | None = None
 

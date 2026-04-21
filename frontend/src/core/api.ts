@@ -220,8 +220,6 @@ export async function fetchUserProjects(): Promise<AvailableProjectsModel[]> {
  * @returns void
  */
 export function useCreateProject() {
-  const { notify } = useNotifications();
-
   // POST method hook generates an async function which will do the API call
   // the component using this hook will decide when to use this method  in its lifecycle
   // (typically in a form submit handler)
@@ -237,11 +235,10 @@ export function useCreateProject() {
         body: project,
       });
       if (!res.error) {
-        notify({ type: 'warning', message: 'Project in creation.' });
         return res['data'];
       } else throw new Error(formatApiError(res.error));
     },
-    [notify],
+    [],
   );
   // this POST hook returns a function ready to be used by a component
   return createProject;
@@ -2042,12 +2039,13 @@ export function useGenerate(
   n_batch: number | null,
   prompt: string | null,
   mode: string | null,
+  dataset: string | null,
   token?: string,
   promptName?: string,
 ) {
   const { notify } = useNotifications();
   const generate = useCallback(async () => {
-    if (projectSlug && modelId && prompt && n_batch && currentScheme && mode) {
+    if (projectSlug && modelId && prompt && n_batch && currentScheme && mode && dataset) {
       const res = await api.POST('/generate/start', {
         params: {
           query: {
@@ -2061,6 +2059,7 @@ export function useGenerate(
           token: token,
           scheme: currentScheme,
           mode: mode,
+          dataset: dataset,
           prompt_name: promptName,
         },
       });
@@ -2068,7 +2067,7 @@ export function useGenerate(
       return true;
     }
     return null;
-  }, [projectSlug, modelId, prompt, n_batch, currentScheme, mode, token, notify, promptName]);
+  }, [projectSlug, modelId, prompt, n_batch, currentScheme, mode, dataset, token, notify, promptName]);
 
   return { generate };
 }
@@ -2505,7 +2504,6 @@ export function useAddProjectFile() {
             },
           },
         );
-        notify({ type: 'success', message: 'File uploaded.' });
       } catch (error) {
         notify({ type: 'error', message: `Upload failed: ${error}` });
       } finally {
