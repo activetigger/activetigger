@@ -1,0 +1,482 @@
+@use 'sass:map';
+
+/**
+* ANNOTATION MODE
+*/
+.annotation-mode {
+  margin-top: map.get($spacers, 1);
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  width: 100%;
+  column-gap: map.get($spacers, 5);
+  row-gap: map.get($spacers, 3);
+
+  justify-content: space-between;
+
+  label {
+    margin: 0;
+  }
+
+  > div {
+    display: flex;
+    flex-wrap: wrap;
+
+    justify-content: flex-start;
+    column-gap: map.get($spacers, 2);
+
+    align-items: flex-start;
+
+    .active-mode-button {
+      padding: 3px 5px;
+      display: flex;
+      @extend .gap-1;
+      margin: 0;
+
+      align-items: center;
+    }
+    .react-select {
+      width: 100%;
+    }
+    // TODO: replace by react-select styling technics once we switch default input styles back to bootstrap
+    input,
+    select {
+      padding: 9px;
+      margin: 0;
+      line-height: initial;
+    }
+
+    .at-input-group:has(.react-select) {
+      flex-grow: 1;
+      //max-width: 300px;
+      min-width: 250px;
+      position: relative;
+    }
+    input {
+      max-width: 45vw;
+    }
+  }
+
+  .submit-container {
+    // @media (max-width: 1800px) {
+    //   align-self: end;
+    // }
+    align-self: flex-end;
+    display: flex;
+    align-items: center;
+    column-gap: map.get($spacers, 1);
+
+    > * {
+      height: fit-content;
+    }
+  }
+}
+
+// common style for Element text frame
+.history-element,
+.annotation-frame {
+  color: black;
+  font-family: 'Arial', sans-serif;
+  background-color: #f9f9f9;
+  border: 1px solid $primary;
+  border-radius: $border-radius;
+}
+
+.annotation-block {
+  display: grid;
+  // tag action button/grid size settings
+  --tag-action-width: 200px;
+  --tag-action-column-gap: 1rem;
+  --tag-action-row-gap: 1rem;
+
+  @include media-breakpoint-down(lg) {
+    --tag-action-width: 100%;
+  }
+  // only one column
+  grid-template-columns: 100%;
+
+  @extend .gap-3;
+  @extend .my-3;
+  justify-content: flex-start;
+
+  width: 100%;
+
+  // two column layout when big screen and force one column inactive
+  @include media-breakpoint-up(lg) {
+    &:not(.force-one-column-layout) {
+      grid-template-columns:
+        // text column takes the settings width but the minimum tag container size
+
+        minmax(
+          calc(var(--text-width) - var(--tag-action-width) - var(--tag-action-column-gap) - 10px),
+          calc(100% - var(--tag-action-width) - var(--tag-action-column-gap) - 10px)
+        )
+        // tag container takes the rest of available width but with a minimum to see the potential second column without having to scroll
+        minmax(
+          calc(var(--tag-action-width) + var(--tag-action-column-gap) + 10px),
+          calc(100% - var(--text-width) - var(--tag-action-column-gap))
+        );
+      // only one row
+      grid-template-rows: 100%;
+      // make sure the layout fits into visible space
+      max-height: 90vh;
+
+      .tag-action-container {
+        // respect height to force columns
+        height: 100%;
+        // place element in top-bottom flow before filling second column
+        grid-auto-flow: column;
+        // constraint column widths to avoid long labels spreading
+        grid-template-columns: repeat(auto-fit, var(--tag-action-width));
+        // align columns to the text frame limit
+        justify-content: start;
+      }
+    }
+  }
+
+  // special one column layout option
+  &.force-one-column-layout {
+    // only one column
+    grid-template-columns: 100%;
+    // center both rows
+    justify-items: center;
+    @include media-breakpoint-up(lg) {
+      // apply width settings to the text frame
+      .annotation-frame {
+        width: var(--text-width);
+      }
+    }
+  }
+
+  .annotation-frame {
+    // place in the grid (optional)
+    grid-column: 1;
+    grid-row: 1;
+    //layout
+    padding: 16px;
+    height: var(--height);
+
+    //internal layout
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+
+    @include media-breakpoint-down(lg) {
+      //ignore width settings on small screens
+      width: 100%;
+    }
+
+    // text
+    position: relative;
+    white-space: pre-wrap;
+    box-shadow: 0px 0px 15px color(from $primary srgb r g b / 50%);
+    font-size: 16px;
+    line-height: 1.6;
+
+    .element-text {
+      flex-grow: 1;
+      overflow-y: auto;
+      margin: 0;
+    }
+    // additional information boxes
+    dl {
+      display: flex;
+      flex-wrap: wrap;
+      row-gap: map.get($spacers, 0);
+      column-gap: map.get($spacers, 3);
+      .dl-item {
+        * {
+          margin: 0;
+        }
+        @extend .gap-1;
+        display: flex;
+        dt:after {
+          content: ':';
+        }
+      }
+    }
+  }
+
+  .span-annotation-label-selector{
+    --label-color : red;
+    width: 100%;
+    text-align: center;
+    padding: 8px 12px;
+    border-radius: 6px;
+    border: var(--label-color) 1px solid;
+    background-color:white;
+    color: var(--label-color);
+    cursor: pointer;
+    font-weight: 600;
+    transition: background-color 0.15s ease, color 0.15s ease;
+    &.active{
+      background-color: var(--label-color);
+      color: white
+    }
+  }
+
+  /**
+  * TAG ACTION CONTAINER
+  * grid which shows the tag action buttons
+  */
+  .tag-action-container {
+    // buttons height
+    --tag-action-height: 40px;
+
+    display: grid;
+    // we need to allow overflow to make sure the layout can respect the width to spread columns
+    overflow-y: scroll;
+
+    // gaps
+    column-gap: var(--tag-action-column-gap);
+    row-gap: var(--tag-action-row-gap);
+
+    // default layout for small screens/one-column
+    // spread rows
+    grid-auto-flow: row;
+    grid-template-rows: repeat(auto-fill, var(--tag-action-height));
+    // columns width constraints
+    grid-template-columns: repeat(auto-fill, var(--tag-action-width));
+
+    // fill width
+    width: 100%;
+    // as high as needed
+    height: fit-content;
+
+    align-content: start;
+    align-items: center;
+    justify-content: center;
+
+    @include media-breakpoint-down(lg) {
+      // only two columns
+      grid-template-columns: repeat(auto-fill, calc(50% - var(--tag-action-column-gap) / 2));
+
+      @include media-breakpoint-down(sm) {
+        // only one column
+        grid-template-columns: 100%;
+      }
+    }
+
+    .btn-annotate-general-action,
+    .btn-annotate-predicted-action,
+    .btn-annotate-action {
+      //buttons internal layout
+
+      margin: 0;
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+      color: white;
+
+      height: fit-content;
+
+      svg,
+      .badge {
+        //icon & key stroke badge
+        flex-shrink: 0;
+      }
+      @media (pointer: coarse) {
+        // hide key stroke badges on small screen => no keyboard
+        .badge{
+          &:not(#predict-probability){
+          display: none;
+          }
+        }
+      }
+    }
+    .tag-action-button {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: var(--tag-action-width);
+      .truncate-middle {
+        width: 0;
+        flex-grow: 1;
+        flex-shrink: 1;
+      }
+      .badge {
+        flex-shrink: 0;
+        flex-grow: 0;
+      }
+    }
+
+    // button styles
+    .btn-annotate-action {
+      @extend .btn;
+      @extend .btn-primary;
+    }
+    .btn-annotate-general-action {
+      @extend .btn;
+      @extend .btn-secondary;
+      background-color: rgb(250, 153, 74);
+      border-color: rgb(250, 153, 74);
+      &:hover,
+      &:focus,
+      &:active,
+      &.active,
+      &:focus-visible {
+        background-color: rgb(230, 133, 54);
+        border-color: rgb(230, 133, 54);
+        color: white;
+      }
+    }
+    .btn-annotate-predicted-action {
+      @extend .btn;
+      @extend .btn-info;
+
+      background-color: $gray-500;
+      border-color: $gray-500;
+      &:hover,
+      &:focus,
+      &:active,
+      &.active,
+      &:focus-visible {
+        background-color: $gray-600;
+        border-color: $gray-600;
+        color: white;
+      }
+    }
+
+    // prediction layout with or without stats
+    .prediction-container {
+      // container does not change layout
+      display: contents;
+      align-self: center;
+      &:has(.prediction-stats) {
+        display: flex;
+        flex-direction: column;
+        @extend .gap-1;
+        align-items: flex-start;
+        // span on two rows
+        grid-row-start: span 2;
+      }
+    }
+    // no tag button special case
+    .no-tag-action {
+      align-items: center;
+      width: var(--tag-action-width);
+      span.text {
+        display: flex;
+        flex-wrap: nowrap;
+        text-wrap: nowrap;
+        align-items: center;
+        flex-grow: 1;
+        @extend .gap-1;
+      }
+    }
+    // comment field layout + placement on grid
+    .annotation-comment {
+      width: 100%;
+      height: var(--tag-action-height);
+      @include media-breakpoint-down(lg) {
+        grid-column-start: span 2;
+      }
+      @include media-breakpoint-down(md) {
+        grid-column-start: span 1;
+      }
+      // @include media-breakpoint-up(lg) {
+      //   grid-row-start: span 2;
+      //   height: calc(var(--tag-action-height) * 2 + var(--tag-action-row-gap));
+      // }
+    }
+  }
+}
+
+.text-out-context {
+  color: $secondary;
+  opacity: 0.7;
+  font-style: italic;
+}
+
+/**
+* ANNOTATION HISTORY
+*/
+.annotation-history {
+  $gapSize: map.get($spacers, 3);
+  width: 100%;
+
+  display: flex;
+
+  flex-wrap: wrap;
+  gap: $gapSize;
+
+  position: relative;
+
+  .history-element {
+    @extend .p-2;
+    width: calc(25% - (3 / 4 * $gapSize));
+    @include media-breakpoint-down(xl) {
+      width: calc(33% - (2 / 3 * $gapSize));
+    }
+
+    @include media-breakpoint-down(lg) {
+      width: calc(50% - (1 / 2 * $gapSize));
+    }
+    @include media-breakpoint-down(sm) {
+      width: 100%;
+    }
+
+    text-decoration: none;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    align-items: start;
+    .badge {
+      max-width: calc(100% - 2 * map.get($spacers, 2));
+      margin: 0;
+
+      .truncate-middle {
+        min-width: 0;
+      }
+    }
+  }
+}
+
+/**
+* TRUNCATE MIDDLE COMPONENT
+*/
+.truncate-middle {
+  display: flex;
+  justify-content: start;
+  align-items: center;
+  position: relative;
+  text-align: start;
+  flex-shrink: 1;
+  flex-grow: 1;
+
+  span {
+    @extend .text-truncate;
+    display: inline-block;
+    max-width: 100%;
+    white-space: preserve nowrap;
+  }
+  span:first-child {
+    text-overflow: '..';
+  }
+  span:last-child {
+    text-overflow: '..';
+    direction: rtl;
+    text-align: end;
+  }
+}
+
+/**
+* FORCE COMPLETE LABEL
+* Wraps text on multiple lines and shrinks the font so long labels
+* fit inside the existing fixed-size button without overflow.
+*/
+.label-full {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.05;
+  font-size: 0.72rem;
+  text-align: start;
+  flex-shrink: 1;
+  flex-grow: 1;
+  min-width: 0;
+}

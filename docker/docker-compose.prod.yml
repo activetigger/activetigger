@@ -1,0 +1,22 @@
+services:
+  nginx:
+    image: jonasal/nginx-certbot:latest
+    restart: ${RESTART_POLICY}
+    ports:
+      - 80:80
+      - 443:443
+    environment:
+      - CERTBOT_EMAIL=${CERTBOT_EMAIL}
+      - DOMAIN=${DOMAIN}
+    volumes:
+      - ${PROJECT_PATH}/docker/template_start_nginx_prod.sh:/scripts/template_start.sh
+      - ${PROJECT_PATH}/docker/nginx.prod_template.conf:/etc/nginx/nginx.prod.template
+      - ${PROJECT_PATH}/frontend/dist:/var/www/frontend
+      - ${DATA_PATH}/projects/static:/api/static
+      - ${PROJECT_PATH}/docker/certificates:/etc/letsencrypt/live/activetigger/
+    command: ["bash", "/scripts/template_start.sh"]
+    depends_on:
+      - api
+      - frontend
+  frontend:
+    restart: "no"

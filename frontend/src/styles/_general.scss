@@ -1,0 +1,274 @@
+// At the element level
+input,
+select,
+textarea {
+  width: 100%;
+  padding: 10px;
+  margin: 2px 0px;
+
+  background-color: white;
+  border: $tertiary 1px solid;
+  border-radius: $border-radius;
+}
+
+input[type='checkbox'],
+input[type='radio'] {
+  height: 15px;
+  width: 15px;
+  margin-right: 6px;
+}
+
+.at-input-group {
+  display: flex;
+  flex-direction: column;
+
+  label.small-gray {
+    color: $neutral-gray;
+    font-size: 0.8rem;
+  }
+}
+
+button {
+  margin: 2px;
+  border: 0px;
+  border-radius: $border-radius;
+  padding: 2px 10px;
+  cursor: pointer;
+}
+
+button:hover {
+  filter: brightness(1.8);
+}
+
+button:active {
+  filter: brightness(5);
+}
+
+input::placeholder {
+  color: $dark-grey-color;
+  opacity: 0.5;
+  font-style: italic;
+}
+
+.batch-size-label {
+  font-size: 0.75rem;
+  color: #888;
+  font-weight: normal;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+
+  input {
+    width: 55px;
+    height: 24px;
+    font-size: 0.75rem;
+    color: #666;
+    padding: 2px 4px;
+  }
+}
+
+table {
+  margin: 10px 0px;
+}
+
+// Recurring elements
+.btn-danger {
+  background-color: $danger-color;
+  border: 2px solid $danger-color;
+  color: white;
+}
+
+.btn-drop-dataset {
+  margin: 0px 5px;
+  font-size: medium;
+  background-color: $danger-color;
+  color: white;
+}
+
+
+.badge {
+  border: 0px;
+  border-radius: $border-radius;
+  background-color: $light-grey-color;
+  color: black;
+  padding: 5px 10px;
+  margin: 2px 5px;
+}
+
+.badge.info {
+  color: white;
+  background-color: $info-color;
+}
+
+.badge.danger {
+  background-color: $danger-color;
+}
+
+.badge.hotkey {
+  background-color: rgba(0, 0, 0, 0.2);
+}
+
+.transparent-background {
+  background-color: $transparent;
+}
+
+.btn-submit {
+  font-size: larger;
+  color: white;
+  background-color: $primary;
+  margin: 10px 0px;
+  width: 100%;
+}
+
+.btn-submit-danger {
+  font-size: larger;
+  color: white;
+  background-color: $danger-color;
+  margin: 10px 0px;
+  width: 100%;
+}
+
+.btn-primary-action {
+  background-color: $primary;
+  border: 2px solid $primary;
+  color: white;
+}
+
+.btn-secondary-action {
+  background-color: $transparent;
+  border: 2px solid $secondary;
+  color: $secondary;
+}
+
+.btn-stop-process {
+  background-color: $primary;
+  border: 2px solid $primary;
+  color: white;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+#project-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+
+  background: $light-grey-color;
+  border: 0px;
+  border-radius: $border-radius;
+  padding: 16px 20px;
+  transition:
+    background-color 0.2s,
+    color 0.2s,
+    box-shadow 0.2s;
+  cursor: pointer;
+
+  .clickable-zone {
+    .projecttitle {
+      font-size: 20px;
+      font-weight: bold;
+      margin: 0 0 8px;
+    }
+    width: 80%;
+    .projectdetails {
+      font-size: smaller;
+      display: flex;
+      justify-content: start;
+      #key {
+        width: 80px;
+      }
+      margin: 5px 0px;
+    }
+    .badge.info {
+      margin-left: 0px;
+    }
+  }
+
+  .trash-wrapper {
+    color: black;
+    cursor: pointer;
+  }
+
+  .trash-wrapper:hover {
+    color: red;
+  }
+}
+
+#project-card:hover {
+  box-shadow: 0px 0px 15px color(from $primary srgb r g b / 50%);
+  background: color(from $primary srgb r g b / 50%);
+  color: white;
+}
+
+#current-scheme-badge {
+  height: 38px;
+  width: 150px;
+  background-color: $primary;
+  border-radius: $border-radius 0px 0px $border-radius;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  color: white;
+  font-weight: bold;
+}
+
+.user-info {
+  margin-top: 20px;
+  //padding: 5px;
+  font-size: 1rem;
+  background-color: #f8f9fa;
+  border: 0px solid #343a40;
+  color: #343a40;
+  text-align: center;
+}
+
+.user-info span {
+  color: #007bff;
+}
+
+.user-info .status {
+  color: #28a745;
+  font-weight: bold;
+}
+
+// Message cards on homepage
+.message-content {
+  p {
+    margin: 0 0 0.25rem;
+    &:last-child {
+      margin-bottom: 0;
+    }
+  }
+  a {
+    color: $primary;
+    text-decoration: underline;
+  }
+  code {
+    background: #e9ecef;
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px;
+    font-size: 0.85em;
+  }
+  ul, ol {
+    margin: 0.25rem 0;
+    padding-left: 1.5rem;
+  }
+  strong {
+    font-weight: 600;
+  }
+}
+
+// hide internal links in MDeditor
+.wmde-markdown h1 a,
+.wmde-markdown h2 a,
+.wmde-markdown h3 a,
+.wmde-markdown h4 a,
+.wmde-markdown h5 a,
+.wmde-markdown h6 a {
+  display: none;
+  pointer-events: none;
+}

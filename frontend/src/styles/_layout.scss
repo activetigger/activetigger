@@ -1,0 +1,210 @@
+// generic elements ---
+.horizontal {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+}
+
+.horizontal.wrap {
+  width: 100%;
+  flex-wrap: wrap;
+}
+
+.horizontal.center {
+  width: 100%;
+  justify-content: center;
+}
+
+// Titles, subsections and explanations
+.subsection {
+  font-weight: bold;
+  color: $secondary;
+  margin: 10px 0px;
+}
+
+// project sidebar ---
+.project-sidebar {
+  height: fit-content;
+  @include media-breakpoint-up(md) {
+    top: calc(var(--bs-gutter-x) * 0.5);
+  }
+
+  border-radius: 10px;
+  margin: calc(var(--bs-gutter-x) * 0.5) 0;
+  padding: 5px;
+
+  .nav {
+    flex-direction: column;
+    width: 200px;
+    @include media-breakpoint-down(md) {
+      flex-direction: row;
+      flex-wrap: nowrap;
+      justify-content: space-between;
+      width: 100%;
+      gap: 0.5rem;
+    }
+    .nav-item {
+      flex-grow: 1;
+      .nav-link {
+        height: 100%;
+        display: flex;
+        flex-wrap: nowrap;
+        align-items: center;
+        gap: 0.5rem;
+        justify-content: start;
+        svg {
+          flex-shrink: 0;
+        }
+        &.active span {
+          @extend .text-white;
+        }
+
+        @include media-breakpoint-down(md) {
+          gap: 0.1rem;
+          padding: 0.4rem 0.4rem;
+          justify-content: center;
+
+          // don't show label if not selected
+          &:not(.active) {
+            span {
+              display: none;
+            }
+          }
+          &.active {
+            span {
+              display: flex;
+            }
+          }
+        }
+        @include media-breakpoint-down(sm) {
+          gap: 0.1rem;
+          padding: 0.4rem 0.1rem;
+        }
+      }
+    }
+  }
+}
+
+// Status notch ---
+#status-notch {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  border-top: 0.5px black solid;
+  background-color: $quaternary;
+  display: flex;
+  flex-wrap: nowrap;
+  // height: 150px;
+  span {
+    font-size: smaller;
+    border-right: 0.5px black solid;
+    padding-right: 10px;
+    margin-right: 5px;
+    margin-left: 10px;
+    margin-bottom: 3px;
+    margin-top: 3px;
+    // height: 100px;
+  }
+}
+
+#computing-span {
+  div {
+    padding: 0px 3px;
+  }
+}
+@keyframes shimmer {
+  to {
+    background-position: 100%;
+  }
+}
+
+// Navbar ---
+#nav-bar-header {
+  $header-height: 50px;
+  @include media-breakpoint-down(md) {
+    #navbarSupportedContent {
+      align-items: start;
+      .navbar-nav {
+        .nav-link {
+          padding: 0;
+        }
+      }
+      .navbar-text {
+        padding: 0;
+        // align vertically with menu
+        margin-top: -2px;
+        button {
+          padding: 0;
+        }
+      }
+    }
+  }
+}
+
+// Model selection ---
+.model-pill-selection {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  align-items: flex-start;
+
+  .model-pill {
+    background-color: $tertiary;
+    color: black;
+    border: none;
+    border-radius: 20px;
+    padding: 0px 15px;
+    margin: 2px 5px 2px 0px;
+    height: 35px;
+    #bin {
+      background-color: rgba(0, 0, 0, 0);
+      border: none;
+    }
+    font-size: smaller;
+  }
+
+  .model-pill.selected {
+    background-color: $secondary;
+    color: white;
+  }
+
+  .model-pill#create-new,
+  .model-pill#compute-validate {
+    font-size: normal;
+    background-color: $primary;
+    color: white;
+    font-weight: bold;
+  }
+  .model-pill.disabled#create-new,
+  .model-pill.disabled#compute-validate {
+    pointer-events: none;
+    opacity: 0.8;
+  }
+}
+
+// get element button
+.create-new-element {
+  font-size: normal;
+  background-color: $primary;
+  color: white;
+  font-weight: bold;
+  border: none;
+  border-radius: 20px;
+  padding: 0px 15px;
+  height: 35px;
+  display: inline-flex;
+  align-items: center;
+  font-size: smaller;
+  cursor: pointer;
+}
+
+@-webkit-keyframes glow {
+  from {
+    border: 3px rgba(0, 0, 0, 0) solid;
+  }
+  to {
+    border: 3px rgba(255, 255, 255, 0.7) solid;
+  }
+}

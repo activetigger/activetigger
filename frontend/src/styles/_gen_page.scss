@@ -1,0 +1,20 @@
+#button-context-wrapper {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    align-items: center;
+    align-content: center;
+    width: 60%;
+    flex: 1 0 60%;
+    
+    button {
+        background-color: rgba(0, 0, 0, 0);
+        border: 0px;
+        color: $secondary;
+        text-decoration: underline;
+        opacity: 1;
+        padding: 3px 10px 3px 10px;
+        margin: 2px 4px 2px 4px;
+    }
+}

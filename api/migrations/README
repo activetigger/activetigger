@@ -1,0 +1,37 @@
+# Use migrations for DB schema changes
+
+## Setup
+
+The migrations are handled by alembic, which use SQLAlchemy models declarations to create SQL scripts to run migrations.
+
+The DB URL is set in `alembic.ini` with `sqlalchemy.url`. It allows alembic to connect with the DB, create migrations scripts and apply them.
+
+## Create a migration
+
+To create a migration, after a change in the models, simply run:
+```sh
+alembic revision --autogenerate -m "{WHAT CHANGE IN THIS REVISION}"
+```
+
+This will create a new file in `migrations/versions` with a unique ID and the name you gave to the `-m` param. You'll see in the newly created file an `upgrade` and a `downgrade` method. Respectively, they'll be use to update your DB to the latest schema or to revert to a previous version.
+
+## Run migration
+
+To ensure your DB is up to date, by running all the migrations scripts, use
+```sh
+alembic upgrade head
+```
+
+If you only want to update one migration at a time, use
+```sh
+alembic upgrade +1
+```
+
+On the contrary, if you want to revert the last migration: 
+```sh
+alembic downgrade -1
+```
+
+## Links
+
+- [Alembic tutorial](https://alembic.sqlalchemy.org/en/latest/tutorial.html)

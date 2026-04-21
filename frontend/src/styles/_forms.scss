@@ -1,0 +1,30 @@
+form {
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+
+  details {
+    background-color: $tertiary;
+    margin: 5px 0px;
+    padding: 15px;
+    border: 0px;
+    border-radius: $border-radius;
+    display: flex;
+    flex-direction: column;
+  }
+}
+
+label {
+  color: $label-color;
+  font-weight: bolder;
+}
+
+.form-frame {
+  padding: 0px;
+}
+
+.label-small-gray {
+  font-size: 0.8rem;
+  color: #9ca3af; // Tailwind's neutral gray tone (lighter)
+  margin-bottom: -5px;
+}

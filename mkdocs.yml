@@ -1,0 +1,16 @@
+site_name: ActiveTigger Documentation
+nav:
+  - Home: index.md
+  - Quickstart: quickstart.md
+  - Use Cases: usecases.md
+  - User Guide: documentation.md
+  - Get Access: access.md
+  - Software: software.md
+  - Environment: environment.md
+  - FAQ: faq.md
+  - Contributors: contributors.md
+markdown_extensions:
+  - footnotes
+  - admonition
+
+theme: readthedocs

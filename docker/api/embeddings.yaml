@@ -1,0 +1,5 @@
+models:
+  Qwen/Qwen3-Embedding-0.6B: {}
+  all-mpnet-base-v2: {}
+  jinaai/jina-embeddings-v5-text-small:
+    task: retrieval

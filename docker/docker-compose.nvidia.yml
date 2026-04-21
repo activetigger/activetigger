@@ -1,0 +1,14 @@
+services:
+  api:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      - DATA_PATH=/data
+      - GPU=true
+      - CPU_ONLY=false
+    env_file: ".env"

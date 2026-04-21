@@ -1,0 +1,55 @@
+#progress-bar-window{
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100%;
+    width: 100%;
+    background-color: #ffffff80;
+    display: flex;
+    justify-content: center;
+    align-items: center;   
+
+    #progress-bar-container{
+        background-color: $light;
+        border: $dark 2px solid;
+        border-radius: $border-radius;
+        width: 50%;
+        min-width: 200px;
+        padding: 10px;
+    }
+    #progress-container{
+        display: flex;
+        flex-wrap: nowrap;
+        justify-content: space-between;
+        align-items: center;
+        span{
+            flex: 1 1 50px;
+            margin: 0px;
+            margin-right: .2rem;
+            text-align: center;
+        }
+        // Project Creation form upload progress
+        #upload-progress,
+        #upload-progress[value]::-webkit-progress-bar {
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            appearance: none;
+            border: none;
+            border-radius: 0;
+            background-color: lightgray;
+            color: $secondary;
+            
+            height: 6px;
+            flex: 10 1 50px;
+            margin: 0;
+        }
+        
+        #upload-progress[value]::-moz-progress-bar {
+            background-color: $secondary;
+        }
+        
+        #upload-progress[value]::-webkit-progress-value {
+            background-color: $secondary;
+        }
+    }
+}

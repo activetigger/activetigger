@@ -1,0 +1,36 @@
+.explore-container {
+  .explore-viz-container {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    @extend .gap-4;
+
+    @include media-breakpoint-up(xl) {
+      height: 75vh;
+      flex-direction: row;
+    }
+
+    position: relative;
+
+    .explore-annotation-column {
+      @include media-breakpoint-up(xl) {
+        height: 100%;
+        overflow-y: auto;
+
+        flex-grow: 1;
+      }
+      width: 100%;
+    }
+
+    .explore-viz-column {
+      border: 1px var(--bs-border-color) solid;
+      position: relative;
+      @include media-breakpoint-up(xl) {
+        flex-grow: 1;
+      }
+      height: calc(75vh + 2px);
+      box-sizing: border-box;
+      width: 100%;
+    }
+  }
+}

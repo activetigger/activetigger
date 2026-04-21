@@ -1,0 +1,50 @@
+services:
+  postgres:
+    image: postgres:${POSTGRES_VERSION}
+    restart: ${RESTART_POLICY}
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      - ${DATA_PATH}/postgresql/:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+  api:
+    build:
+      context: ./api
+      dockerfile: ./Dockerfile
+      args:
+        - PYTHON_VERSION=${PYTHON_VERSION}
+        - USER_ID=${USER_ID}
+        - GROUP_ID=${GROUP_ID}
+    entrypoint: /entrypoint.sh
+    restart: ${RESTART_POLICY}
+    user: ${USER_ID}:${GROUP_ID}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ${PROJECT_PATH}/docker/api/entrypoint.sh:/entrypoint.sh
+      - ${PROJECT_PATH}/api:/api
+      - ${DATA_PATH}:/data
+    env_file: ".env"
+    environment:
+      - DATA_PATH=/data
+      - GPU=false
+      - CPU_ONLY=true
+  frontend:
+    image: node:${NODE_VERSION}
+    entrypoint: /entrypoint.sh
+    restart: ${RESTART_POLICY}
+    volumes:
+      - ${PROJECT_PATH}/docker/frontend/entrypoint.sh:/entrypoint.sh
+      - ${PROJECT_PATH}/frontend:/frontend
+    environment:
+      - API_PORT=${API_PORT}
+      - MODE=${MODE}
+      - VITE_API_URL=${API_URL}
