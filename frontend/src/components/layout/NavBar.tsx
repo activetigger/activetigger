@@ -3,7 +3,7 @@ import { FC, useState } from 'react';
 import { IoMdLogIn, IoMdLogOut } from 'react-icons/io';
 import { Link, useNavigate } from 'react-router-dom';
 import { Tooltip } from 'react-tooltip';
-import logo from '../../assets/at.svg';
+import logo from '../../assets/at.png';
 import { useAppContext } from '../../core/useAppContext';
 import { useAuth } from '../../core/useAuth';
 

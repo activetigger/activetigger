@@ -176,7 +176,7 @@ class Orchestrator:
         Synchronous work for the update loop (runs in a thread to avoid
         blocking the async event loop).
         """
-        self.queue.clean_old_processes()
+        self.queue.clean_old_processes(timeout=4)
         timer = time.time()
 
         # loop on loaded projects

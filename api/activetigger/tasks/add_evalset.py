@@ -62,7 +62,7 @@ class AddEvalSet(BaseTask):
             # added a check if DF is empty to avoid errors
             if len(df) == 0:
                 raise Exception("Your valid set is empty")
-            print("df cols", df.columns, flush=True)
+            #print("df cols", df.columns, flush=True)
             # stop Process
             self.__stop_process_opportunity()
             # create text column

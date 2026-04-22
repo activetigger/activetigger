@@ -4,7 +4,7 @@ import { FaGithub } from 'react-icons/fa';
 import { IoMdLogOut } from 'react-icons/io';
 import { Link, useNavigate } from 'react-router-dom';
 import { Tooltip } from 'react-tooltip';
-import logo from '../assets/at.svg';
+import logo from '../assets/at.png';
 import { LoginForm } from '../components/forms/LoginForm';
 import Notifications from '../components/layout/Notifications';
 import { useGetActiveUsers, useGetServer } from '../core/api';
