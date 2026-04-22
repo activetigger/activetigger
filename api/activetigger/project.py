@@ -407,35 +407,39 @@ class Project:
             shutil.rmtree(f"{config.data_path}/projects/static/{self.name}")
 
     def drop_evalset(self, dataset: str) -> None:
-        """
-        Clean all the test data of the project
-        - remove the file
-        - remove all the annotations in the database
-        - set the flag to False
-        """
-        if not self.params.dir:
-            raise Exception("No directory for project")
-        path = self.params.dir.joinpath(f"{dataset}.parquet")
-        if not path.exists():
-            raise Exception("No eval data available")
-        os.remove(path)
-        self.db_manager.projects_service.delete_annotations_evalset(
-            self.params.project_slug, dataset
-        )
-        if dataset == "test":
-            self.data.test = None
-            self.params.test = False
-        if dataset == "valid":
-            self.data.valid = None
-            self.params.valid = False
-        self.db_manager.projects_service.update_project(
-            self.params.project_slug, jsonable_encoder(self.params)
-        )
-        # add reload
-        self.data.load_dataset("all")
-        # reset the features file
-        self.features.reset_features_file()
-        self.quickmodels.drop_models(which="all")
+            """
+            Clean all the test data of the project
+            - remove the file
+            - remove all the annotations in the database
+            - set the flag to False
+            """
+            if not self.params.dir:
+                raise Exception("No directory for project")
+            path = self.params.dir.joinpath(f"{dataset}.parquet")
+            if not path.exists():
+                raise Exception("No eval data available")
+            os.remove(path)
+            self.db_manager.projects_service.delete_annotations_evalset(
+                self.params.project_slug, dataset
+            )
+            if dataset == "test":
+                self.data.test = None
+                self.params.test = False
+                self.params.s_test_idx=None
+            if dataset == "valid":
+                self.data.valid = None
+                self.params.valid = False
+                self.params.s_val_idx=None
+            if self.params.holdout_selection is not None and (self.params.valid==self.params.test==False):
+                self.params.holdout_selection=None
+            self.db_manager.projects_service.update_project(
+                self.params.project_slug, jsonable_encoder(self.params)
+            )
+            # add reload
+            self.data.load_dataset("all")
+            # reset the features file
+            self.features.reset_features_file()
+            self.quickmodels.drop_models(which="all")
 
     def add_evalset(
         self, dataset, evalset: EvalSetDataModel, username: str, project_slug: str

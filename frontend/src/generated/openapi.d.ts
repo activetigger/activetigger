@@ -2182,18 +2182,12 @@ export interface components {
         };
         /** Body_upload_file_dataset_files_add_dataset_post */
         Body_upload_file_dataset_files_add_dataset_post: {
-            /**
-             * File
-             * Format: binary
-             */
+            /** File */
             file: string;
         };
         /** Body_upload_file_project_files_add_project_post */
         Body_upload_file_project_files_add_project_post: {
-            /**
-             * File
-             * Format: binary
-             */
+            /** File */
             file: string;
         };
         /**
@@ -2985,30 +2979,25 @@ export interface components {
              */
             clear_valid: boolean;
             /**
-             * Random Selection
-             * @default false
+             * Train Selection
+             * @default random
+             * @enum {string}
              */
-            random_selection: boolean;
+            train_selection: "sequential" | "stratification" | "force_label" | "random";
+            /**
+             * Holdout Selection
+             * @enum {unknown}
+             */
+            holdout_selection?: "sequential" | "random" | "stratification" | null;
+            /** S Val Idx */
+            s_val_idx?: number | null;
+            /** S Test Idx */
+            s_test_idx?: number | null;
             /**
              * Cols Stratify
              * @default []
              */
             cols_stratify: string[];
-            /**
-             * Stratify Train
-             * @default false
-             */
-            stratify_train: boolean;
-            /**
-             * Stratify Test
-             * @default false
-             */
-            stratify_test: boolean;
-            /**
-             * Force Label
-             * @default false
-             */
-            force_label: boolean;
             /**
              * Force Computation
              * @default false
@@ -3138,30 +3127,25 @@ export interface components {
              */
             clear_valid: boolean;
             /**
-             * Random Selection
-             * @default false
+             * Train Selection
+             * @default random
+             * @enum {string}
              */
-            random_selection: boolean;
+            train_selection: "sequential" | "stratification" | "force_label" | "random";
+            /**
+             * Holdout Selection
+             * @enum {unknown}
+             */
+            holdout_selection?: "sequential" | "random" | "stratification" | null;
+            /** S Val Idx */
+            s_val_idx?: number | null;
+            /** S Test Idx */
+            s_test_idx?: number | null;
             /**
              * Cols Stratify
              * @default []
              */
             cols_stratify: string[];
-            /**
-             * Stratify Train
-             * @default false
-             */
-            stratify_train: boolean;
-            /**
-             * Stratify Test
-             * @default false
-             */
-            stratify_test: boolean;
-            /**
-             * Force Label
-             * @default false
-             */
-            force_label: boolean;
             /**
              * Force Computation
              * @default false
@@ -3664,6 +3648,10 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+            /** Input */
+            input?: unknown;
+            /** Context */
+            ctx?: Record<string, never>;
         };
         /**
          * WaitingModel
@@ -4242,7 +4230,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": string | null;
                 };
             };
             /** @description Validation Error */

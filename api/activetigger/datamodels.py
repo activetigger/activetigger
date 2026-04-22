@@ -79,11 +79,11 @@ class ProjectBaseModel(BaseModel):
     n_total: int | None = None
     clear_test: bool = False
     clear_valid: bool = False
-    random_selection: bool = False
+    train_selection:Literal["sequential","stratification","force_label","random"]="random"
+    holdout_selection:Literal["sequential","random","stratification",None]=None
+    s_val_idx:int|None=None
+    s_test_idx:int|None=None
     cols_stratify: list[str] = []
-    stratify_train: bool = False
-    stratify_test: bool = False
-    force_label: bool = False
     force_computation: bool = False
     seed: int = 42
 
