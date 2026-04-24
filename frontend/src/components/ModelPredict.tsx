@@ -59,7 +59,7 @@ export const ModelPredict: FC<{ currentModel: string | null }> = ({ currentModel
             }}
             disabled={isComputing}
           >
-            Prediction complete dataset
+            Prediction complete dataset (+ imported)
           </button>
         )}
         {model && (

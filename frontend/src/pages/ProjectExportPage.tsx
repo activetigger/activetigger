@@ -212,7 +212,7 @@ export const ProjectExportPage: FC = () => {
                         disabled={predictionLoading !== null}
                         onClick={() => downloadPrediction('all')}
                       >
-                        Export prediction complete dataset
+                        Export prediction complete dataset (+ imported)
                         {predictionLoading === 'all' && (
                           <PulseLoader color="white" size={6} className="ms-2" />
                         )}

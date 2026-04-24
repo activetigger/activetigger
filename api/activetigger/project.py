@@ -1544,7 +1544,9 @@ class Project:
         Fetch all necessary data and launch a prediction process
         """
         # Retrieve relevant data
-        dataset_index = None
+        path_train = None
+        path_valid = None
+        path_test = None
         if dataset_type == "external":
             if external_dataset is None:
                 raise Exception("No external dataset available for prediction")
@@ -1557,7 +1559,9 @@ class Project:
             col_label = None
             datasets = None
             path_data = self.data.path_data_all
-            dataset_index = self.data.index
+            path_train = self.data.path_train
+            path_valid = self.data.path_valid if self.data.path_valid.exists() else None
+            path_test = self.data.path_test if self.data.path_test.exists() else None
         elif dataset_type == "annotable":
             if datasets is None:
                 raise Exception("No dataset available for prediction")
@@ -1589,7 +1593,9 @@ class Project:
             statistics=datasets,
             path_data=path_data,
             external_dataset=external_dataset,
-            dataset_index=dataset_index,
+            path_train=path_train,
+            path_valid=path_valid,
+            path_test=path_test,
         )
 
     def start_quick_model_prediction(

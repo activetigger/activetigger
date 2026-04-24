@@ -309,7 +309,9 @@ class LanguageModels:
         statistics: list | None = None,
         path_data: Path | None = None,
         external_dataset: None | TextDatasetModel = None,
-        dataset_index: DataFrame | None = None,
+        path_train: Path | None = None,
+        path_valid: Path | None = None,
+        path_test: Path | None = None,
     ) -> None:
         """
         Start predicting process
@@ -343,7 +345,9 @@ class LanguageModels:
                 statistics=statistics,
                 path_data=path_data,
                 external_dataset=external_dataset,
-                dataset_index=dataset_index,
+                path_train=path_train,
+                path_valid=path_valid,
+                path_test=path_test,
             ),
             queue="gpu",
         )

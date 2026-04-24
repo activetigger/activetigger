@@ -58,7 +58,9 @@ class PredictBertMultiClass(BaseTask):
         statistics: list | None = None,
         event: Optional[multiprocessing.synchronize.Event] = None,
         unique_id: Optional[str] = None,
-        dataset_index: DataFrame | None = None,
+        path_train: Path | None = None,
+        path_valid: Path | None = None,
+        path_test: Path | None = None,
         **kwargs,
     ):
         super().__init__()
@@ -74,7 +76,9 @@ class PredictBertMultiClass(BaseTask):
         self.file_name = file_name
         self.batch = batch
         self.statistics = statistics
-        self.dataset_index = dataset_index
+        self.path_train = path_train
+        self.path_valid = path_valid
+        self.path_test = path_test
         self.progress_path = self.path / "progress_predict"
 
         if self.df is None and path_data is not None:
@@ -134,18 +138,37 @@ class PredictBertMultiClass(BaseTask):
             df = df[["id_external", "dataset", "text"]].dropna()
 
         if self.dataset == "all":
-            df["id_external"] = df[self.col_id_external]
+            df["id_external"] = df[self.col_id_external].astype(str)
             df["dataset"] = "all"
-            if self.dataset_index is not None and "id_external" in self.dataset_index.columns:
-                mapping = dict(
-                    zip(
-                        self.dataset_index["id_external"].astype(str),
-                        self.dataset_index["dataset"],
-                    )
-                )
-                df["dataset"] = (
-                    df["id_external"].astype(str).map(mapping).fillna(df["dataset"])
-                )
+            existing_ids = set(df["id_external"])
+            # add also all elements that may have been imported
+            subsets = {
+                "train": self.path_train,
+                "valid": self.path_valid,
+                "test": self.path_test,
+            }
+            extra_frames = []
+            for name, subset_path in subsets.items():
+                if subset_path is None or not subset_path.exists():
+                    continue
+                subset = Data.read_dataset(subset_path)
+                if "id_external" not in subset.columns:
+                    continue
+                subset["id_external"] = subset["id_external"].astype(str)
+                # label rows from the main corpus that belong to this split
+                in_main = subset["id_external"].isin(existing_ids)
+                if in_main.any():
+                    main_mask = df["id_external"].isin(set(subset.loc[in_main, "id_external"]))
+                    df.loc[main_mask, "dataset"] = name
+                # collect imported rows (present only in the split parquet)
+                imported = subset.loc[~in_main]
+                if not imported.empty and "text" in imported.columns:
+                    imported = imported[["id_external", "text"]].copy()
+                    imported["dataset"] = name
+                    extra_frames.append(imported)
+
+            if extra_frames:
+                df = pd.concat([df, *extra_frames])
 
         return df
 
