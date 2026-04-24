@@ -27,7 +27,7 @@ dependencies = [
 		"pyarrow",
 		"torch>=2.6.0",
 		"transformers[torch]>=4.51.0",
-		"sentence-transformers",
+		"sentence-transformers>=5.4.0",
 		"typing-inspect",
 		"typing-extensions",
 		"spacy>=3.8",
