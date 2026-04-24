@@ -1386,8 +1386,7 @@ class Project:
         """
         col_name_id = self.params.col_id if self.params.col_id else "id"
         col_name_id = col_name_id.removeprefix("dataset_")
-        if len(table) > 0:
-            table[col_name_id] = table["index"].map(self.data.index["id_external"])
+        table[col_name_id] = table["index"].map(self.data.index["id_external"])
         table = table.rename(columns={"index": "id_internal"})
         # put col_id first, then id_internal, then the rest
         ordered = [col_name_id, "id_internal"] + [
