@@ -21,6 +21,7 @@ from activetigger.queue_manager import Queue
 from activetigger.tasks.compute_clip_imagexp import ComputeClipImagexp
 from activetigger.tasks.compute_dfm import ComputeDfm
 from activetigger.tasks.compute_fasttext import ComputeFasttext
+from activetigger.tasks.compute_multimodal import ComputeMultimodal
 from activetigger.tasks.compute_sbert import ComputeSbert
 
 # Experimental image projects: list of selectable image embedding models.
@@ -36,6 +37,21 @@ IMAGE_EMBEDDING_MODELS_IMAGEXP: dict[str, dict[str, str]] = {
     },
 }
 DEFAULT_IMAGE_EMBEDDING_MODEL_IMAGEXP = "ViT-B-32/openai"
+
+# Experimental image projects: multimodal sentence-transformer models used
+# for prompt-based image retrieval (§ docs/multimodal-prompt-selection.md).
+# UI label -> full HF model name (loaded via SentenceTransformer(name)).
+# The CLIP entries are native sentence-transformers models and work on CPU
+# with no extra dependencies. BGE-VL and Qwen need trust_remote_code=True;
+# BGE-VL additionally may require `pip install FlagEmbedding`.
+MULTIMODAL_EMBEDDING_MODELS: dict[str, str] = {
+    "CLIP-ViT-B-32": "sentence-transformers/clip-ViT-B-32",
+    "CLIP-ViT-L-14": "sentence-transformers/clip-ViT-L-14",
+    "BGE-VL-base": "BAAI/BGE-VL-base",
+    "Qwen3-VL-Embedding-2B": "Qwen/Qwen3-VL-Embedding-2B",
+    "Qwen3-VL-Embedding-8B": "Qwen/Qwen3-VL-Embedding-8B",
+}
+DEFAULT_MULTIMODAL_EMBEDDING_MODEL = "CLIP-ViT-B-32"
 
 
 class Features:
@@ -87,6 +103,13 @@ class Features:
         self.lang = lang
         self.computing = computing
         self.kind = kind
+        # Optional hook called as `on_delete(name, kind)` after a successful
+        # feature delete. Project wires this up for image projects so that
+        # deleting a multimodal-embeddings feature cascades to prompts.
+        self.on_delete = None
+        # Optional hook called after a full reset_features_file() — all
+        # features are gone, so any prompt/cache bound to them is stale.
+        self.on_reset = None
 
         # Experimental image projects: replace the text embedding model list
         # with image embedding models, drop fasttext/dfm/regex (text-only).
@@ -96,6 +119,10 @@ class Features:
                 "image-embeddings": {
                     "models": IMAGE_EMBEDDING_MODELS_IMAGEXP,
                     "default": DEFAULT_IMAGE_EMBEDDING_MODEL_IMAGEXP,
+                },
+                "multimodal-embeddings": {
+                    "models": MULTIMODAL_EMBEDDING_MODELS,
+                    "default": DEFAULT_MULTIMODAL_EMBEDDING_MODEL,
                 },
                 "dataset": {},
             }
@@ -166,6 +193,13 @@ class Features:
         self.projects_service.delete_project_features(self.project_slug)
         self.create_features_file()
         self.map, self.n = self.get_map()
+
+        # cascade hook — every prompt/cache bound to a feature is now stale.
+        if getattr(self, "on_reset", None) is not None:
+            try:
+                self.on_reset()
+            except Exception as ex:
+                print(f"on_reset hook failed: {ex}")
 
     def get_map(self) -> tuple[dict, int]:
         """
@@ -294,6 +328,13 @@ class Features:
         if not self.exists(name):
             raise Exception("Feature doesn't exist")
 
+        # remember kind before the DB row is gone, so the on_delete hook
+        # (e.g. prompts cascade) can dispatch on it.
+        try:
+            kind = self.projects_service.get_feature(self.project_slug, name).kind
+        except Exception:
+            kind = None
+
         col = self.map[name]
         # read data, delete columns and save
         content = pd.read_parquet(self.path_features)
@@ -306,6 +347,13 @@ class Features:
 
         # refresh the map
         self.map = self.get_map()[0]
+
+        # cascade hook (set by Project for image projects to drop dependent prompts)
+        if getattr(self, "on_delete", None) is not None:
+            try:
+                self.on_delete(name, kind)
+            except Exception as ex:
+                print(f"on_delete hook failed for feature {name}: {ex}")
 
     def get(
         self, features: list | str, dataset: list | str = "all", keep_dataset_column: bool = False
@@ -436,6 +484,12 @@ class Features:
                 pretty_name = f"CLIP_{ui_label.replace('/', '_')}"
             else:
                 pretty_name = f"CLIP_{name}"
+        elif kind == "multimodal-embeddings":
+            ui_label = parameters.get("model") or DEFAULT_MULTIMODAL_EMBEDDING_MODEL
+            if use_default_name:
+                pretty_name = f"MM_{ui_label.replace('/', '_')}"
+            else:
+                pretty_name = f"MM_{name}"
         elif kind == "fasttext":
             if parameters["model"] is not None and parameters["model"] != "":
                 short_model = (
@@ -471,14 +525,19 @@ class Features:
             "regex",
             "dataset",
             "image-embeddings",
+            "multimodal-embeddings",
         }:
             raise ValueError("Kind not recognized")
 
         # Experimental image projects: gate text-only feature kinds.
-        if self.kind == "image" and kind not in {"image-embeddings", "dataset"}:
+        if self.kind == "image" and kind not in {
+            "image-embeddings",
+            "multimodal-embeddings",
+            "dataset",
+        }:
             raise ValueError(f"Feature kind '{kind}' is not supported on image projects")
-        if self.kind != "image" and kind == "image-embeddings":
-            raise ValueError("image-embeddings is only available on image projects")
+        if self.kind != "image" and kind in {"image-embeddings", "multimodal-embeddings"}:
+            raise ValueError(f"{kind} is only available on image projects")
 
         name = self.__create_pretty_name(kind, name, use_default_name, parameters)
         if self.exists(name):
@@ -590,6 +649,36 @@ class Features:
 
             parameters = {
                 "model": ui_label,
+                "name": name,
+                "kind": kind,
+                "username": username,
+                "batch_size": batch_size,
+            }
+
+        if kind == "multimodal-embeddings":
+            ui_label = parameters.get("model") or DEFAULT_MULTIMODAL_EMBEDDING_MODEL
+            if ui_label == "generic":
+                ui_label = DEFAULT_MULTIMODAL_EMBEDDING_MODEL
+            hf_name = MULTIMODAL_EMBEDDING_MODELS.get(ui_label)
+            if hf_name is None:
+                raise ValueError(f"Unknown multimodal embedding model: {ui_label}")
+
+            batch_size = int(parameters.get("batch_size", 8))
+            unique_id = self.queue.add_task(
+                "feature",
+                self.project_slug,
+                ComputeMultimodal(
+                    paths=df,
+                    path_process=self.path_all.parent,
+                    model_name=hf_name,
+                    batch_size=batch_size,
+                ),
+                queue="gpu",
+            )
+
+            parameters = {
+                "model": ui_label,
+                "hf_name": hf_name,
                 "name": name,
                 "kind": kind,
                 "username": username,

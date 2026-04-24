@@ -31,6 +31,7 @@ from activetigger.app.routers import (
     models,
     monitoring,
     projects,
+    prompts,
     schemes,
     users,
 )
@@ -129,6 +130,7 @@ app.include_router(projects.router)
 app.include_router(annotations.router)
 app.include_router(schemes.router)
 app.include_router(features.router)
+app.include_router(prompts.router)
 app.include_router(export.router)
 app.include_router(models.router)
 app.include_router(generation.router)

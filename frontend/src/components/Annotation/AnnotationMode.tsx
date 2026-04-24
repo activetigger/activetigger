@@ -3,7 +3,7 @@ import { ChangeEvent, Dispatch, FC, SetStateAction, useEffect, useMemo, useState
 import { FaMapMarkedAlt } from 'react-icons/fa';
 import { GiTigerHead } from 'react-icons/gi';
 import { HiOutlineQuestionMarkCircle } from 'react-icons/hi';
-import { LuRefreshCw } from 'react-icons/lu';
+import { LuMessageSquare, LuRefreshCw } from 'react-icons/lu';
 import { MdDisplaySettings } from 'react-icons/md';
 import Select from 'react-select';
 import { Tooltip } from 'react-tooltip';
@@ -13,6 +13,7 @@ import { useDebounceValue } from 'usehooks-ts';
 import { useGetQuickModel, useStatistics } from '../../core/api';
 import { useAppContext } from '../../core/useAppContext';
 import { isValidRegex } from '../../core/utils';
+import type { PromptsProjectStateModel } from '../../types';
 import { AnnotationTagFilterSelect } from './AnnotationTagFilterSelect';
 
 interface AnnotationModeFormProps {
@@ -20,6 +21,7 @@ interface AnnotationModeFormProps {
   setActiveMenu: Dispatch<SetStateAction<boolean>>;
   setShowDisplayViz: Dispatch<SetStateAction<boolean>>;
   setShowDisplayConfig: Dispatch<SetStateAction<boolean>>;
+  setShowPromptsModal?: Dispatch<SetStateAction<boolean>>;
   nSample: number | null;
   statistics: ReturnType<typeof useStatistics>['statistics'];
 }
@@ -37,6 +39,7 @@ export const AnnotationModeForm: FC<AnnotationModeFormProps> = ({
   setActiveMenu,
   setShowDisplayViz,
   setShowDisplayConfig,
+  setShowPromptsModal,
   nSample,
   statistics,
 }) => {
@@ -109,6 +112,14 @@ export const AnnotationModeForm: FC<AnnotationModeFormProps> = ({
           ? project?.next.methods.filter((m) => m !== 'maxprob')
           : project?.next.methods_min) || []
       ).map((mode) => ({ mode, label_prob: undefined }));
+      // Prompt selection doesn't need an active model — surface it whenever
+      // the backend exposes it (image projects with embeddings + prompts).
+      if (
+        (project?.next.methods || []).includes('prompt') &&
+        !modes.some((m) => m.mode === 'prompt')
+      ) {
+        modes.push({ mode: 'prompt', label_prob: undefined });
+      }
       const probLabels =
         phase === 'train' && activeModel
           ? availableLabels
@@ -128,9 +139,10 @@ export const AnnotationModeForm: FC<AnnotationModeFormProps> = ({
     }, [phase, activeModel, project?.next.methods, project?.next.methods_min, availableLabels]);
 
   // reset selection mode to "fixed" when the active model is deactivated
-  // and the current mode requires a model (e.g. maxprob, active)
+  // and the current mode requires a model (e.g. maxprob, active).
+  // "prompt" is model-independent, so it survives deactivation.
   useEffect(() => {
-    if (!activeModel && !['fixed', 'random'].includes(selectionConfig.mode)) {
+    if (!activeModel && !['fixed', 'random', 'prompt'].includes(selectionConfig.mode)) {
       const availableModes = project?.next.methods_min || [];
       if (!availableModes.includes(selectionConfig.mode)) {
         setAppContext((prev) => ({
@@ -203,7 +215,9 @@ export const AnnotationModeForm: FC<AnnotationModeFormProps> = ({
                 ? `max pred ${o.label_prob}`
                 : o.mode === 'active' && o.label_prob
                   ? `active ${o.label_prob}`
-                  : o.mode
+                  : o.mode === 'prompt'
+                    ? 'prompt (multimodal)'
+                    : o.mode
             }
             onChange={(option) => {
               if (option !== null) {
@@ -213,12 +227,71 @@ export const AnnotationModeForm: FC<AnnotationModeFormProps> = ({
                     ...prev.selectionConfig,
                     mode: option.mode,
                     label_prob: option.label_prob,
+                    // Clear prompt_id when leaving prompt mode.
+                    prompt_id: option.mode === 'prompt' ? prev.selectionConfig.prompt_id : undefined,
                   },
                 }));
               }
             }}
           />
         </div>
+
+        {project?.params?.kind === 'image' && setShowPromptsModal && (
+          <div className="at-input-group">
+            <label className="small-gray">Prompts</label>
+            <div className="d-flex align-items-center gap-2">
+              <button
+                type="button"
+                className="button"
+                onClick={() => setShowPromptsModal(true)}
+                title="Manage prompts for image selection"
+              >
+                <LuMessageSquare
+                  size={28}
+                  style={{
+                    color: selectionConfig.prompt_id ? 'green' : 'grey',
+                    cursor: 'pointer',
+                  }}
+                />
+              </button>
+              {selectionConfig.mode === 'prompt' &&
+                (() => {
+                  const promptsState = (
+                    project as unknown as { prompts?: PromptsProjectStateModel | null } | undefined
+                  )?.prompts;
+                  const available = promptsState?.available ?? [];
+                  if (available.length === 0) {
+                    return (
+                      <small className="text-muted">No prompts — click to add one</small>
+                    );
+                  }
+                  return (
+                    <select
+                      className="form-select form-select-sm"
+                      style={{ maxWidth: '220px' }}
+                      value={selectionConfig.prompt_id ?? ''}
+                      onChange={(e) =>
+                        setAppContext((prev) => ({
+                          ...prev,
+                          selectionConfig: {
+                            ...prev.selectionConfig,
+                            prompt_id: e.target.value || undefined,
+                          },
+                        }))
+                      }
+                    >
+                      <option value="">— select a prompt —</option>
+                      {available.map((p) => (
+                        <option key={p.prompt_id} value={p.prompt_id}>
+                          {p.text.length > 40 ? p.text.slice(0, 40) + '…' : p.text}
+                        </option>
+                      ))}
+                    </select>
+                  );
+                })()}
+            </div>
+          </div>
+        )}
       </div>
       {/* CONTENT */}
       <div>

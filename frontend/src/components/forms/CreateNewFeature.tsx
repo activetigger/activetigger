@@ -15,6 +15,7 @@ interface FeaturesOptions {
   fasttext?: Options;
   'sentence-embeddings'?: Options;
   'image-embeddings'?: Options;
+  'multimodal-embeddings'?: Options;
 }
 
 interface CreateNewFeatureProps {
@@ -46,7 +47,12 @@ export const CreateNewFeature: FC<CreateNewFeatureProps> = ({
         max_length_tokens: 1024,
         batch_size: 32,
       },
-      type: 'image-embeddings' in featuresOption ? 'image-embeddings' : 'sentence-embeddings',
+      type:
+        'image-embeddings' in featuresOption
+          ? 'image-embeddings'
+          : 'multimodal-embeddings' in featuresOption
+            ? 'multimodal-embeddings'
+            : 'sentence-embeddings',
       name: defaultName,
     },
   });
@@ -142,6 +148,38 @@ export const CreateNewFeature: FC<CreateNewFeatureProps> = ({
             placeholder="Batch size"
             {...register('parameters.batch_size')}
           />
+        </details>
+      )}
+
+      {selectedFeatureToCreate === 'multimodal-embeddings' && (
+        <details open>
+          <summary>Multimodal (image + prompt) model</summary>
+          <label htmlFor="mm_model">Model to use</label>
+          <select id="mm_model" {...register('parameters.model')}>
+            <option key="generic" value="generic">
+              Default model
+            </option>
+            {(featuresOption['multimodal-embeddings']?.models
+              ? Object.keys(
+                  featuresOption['multimodal-embeddings']['models'] as Record<string, unknown>,
+                )
+              : []
+            ).map((element) => (
+              <option key={element} value={element}>
+                {element}
+              </option>
+            ))}
+          </select>
+          <label htmlFor="mm_batch_size">Batch size</label>
+          <input
+            type="number"
+            id="mm_batch_size"
+            placeholder="Batch size"
+            {...register('parameters.batch_size')}
+          />
+          <small>
+            Large Qwen models (2B/8B) need substantial GPU memory. Start with BGE-VL-base.
+          </small>
         </details>
       )}
 

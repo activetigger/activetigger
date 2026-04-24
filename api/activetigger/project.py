@@ -45,6 +45,7 @@ from activetigger.datamodels import (
     ProjectModel,
     ProjectStateModel,
     ProjectUpdateModel,
+    PromptComputing,
     QuickModelComputing,
     QuickModelInModel,
     StaticFileModel,
@@ -67,6 +68,7 @@ from activetigger.languagemodels import LanguageModels
 from activetigger.messages import Messages
 from activetigger.monitoring import Monitoring
 from activetigger.projections import Projections
+from activetigger.prompts import Prompts
 from activetigger.queue_manager import Queue
 from activetigger.quickmodels import QuickModels
 from activetigger.schemes import Schemes
@@ -225,6 +227,28 @@ class Project:
             self.params.language,
             kind=getattr(self.params, "kind", "text"),
         )
+        # Experimental multimodal prompt panel — image projects only.
+        # See docs/multimodal-prompt-selection.md.
+        self.prompts: Prompts | None = None
+        if getattr(self.params, "kind", "text") == "image" and self.params.dir is not None:
+            self.prompts = Prompts(
+                project_slug,
+                self.params.dir,
+                self.queue,
+                self.computing,
+                self.features,
+            )
+
+            def _cascade_prompts(name: str, kind: str | None) -> None:
+                if kind == "multimodal-embeddings" and self.prompts is not None:
+                    self.prompts.delete_by_feature(name)
+
+            def _reset_prompts() -> None:
+                if self.prompts is not None:
+                    self.prompts.reset_all()
+
+            self.features.on_delete = _cascade_prompts
+            self.features.on_reset = _reset_prompts
         self.languagemodels = LanguageModels(
             project_slug,
             self.params.dir,
@@ -829,7 +853,7 @@ class Project:
         n_sample = f.sum()  # use len(ss) for adding history
 
         # validate selection method
-        valid_selections = {"fixed", "random", "maxprob", "active"}
+        valid_selections = {"fixed", "random", "maxprob", "active", "prompt"}
         if next.selection not in valid_selections:
             raise ValueError(f"Unknown selection method: '{next.selection}'")
 
@@ -886,6 +910,25 @@ class Project:
                 element_id = ss_active.index[0]
                 n_sample = f.sum()
                 indicator = f"entropy: {round(proba.loc[element_id, 'entropy'], 2)}"
+
+        # prompt: cosine similarity between a saved prompt embedding and the
+        # image embeddings of its bound multimodal-embeddings feature.
+        # The full sorted ranking is cached on the Prompts object per
+        # (prompt_id, dataset); each call then just does an index
+        # intersection with the candidate set ss.
+        if next.selection == "prompt":
+            if self.prompts is None:
+                raise ValueError("Prompt selection is only available on image projects")
+            if next.prompt_id is None:
+                raise ValueError("prompt_id is required for prompt selection")
+            ranked = self.prompts.get_ranking(next.prompt_id, next.dataset)
+            # Index.intersection preserves the order of self, so candidates
+            # stays in descending-similarity order.
+            candidates = ranked.loc[ranked.index.intersection(ss.index)]
+            if candidates.empty:
+                raise ValueError("No candidate elements have embeddings for the prompt's feature.")
+            element_id = candidates.index[0]
+            indicator = f"similarity: {round(float(candidates.iloc[0]), 3)}"
 
         if (
             next.model_active is not None
@@ -1186,15 +1229,29 @@ class Project:
         ):
             return self._state_cache
 
+        # expose "prompt" selection only when the image project has at least
+        # one multimodal-embeddings feature AND at least one saved prompt.
+        methods = ["fixed", "random", "maxprob", "active"]
+        if self.prompts is not None:
+            try:
+                available = self.features.get_available()
+            except Exception:
+                available = {}
+            has_mm_feature = any(f.kind == "multimodal-embeddings" for f in available.values())
+            has_prompt = len(self.prompts.list()) > 0
+            if has_mm_feature and has_prompt:
+                methods.append("prompt")
+
         result = ProjectStateModel(
             params=self.params,
             next=NextProjectStateModel(
                 methods_min=["fixed", "random"],
-                methods=["fixed", "random", "maxprob", "active"],
+                methods=methods,
                 sample=["untagged", "all", "tagged", "not_by_me", "commented"],
             ),
             schemes=self.schemes.state(),
             features=self.features.state(),
+            prompts=self.prompts.state() if self.prompts is not None else None,
             quickmodel=self.quickmodels.state(),
             languagemodels=self.languagemodels.state(),
             projections=self.projections.state(),
@@ -1833,6 +1890,10 @@ class Project:
                             feature_computation.parameters,
                             results,
                         )
+                    case "prompt":
+                        prompt_computation = cast(PromptComputing, e)
+                        if self.prompts is not None and results is not None:
+                            self.prompts.receive_result(prompt_computation, results)
                     case "projection":
                         projection = cast(ProjectionComputing, e)
                         self.projections.add(projection, results)

@@ -11,7 +11,7 @@ import {
   useStatistics,
 } from '../../core/api';
 import { useAppContext } from '../../core/useAppContext';
-import { ElementOutModel } from '../../types';
+import { ElementOutModel, PromptsProjectStateModel } from '../../types';
 
 import MDEditor from '@uiw/react-md-editor';
 import classNames from 'classnames';
@@ -23,6 +23,7 @@ import { TagDisplayParameters } from '../TagDisplayParameters';
 import { DisplayProjection } from '../vizualisation/DisplayProjection';
 import { AnnotationHistoryList } from './AnnotationHistoryList';
 import { AnnotationModeForm } from './AnnotationMode';
+import { PromptsPanel } from './PromptsPanel';
 import { MulticlassInput } from './MulticlassInput';
 import { MultilabelInput } from './MultilabelInput';
 import { SelectActiveLearning } from './SelectActiveLearning';
@@ -65,6 +66,7 @@ export const AnnotationManagement: FC = () => {
   const [showDisplayConfig, setShowDisplayConfig] = useState<boolean>(false);
   const [showDisplayViz, setShowDisplayViz] = useState<boolean>(false);
   const [showCodebook, setShowCodebook] = useState<boolean>(false);
+  const [showPromptsModal, setShowPromptsModal] = useState<boolean>(false);
   const { codebook } = useGetSchemeCodebook(projectName || null, currentScheme || null);
   const [selectFirstModelTrained, setSelectFirstModelTrained] = useState<boolean>(false);
   const [authorizeRetraining, setAuthorizeRetraining] = useState<boolean>(false);
@@ -291,6 +293,7 @@ export const AnnotationManagement: FC = () => {
         setActiveMenu={setActiveMenu}
         setShowDisplayViz={setShowDisplayViz}
         setShowDisplayConfig={setShowDisplayConfig}
+        setShowPromptsModal={setShowPromptsModal}
         nSample={nSample}
         statistics={statistics}
       />
@@ -448,6 +451,26 @@ export const AnnotationManagement: FC = () => {
         </Modal.Header>
         <Modal.Body data-color-mode="light">
           <MDEditor.Markdown source={codebook || ''} style={{ backgroundColor: 'transparent' }} />
+        </Modal.Body>
+      </Modal>
+      <Modal
+        show={showPromptsModal}
+        onHide={() => setShowPromptsModal(false)}
+        size="lg"
+        id="prompts-modal"
+      >
+        <Modal.Header closeButton>
+          <Modal.Title>Prompts for image selection</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          {project?.params?.kind === 'image' && project?.params?.project_slug && (
+            <PromptsPanel
+              projectSlug={project.params.project_slug}
+              state={
+                (project as unknown as { prompts?: PromptsProjectStateModel | null }).prompts
+              }
+            />
+          )}
         </Modal.Body>
       </Modal>
     </>

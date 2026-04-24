@@ -134,6 +134,23 @@ export interface SelectionConfig {
   frameSelection?: boolean; // true/false to use frame to select
   filter?: string;
   users?: string[];
+  prompt_id?: string; // saved prompt id, used when mode === 'prompt'
+}
+
+// Prompt-based image selection (multimodal). Hand-written until
+// `npm run generate` picks up the new backend routes/schemas.
+export interface PromptOutModel {
+  prompt_id: string;
+  text: string;
+  feature_name: string;
+  user: string;
+  created_at: string;
+}
+
+export interface PromptsProjectStateModel {
+  available: PromptOutModel[];
+  bindable_features: string[];
+  training: Record<string, Record<string, string | null>>;
 }
 
 export interface GenerateConfig {

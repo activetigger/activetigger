@@ -163,6 +163,7 @@ class NextInModel(BaseModel):
     filter: str | None = None
     dataset: str = "train"
     model_active: ActiveModel | None = None
+    prompt_id: str | None = None
 
 
 class ElementInModel(BaseModel):
@@ -621,6 +622,27 @@ class FeatureComputing(ProcessComputing):
     parameters: dict
 
 
+class PromptComputing(ProcessComputing):
+    kind: Literal["prompt"]
+    prompt_id: str
+    text: str
+    feature_name: str
+    hf_name: str
+
+
+class PromptInModel(BaseModel):
+    text: str
+    feature_name: str
+
+
+class PromptOutModel(BaseModel):
+    prompt_id: str
+    text: str
+    feature_name: str
+    user: str
+    created_at: str
+
+
 class GenerationComputing(ProcessComputing):
     kind: Literal["generation"]
     project: str
@@ -825,6 +847,12 @@ class FeaturesProjectStateModel(BaseModel):
     training: dict[str, dict[str, str | None]]
 
 
+class PromptsProjectStateModel(BaseModel):
+    available: list[PromptOutModel]
+    bindable_features: list[str]
+    training: dict[str, dict[str, str | None]]
+
+
 class ModelDescriptionModel(BaseModel):
     name: str
     kind: str
@@ -888,6 +916,7 @@ class ProjectStateModel(BaseModel):
     next: NextProjectStateModel
     schemes: SchemesProjectStateModel
     features: FeaturesProjectStateModel
+    prompts: PromptsProjectStateModel | None = None
     quickmodel: QuickModelsProjectStateModel
     languagemodels: LanguageModelsProjectStateModel
     projections: ProjectionsProjectStateModel

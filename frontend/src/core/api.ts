@@ -19,6 +19,7 @@ import {
   ProjectStateModel,
   ProjectUpdateModel,
   ProjectionParametersModel,
+  PromptOutModel,
   QuickModelInModel,
   SelectionConfig,
   SupportedAPI,
@@ -659,21 +660,27 @@ export function useGetNextElementId(
   const { notify } = useNotifications();
   const getNextElementId = useCallback(async () => {
     if (projectSlug && currentScheme) {
+      // prompt_id is not yet in the generated OpenAPI types; the extra field
+      // is kept through a widening cast. Drop the cast once `npm run generate`
+      // picks up the new NextInModel field.
+      const body = {
+        scheme: currentScheme,
+        selection: selectionConfig.mode,
+        sample: selectionConfig.sample,
+        on_labels: selectionConfig.labels,
+        filter: selectionConfig.filter,
+        history: history,
+        frame: selectionConfig.frameSelection ? selectionConfig.frame : null, // only if frame option selected
+        dataset: phase,
+        label_prob: selectionConfig.label_prob,
+        on_users: selectionConfig.users,
+        model_active: activeModel,
+        prompt_id: selectionConfig.prompt_id,
+      };
       const res = await api.POST('/elements/next', {
         params: { query: { project_slug: projectSlug } },
-        body: {
-          scheme: currentScheme,
-          selection: selectionConfig.mode,
-          sample: selectionConfig.sample,
-          on_labels: selectionConfig.labels,
-          filter: selectionConfig.filter,
-          history: history,
-          frame: selectionConfig.frameSelection ? selectionConfig.frame : null, // only if frame option selected
-          dataset: phase,
-          label_prob: selectionConfig.label_prob,
-          on_users: selectionConfig.users,
-          model_active: activeModel,
-        },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        body: body as any,
       });
       if (res.data?.element_id)
         return { element_id: res.data?.element_id, n_sample: res.data?.n_sample };
@@ -2439,6 +2446,79 @@ export function useDeletePrompts(projectSlug: string | null) {
     [notify, projectSlug],
   );
   return deletePrompts;
+}
+
+/**
+ * Multimodal prompt-based image selection hooks.
+ * These call /prompts/* which is not yet in the generated OpenAPI types,
+ * so we drop to raw fetch (same pattern as fetchOllamaModels).
+ * See docs/multimodal-prompt-selection.md.
+ */
+
+function _authHeaders(): Record<string, string> {
+  const auth = JSON.parse(localStorage.getItem('activeTigger.auth') || '{}');
+  return auth.access_token ? { Authorization: `Bearer ${auth.access_token}` } : {};
+}
+
+export function useAddImagePrompt(projectSlug: string | null) {
+  const { notify } = useNotifications();
+  const addPrompt = useCallback(
+    async (text: string, featureName: string) => {
+      if (!projectSlug || !text || !featureName) return null;
+      const baseUrl = config.api.url.replace(/\/+$/, '');
+      const url = `${baseUrl}/prompts/add?project_slug=${encodeURIComponent(projectSlug)}`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ..._authHeaders() },
+        body: JSON.stringify({ text, feature_name: featureName }),
+      });
+      if (!res.ok) {
+        const detail = await res.json().catch(() => null);
+        notify({ type: 'error', message: detail?.detail || `HTTP ${res.status}` });
+        return null;
+      }
+      notify({ type: 'info', message: 'Prompt is computing.' });
+      return (await res.json()) as { unique_id: string };
+    },
+    [projectSlug, notify],
+  );
+  return addPrompt;
+}
+
+export function useListImagePrompts(projectSlug: string | null) {
+  const [fetchTrigger, setFetchTrigger] = useState<boolean>(false);
+  const prompts = useAsyncMemo(async () => {
+    if (!projectSlug) return [] as PromptOutModel[];
+    const baseUrl = config.api.url.replace(/\/+$/, '');
+    const url = `${baseUrl}/prompts/list?project_slug=${encodeURIComponent(projectSlug)}`;
+    const res = await fetch(url, { headers: _authHeaders() });
+    if (!res.ok) return [] as PromptOutModel[];
+    return (await res.json()) as PromptOutModel[];
+  }, [projectSlug, fetchTrigger]);
+  const reFetch = useCallback(() => setFetchTrigger((f) => !f), []);
+  return { prompts: getAsyncMemoData(prompts) || [], reFetchImagePrompts: reFetch };
+}
+
+export function useDeleteImagePrompt(projectSlug: string | null) {
+  const { notify } = useNotifications();
+  const deletePrompt = useCallback(
+    async (promptId: string) => {
+      if (!projectSlug || !promptId) return false;
+      const baseUrl = config.api.url.replace(/\/+$/, '');
+      const url = `${baseUrl}/prompts/delete?project_slug=${encodeURIComponent(
+        projectSlug,
+      )}&prompt_id=${encodeURIComponent(promptId)}`;
+      const res = await fetch(url, { method: 'POST', headers: _authHeaders() });
+      if (!res.ok) {
+        notify({ type: 'error', message: `HTTP ${res.status}` });
+        return false;
+      }
+      notify({ type: 'success', message: 'Prompt deleted.' });
+      return true;
+    },
+    [projectSlug, notify],
+  );
+  return deletePrompt;
 }
 
 /***** MANAGE Files ******/
