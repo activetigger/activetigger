@@ -60,6 +60,13 @@ class Prompts:
         return pd.read_parquet(self.path_file)
 
     def _write(self, df: pd.DataFrame) -> None:
+        # Writing an empty DataFrame can produce a parquet file that pyarrow
+        # later fails to read ("magic bytes not found in footer"). Treat an
+        # empty result the same as "no file" — _read already handles that.
+        if df.empty:
+            if self.path_file.exists():
+                self.path_file.unlink()
+            return
         df.to_parquet(self.path_file, index=True)
 
     def _resolve_feature(self, feature_name: str) -> str:
