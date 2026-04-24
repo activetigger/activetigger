@@ -208,8 +208,16 @@ class Features:
                 cols_to_drop += [
                     c
                     for c in df.columns
-                    if c in ("prediction", "text", "GS-label", "GS-label-non-dichotomized")
-                    or df[c].dtype == "object"
+                    if c
+                    in (
+                        "prediction",
+                        "text",
+                        "dataset",
+                        "id_external",
+                        "GS-label",
+                        "GS-label-non-dichotomized",
+                    )
+                    or not pd.api.types.is_numeric_dtype(df[c])
                 ]
                 df = df.drop(columns=set(cols_to_drop), errors="ignore")
                 name = f.replace("__", "_")  # avoid __ in the name for features

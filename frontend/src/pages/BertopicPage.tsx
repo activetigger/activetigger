@@ -210,6 +210,10 @@ export const BertopicPage: FC = () => {
                           <td>{parameters?.bertopic_params.embedding_model}</td>
                         </tr>
                         <tr>
+                          <td>Embedding batch size</td>
+                          <td>{parameters?.bertopic_params.embedding_batch_size}</td>
+                        </tr>
+                        <tr>
                           <td>Number of keywords</td>
                           <td>{parameters?.bertopic_params.top_n_words}</td>
                         </tr>
@@ -265,9 +269,16 @@ export const BertopicPage: FC = () => {
         )}
         {projection && (
           <>
-            <div style={{ height: `${figSize}vh`, width: '100%' }}>
+            <div
+              style={{
+                height: `${figSize}vh`,
+                width: '100%',
+                maxWidth: '100%',
+                overflow: 'hidden',
+              }}
+            >
               <BertopicVizSigma
-                className={`col-12 border h-100`}
+                className="border h-100 w-100"
                 nodes={projection.nodes}
                 selectedId={selectedId}
                 setSelectedIdAfterClick={setSelectedIdAfterClick}

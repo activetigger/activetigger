@@ -118,12 +118,12 @@ class ComputeSbert(BaseTask):
                 index=self.texts.index,
                 columns=["sb%03d" % (x + 1) for x in range(len(embeddings[0][0]))],
             )
-            if self.progress_file_temporary:
-                self.path_progress.unlink()
             return emb
         except Exception as e:
             raise e
         finally:
+            if self.progress_file_temporary:
+                self.path_progress.unlink(missing_ok=True)
             if sbert is not None:
                 del sbert
             del self.texts

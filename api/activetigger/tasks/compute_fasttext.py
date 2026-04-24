@@ -47,36 +47,40 @@ class ComputeFasttext(BaseTask):
         if not self.path_models.exists():
             raise Exception(f"path {str(self.path_models)} does not exist")
 
-        current_directory = os.getcwd()
-        os.chdir(self.path_models)
+        progress_path = self.path_process.joinpath(self.unique_id)
+        try:
+            current_directory = os.getcwd()
+            os.chdir(self.path_models)
 
-        # if no model is specified, try to dl the language model
-        if self.model is None or self.model == "" or self.model == "generic":
-            model_name = download_model(self.language, if_exists="ignore")
-        else:
-            model_name = self.model
-            if not Path(model_name).exists():
-                raise FileNotFoundError(f"Model {model_name} not found")
+            # if no model is specified, try to dl the language model
+            if self.model is None or self.model == "" or self.model == "generic":
+                model_name = download_model(self.language, if_exists="ignore")
+            else:
+                model_name = self.model
+                if not Path(model_name).exists():
+                    raise FileNotFoundError(f"Model {model_name} not found")
 
-        os.chdir(current_directory)
-        texts_tk = tokenize(self.texts)
-        ft = fasttext.load_model(str(self.path_models.joinpath(model_name)))
-        emb = []
-        for t in texts_tk:
-            emb.append(ft.get_sentence_vector(t.replace("\n", " ")))
-            # manage progress
-            if len(emb) % 100 == 0:
-                progress_percent = len(emb) / len(texts_tk) * 100
-                with open(self.path_process.joinpath(self.unique_id), "w") as f:
-                    f.write(str(round(progress_percent, 1)))
-                print(progress_percent)
-            # check if the user want to stop the process
-            if self.event is not None:
-                if self.event.is_set():
-                    raise Exception("Process interrupted by user")
+            os.chdir(current_directory)
+            texts_tk = tokenize(self.texts)
+            ft = fasttext.load_model(str(self.path_models.joinpath(model_name)))
+            emb = []
+            for t in texts_tk:
+                emb.append(ft.get_sentence_vector(t.replace("\n", " ")))
+                # manage progress
+                if len(emb) % 100 == 0:
+                    progress_percent = len(emb) / len(texts_tk) * 100
+                    with open(progress_path, "w") as f:
+                        f.write(str(round(progress_percent, 1)))
+                    print(progress_percent)
+                # check if the user want to stop the process
+                if self.event is not None:
+                    if self.event.is_set():
+                        raise Exception("Process interrupted by user")
 
-        # emb = [ft.get_sentence_vector(t.replace("\n", " ")) for t in texts_tk]
-        df = pd.DataFrame(emb, index=self.texts.index)
-        # WARN: this seems strange. Maybe replace with a more explicit syntax
-        df.columns = ["ft%03d" % (x + 1) for x in range(len(df.columns))]
-        return df
+            # emb = [ft.get_sentence_vector(t.replace("\n", " ")) for t in texts_tk]
+            df = pd.DataFrame(emb, index=self.texts.index)
+            # WARN: this seems strange. Maybe replace with a more explicit syntax
+            df.columns = ["ft%03d" % (x + 1) for x in range(len(df.columns))]
+            return df
+        finally:
+            progress_path.unlink(missing_ok=True)

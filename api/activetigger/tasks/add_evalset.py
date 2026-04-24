@@ -6,7 +6,7 @@ import pandas as pd  # type: ignore[import]
 
 from activetigger.config import config
 from activetigger.datamodels import EvalSetDataModel, ProjectBaseModel
-from activetigger.functions import slugify
+from activetigger.functions import concat_text_columns, slugify
 from activetigger.tasks.base_task import BaseTask
 
 
@@ -62,13 +62,11 @@ class AddEvalSet(BaseTask):
             # added a check if DF is empty to avoid errors
             if len(df) == 0:
                 raise Exception("Your valid set is empty")
-            #print("df cols", df.columns, flush=True)
+            # print("df cols", df.columns, flush=True)
             # stop Process
             self.__stop_process_opportunity()
             # create text column
-            df["text"] = df[self.evalset.cols_text].apply(
-                lambda x: "\n\n".join([str(i) for i in x if pd.notnull(i)]), axis=1
-            )
+            df["text"] = concat_text_columns(df, self.evalset.cols_text)
             if not self.evalset.col_label:
                 df = df.rename(columns={self.evalset.col_id: "id"})
             else:

@@ -185,7 +185,7 @@ def export_generations(
 
         # convert to payload
         output = StringIO()
-        table.to_csv(output, index=False)
+        table.to_csv(output, index=True)
         csv_data = output.getvalue()
         output.close()
         headers = {

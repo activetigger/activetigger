@@ -200,6 +200,19 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
   // action when form validated
   const onSubmit: SubmitHandler<EvalSetModel & { files: FileList }> = async (formData) => {
     if (data) {
+      // check that the selected ID column contains unique values
+      if (formData.col_id && data) {
+        const idValues = data.data.map((row) => row[formData.col_id]);
+        const uniqueValues = new Set(idValues);
+        if (uniqueValues.size !== idValues.length) {
+          const nDuplicates = idValues.length - uniqueValues.size;
+          notify({
+            type: 'error',
+            message: `The selected ID column contains ${nDuplicates} duplicate values. Please choose a column with unique values`,
+          });
+          return;
+        }
+      }
       if (!formData.col_id || !formData.cols_text || !formData.n_eval) {
         notify({ type: 'error', message: 'Please fill all the fields.' });
         return;

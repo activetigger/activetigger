@@ -67,7 +67,10 @@ export const LoginForm: FC<{ redirectTo?: string }> = ({ redirectTo }) => {
             placeholder="Password"
             style={{ fontSize: '0.85rem', padding: '0.35rem 0.5rem' }}
           />
-          <button className="btn-submit" style={{ fontSize: '0.85rem', padding: '0.35rem 0.75rem' }}>
+          <button
+            className="btn-submit"
+            style={{ fontSize: '0.85rem', padding: '0.35rem 0.75rem' }}
+          >
             Login
           </button>
         </form>

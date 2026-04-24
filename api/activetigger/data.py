@@ -128,11 +128,11 @@ class Data:
         """
         Get the list of available datasets
         """
-        corpus = [self.train[["dataset"]]]
+        corpus = [self.train[["dataset", "id_external"]]]
         if self.valid is not None:
-            corpus.append(self.valid[["dataset"]])
+            corpus.append(self.valid[["dataset", "id_external"]])
         if self.test is not None:
-            corpus.append(self.test[["dataset"]])
+            corpus.append(self.test[["dataset", "id_external"]])
         df = pd.concat(corpus)
         return df
 
@@ -153,14 +153,12 @@ class Data:
 
     def get_full_id(self) -> DataFrame:
         """
-        Get the full list of IDs from the raw file
+        Get the full list of IDs from loaded datasets
         """
-        if self.index is None:
-            self.index = pd.read_parquet(self.path_data_all, columns=["id_external"])
         return self.index
 
     def get_external_id(self, element_id: str) -> str:
         """
         Get the external ID for a given internal element ID
         """
-        return str(self.get_full_id().loc[element_id, "id_external"])
+        return str(self.index.loc[element_id, "id_external"])

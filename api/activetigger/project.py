@@ -249,6 +249,13 @@ class Project:
             self.db_manager,
         )
 
+        # Persist any generation checkpoints left behind by a crashed worker or
+        # a previous server restart. At load time self.computing is empty, so
+        # every gen_*.jsonl file in the project dir is an orphan.
+        if self.params.dir is not None:
+            for jsonl_path in self.params.dir.glob("gen_*.jsonl"):
+                self._recover_generations_from_jsonl(jsonl_path)
+
     def start_project_creation(self, params: ProjectBaseModel, username: str, path: Path) -> None:
         """
         Manage process creation, sending the heavy process to the queue
@@ -414,13 +421,6 @@ class Project:
         self.users.set_auth(
             AuthUserModel(username=username, project_slug=project.project_slug, status="manager")
         )
-        self.users.set_auth(
-            AuthUserModel(username="root", project_slug=project.project_slug, status="manager")
-        )
-
-        # Load the full project (data, features, schemes, etc.) now that it
-        # exists in the DB and the data files are on disk.
-        self.load_project(project.project_slug)
 
         self.status = "created"
 
@@ -469,9 +469,11 @@ class Project:
         if dataset == "test":
             self.data.test = None
             self.params.test = False
+            self.params.n_test = 0
         if dataset == "valid":
             self.data.valid = None
             self.params.valid = False
+            self.params.n_valid = 0
         self.db_manager.projects_service.update_project(
             self.params.project_slug, jsonable_encoder(self.params)
         )
@@ -1317,6 +1319,40 @@ class Project:
 
         return FileResponse(path.joinpath(file_name), filename=file_name)
 
+    def _rename_generated_id_column(self, table: DataFrame) -> DataFrame:
+        """
+        Rename the generated id column and add the external id.
+
+        The "index" column from the generation table holds the slugged
+        id_internal. We expose it as id_internal and add a column with the
+        original id, named after col_id with the "dataset_" prefix stripped.
+        """
+        col_name_id = self.params.col_id if self.params.col_id else "id"
+        col_name_id = col_name_id.removeprefix("dataset_")
+        if len(table) > 0:
+            table[col_name_id] = table["index"].map(self.data.index["id_external"])
+        table = table.rename(columns={"index": "id_internal"})
+        # put col_id first, then id_internal, then the rest
+        ordered = [col_name_id, "id_internal"] + [
+            c for c in table.columns if c not in (col_name_id, "id_internal")
+        ]
+        return table[ordered]
+
+    def get_generated(
+        self, project_slug: str, username: str, params: ExportGenerationsParams
+    ) -> DataFrame:
+        """
+        Get generated elements with the original unslugged ids.
+        """
+        table = self.generations.get_generated(
+            project_slug=project_slug,
+            user_name=username,
+            params=params,
+        )
+        table_with_id = self._rename_generated_id_column(table)
+
+        return table_with_id
+
     def export_generations(
         self, project_slug: str, username: str, params: ExportGenerationsParams
     ) -> DataFrame:
@@ -1330,12 +1366,13 @@ class Project:
         # apply filters on the generated
         table["answer"] = self.generations.filter(table["answer"], params.filters)
 
-        # join the text
+        # join the text on the internal id before we swap it out
         if self.data.train is None:
             raise Exception("No train data available")
         table = table.join(self.data.train["text"], on="index")
 
-        return table
+        # expose id_internal as the frame index so it lands as the CSV index
+        return self._rename_generated_id_column(table).set_index("id_internal")
 
     def get_process(
         self, kind: str | list, user: str
@@ -1484,6 +1521,7 @@ class Project:
             class_min_freq=bert.class_min_freq,
             use_dichotomization=use_dichotomization,
             label_for_dichotomization=bert.dichotomize if use_dichotomization else None,
+            exclude_labels=bert.exclude_labels,
         )
         self.monitoring.register_process(
             process_name=process_id,
@@ -1506,6 +1544,7 @@ class Project:
         Fetch all necessary data and launch a prediction process
         """
         # Retrieve relevant data
+        dataset_index = None
         if dataset_type == "external":
             if external_dataset is None:
                 raise Exception("No external dataset available for prediction")
@@ -1518,6 +1557,7 @@ class Project:
             col_label = None
             datasets = None
             path_data = self.data.path_data_all
+            dataset_index = self.data.index
         elif dataset_type == "annotable":
             if datasets is None:
                 raise Exception("No dataset available for prediction")
@@ -1549,6 +1589,7 @@ class Project:
             statistics=datasets,
             path_data=path_data,
             external_dataset=external_dataset,
+            dataset_index=dataset_index,
         )
 
     def start_quick_model_prediction(
@@ -1610,6 +1651,8 @@ class Project:
                 prompt=request.prompt,
                 model=GenerationModel(**model.__dict__),
                 cols_context=self.params.cols_context,
+                dataset=request.dataset,
+                prompt_name=request.prompt_name if request.prompt_name else "",
             ),
         )
         self.computing.append(
@@ -1635,6 +1678,37 @@ class Project:
         """
         self.computing.remove(e)
         self.queue.delete(e.unique_id)
+
+    def _recover_generations_from_jsonl(self, path: Path) -> None:
+        """
+        Persist any results left behind in a generation recovery file.
+
+        Rows are inserted into the DB and the file is deleted. Missing file is a no-op.
+        """
+        if not path.exists():
+            return
+        try:
+            with open(path, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        data = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    self.generations.add(
+                        user=data["user"],
+                        project_slug=data["project_slug"],
+                        element_id=data["element_id"],
+                        model_id=data["model_id"],
+                        prompt=data["prompt"],
+                        answer=data["answer"],
+                        batch=data.get("batch"),
+                    )
+            path.unlink()
+        except Exception as ex:
+            print(f"Failed to recover generation checkpoint {path}: {ex}")
 
     def update_processes(self) -> None:
         """
@@ -1680,6 +1754,12 @@ class Project:
                 else:
                     message = f"Error for process {e.kind} : {exception}"
                 self.errors.add(message)
+
+                # recover partial generation results from the checkpoint file
+                if e.kind == "generation" and self.params.dir is not None:
+                    self._recover_generations_from_jsonl(
+                        self.params.dir.joinpath(f"gen_{e.unique_id}.jsonl")
+                    )
 
                 # specific case for project creation ; delete the project
                 if e.kind == "create_project":
@@ -1767,6 +1847,10 @@ class Project:
                                 answer=row.answer,
                                 batch=batch,
                             )
+                        if self.params.dir is not None:
+                            jsonl = self.params.dir.joinpath(f"gen_{e.unique_id}.jsonl")
+                            if jsonl.exists():
+                                jsonl.unlink()
                     case "bertopic":
                         bertopic_model = cast(BertopicComputing, e)
                         events = cast(EventsModel, results)

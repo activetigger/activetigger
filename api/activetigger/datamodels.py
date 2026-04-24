@@ -324,6 +324,7 @@ class LMParametersModelTrained(LMParametersModel):
 class LMParametersDbModel(LMParametersModel):
     predicted: bool = False
     compressed: bool = False
+    exclude_labels: list[str] = []
 
 
 class LMStatusModel(BaseModel):
@@ -333,6 +334,7 @@ class LMStatusModel(BaseModel):
     predicted_external: bool = False
     name: str
     time: str
+    exclude_labels: list[str] = []
 
 
 class BertModelModel(BaseModel):
@@ -486,6 +488,7 @@ class BertopicParamsModel(BaseModel):
     # umap_min_dist: float = 0.0 # Removed because 0.0 is the best value to use for clustering - Axel
     embedding_kind: str = "sentence_transformers"
     embedding_model: str = "all-MiniLM-L6-v2"
+    embedding_batch_size: int = 32
     filter_text_length: int = 2
     input_datasets: str = "train"
 
@@ -498,6 +501,7 @@ class ComputeBertopicModel(BertopicParamsModel):
     name: str
     force_compute_embeddings: bool = False
     embedding_model: str
+    embedding_batch_size: int = 32
     language: str | None = None
     input_datasets: str = "train"
     umap_n_neighbors: int = 30
@@ -532,14 +536,14 @@ class GenerationModelApi(BaseModel):
 
 class MLStatisticsModel(BaseModel):
     training_kind: str | None = None
-    f1_label: dict[str, float] | None = None
-    precision_label: dict[str, float] | None = None
-    recall_label: dict[str, float] | None = None
+    f1_label: dict[str, float | None] | None = None
+    precision_label: dict[str, float | None] | None = None
+    recall_label: dict[str, float | None] | None = None
     f1_weighted: float | None = None
     f1_micro: float | None = None
     f1_macro: float | None = None
-    accuracy: float | dict[str, float] | None = None
-    precision: float | dict[str, float] | None = None
+    accuracy: float | dict[str, float | None] | None = None
+    precision: float | dict[str, float | None] | None = None
     confusion_matrix: list[list[int]] | None = None
     false_predictions: dict[str, Any] | list[Any] | None = None
     table: dict[str, Any] | None = None
@@ -1110,7 +1114,7 @@ class PromptModel(BaseModel):
 
 class TextDatasetModel(BaseModel):
     id: str
-    text: str
+    cols_text: list[str]
     filename: str
     path: Path | None = None
 

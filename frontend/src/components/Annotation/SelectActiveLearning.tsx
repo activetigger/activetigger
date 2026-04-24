@@ -87,13 +87,16 @@ export const SelectActiveLearning: FC<SelectActiveLearningProps> = ({
       label: 'Language Models',
       options: (availableBertModelsWithPrediction ?? [])
         .filter((e) => e) // <-- ensure non-null
-        .map((e) => ({
-          value: e,
-          label: e,
-          type: 'languagemodel',
-          time: availableBertModels?.[e]?.time ?? '',
-          labels_excluded: [],
-        })),
+        .map((e) => {
+          const excluded = availableBertModels?.[e]?.exclude_labels ?? [];
+          return {
+            value: e,
+            label: excluded.length > 0 ? e + ' (labels dropped)' : e,
+            type: 'languagemodel',
+            time: availableBertModels?.[e]?.time ?? '',
+            labels_excluded: excluded,
+          };
+        }),
     },
   ];
 
@@ -111,7 +114,7 @@ export const SelectActiveLearning: FC<SelectActiveLearningProps> = ({
     }
     const formData = {
       name: getRandomName('QuickModel') + '-default',
-      model: 'logistic-l1',
+      model: 'logistic-l2',
       scheme: currentScheme || '',
       params: {
         costLogL2: 1,

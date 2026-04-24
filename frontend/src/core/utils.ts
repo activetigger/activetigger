@@ -57,8 +57,7 @@ export async function loadCSVFile(file: File): Promise<DataType> {
         const tabCount = (line.match(/\t/g) || []).length;
         const semicolonCount = (line.match(/;/g) || []).length;
         const commaCount = (line.match(/,/g) || []).length;
-        const separator =
-          tabCount > 3 ? '\t' : semicolonCount > commaCount ? ';' : ',';
+        const separator = tabCount > 3 ? '\t' : semicolonCount > commaCount ? ';' : ',';
 
         Papa.parse<Record<string, string>>(csvContent, {
           header: true,

@@ -1810,6 +1810,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/monitoring/projects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get All Projects
+         * @description Get summary of all existing projects (admin view).
+         */
+        get: operations["get_all_projects_monitoring_projects_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/": {
         parameters: {
             query?: never;
@@ -2308,6 +2328,11 @@ export interface components {
             /** Embedding Model */
             embedding_model: string;
             /**
+             * Embedding Batch Size
+             * @default 32
+             */
+            embedding_batch_size: number;
+            /**
              * Filter Text Length
              * @default 50
              */
@@ -2667,6 +2692,8 @@ export interface components {
             name: string;
             /** Time */
             time: string;
+            /** Exclude Labels */
+            exclude_labels: string[];
         };
         /** LanguageModelsProjectStateModel */
         LanguageModelsProjectStateModel: {
@@ -3621,8 +3648,8 @@ export interface components {
         TextDatasetModel: {
             /** Id */
             id: string;
-            /** Text */
-            text: string;
+            /** Cols Text */
+            cols_text: string[];
             /** Filename */
             filename: string;
             /** Path */
@@ -6680,6 +6707,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_all_projects_monitoring_projects_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectSummaryModel"][];
                 };
             };
         };

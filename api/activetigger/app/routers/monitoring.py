@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 
 from activetigger.app.dependencies import ServerAction, test_rights, verified_user
-from activetigger.datamodels import MonitoringMetricsModel, UserInDBModel
+from activetigger.datamodels import MonitoringMetricsModel, ProjectSummaryModel, UserInDBModel
 from activetigger.orchestrator import get_orchestrator
 
 router = APIRouter(tags=["monitoring"])
@@ -31,3 +31,15 @@ def get_monitoring_data(
     test_rights(ServerAction.MANAGE_SERVER, current_user.username)
     data = get_orchestrator().monitoring.get_data(kind)
     return data.to_dict(orient="records")
+
+
+@router.get("/monitoring/projects")
+def get_all_projects(
+    current_user: Annotated[UserInDBModel, Depends(verified_user)],
+) -> list[ProjectSummaryModel]:
+    """
+    Get summary of all existing projects (admin view).
+    user_right reflects current user's auth on each project, or "none".
+    """
+    test_rights(ServerAction.MANAGE_SERVER, current_user.username)
+    return get_orchestrator().users.get_all_projects(current_user.username)

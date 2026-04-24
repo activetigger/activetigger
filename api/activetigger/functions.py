@@ -347,6 +347,21 @@ def activate_probs(
 #     return best_threshold
 
 
+def _clean_score(x: Any, decimals: int = 3) -> float | None:
+    """
+    Round a metric, converting NaN (from sklearn zero_division=np.nan) to None
+    so the value is JSON-safe and clearly signals an undefined score.
+    """
+    if x is None:
+        return None
+    try:
+        if np.isnan(x):
+            return None
+    except (TypeError, ValueError):
+        return None
+    return round(float(x), decimals)
+
+
 def get_metrics_multiclass(
     Y_true: pd.Series,
     Y_pred: pd.Series,
@@ -367,32 +382,39 @@ def get_metrics_multiclass(
         labels = list(id2label.values())
 
     # Compute scores per label --- --- --- --- --- --- --- --- --- --- --- --- -
-    precision_label = precision_score(Y_true, Y_pred, average=None, labels=labels, zero_division=1)
-    precision_label = [round(score, decimals) for score in precision_label]
+    precision_label = precision_score(
+        Y_true, Y_pred, average=None, labels=labels, zero_division=np.nan
+    )
+    precision_label = [_clean_score(score, decimals) for score in precision_label]
 
-    f1_label = f1_score(Y_true, Y_pred, average=None, labels=labels, zero_division=1)
-    f1_label = [round(score, decimals) for score in f1_label]
+    f1_label = f1_score(Y_true, Y_pred, average=None, labels=labels, zero_division=np.nan)
+    f1_label = [_clean_score(score, decimals) for score in f1_label]
 
-    recall_label = recall_score(Y_true, Y_pred, average=None, labels=labels, zero_division=1)
-    recall_label = [round(score, decimals) for score in recall_label]
+    recall_label = recall_score(Y_true, Y_pred, average=None, labels=labels, zero_division=np.nan)
+    recall_label = [_clean_score(score, decimals) for score in recall_label]
 
     # Compute score averaged (micro, macro, weighted) --- --- --- --- --- --- --
-    f1_weighted = f1_score(Y_true, Y_pred, average="weighted", labels=labels, zero_division=1)
-    f1_weighted = round(f1_weighted, decimals)
-
-    f1_macro = f1_score(Y_true, Y_pred, average="macro", labels=labels, zero_division=1)
-    f1_macro = round(f1_macro, decimals)
-
-    f1_micro = f1_score(Y_true, Y_pred, average="micro", labels=labels, zero_division=1)
-    f1_micro = round(f1_micro, decimals)
-
-    precision_micro = precision_score(
-        Y_true, Y_pred, average="micro", labels=labels, zero_division=1
+    f1_weighted = _clean_score(
+        f1_score(Y_true, Y_pred, average="weighted", labels=labels, zero_division=np.nan),
+        decimals,
     )
-    precision_micro = round(precision_micro, decimals)
 
-    accuracy = accuracy_score(Y_true, Y_pred)
-    accuracy = round(accuracy, decimals)
+    f1_macro = _clean_score(
+        f1_score(Y_true, Y_pred, average="macro", labels=labels, zero_division=np.nan),
+        decimals,
+    )
+
+    f1_micro = _clean_score(
+        f1_score(Y_true, Y_pred, average="micro", labels=labels, zero_division=np.nan),
+        decimals,
+    )
+
+    precision_micro = _clean_score(
+        precision_score(Y_true, Y_pred, average="micro", labels=labels, zero_division=np.nan),
+        decimals,
+    )
+
+    accuracy = _clean_score(accuracy_score(Y_true, Y_pred), decimals)
 
     # Compute confiusion matrix --- --- --- --- --- --- --- --- --- --- --- --- -
     confusion = confusion_matrix(Y_true, Y_pred, labels=labels)
@@ -464,11 +486,11 @@ def get_metrics_multilabel(
             "y_true": Y_true[:, id],
             "y_pred": Y_pred[:, id],
             "average": "macro",
-            "zero_division": 1,
+            "zero_division": np.nan,
         }
-        precision_label[label] = round(precision_score(**parameters), decimals)
-        recall_label[label] = round(recall_score(**parameters), decimals)
-        f1_label[label] = round(f1_score(**parameters), decimals)
+        precision_label[label] = _clean_score(precision_score(**parameters), decimals)
+        recall_label[label] = _clean_score(recall_score(**parameters), decimals)
+        f1_label[label] = _clean_score(f1_score(**parameters), decimals)
 
         dummy_labels = [label, f"not-{label}"]
         confusion[label] = confusion_matrix(
@@ -485,20 +507,19 @@ def get_metrics_multilabel(
         dict_of_tables[label] = dict_of_tables[label].T
 
     # Compute score averaged (micro, macro, weighted) --- --- --- --- --- --- --
-    f1_weighted = f1_score(Y_true, Y_pred, average="weighted", zero_division=1)
-    f1_weighted = round(f1_weighted, decimals)
-
-    f1_macro = f1_score(Y_true, Y_pred, average="macro", zero_division=1)
-    f1_macro = round(f1_macro, decimals)
-
-    f1_micro = f1_score(Y_true, Y_pred, average="micro", zero_division=1)
-    f1_micro = round(f1_micro, decimals)
-
-    precision_micro = precision_score(Y_true, Y_pred, average="micro", zero_division=1)
-    precision_micro = round(precision_micro, decimals)
-
-    accuracy = accuracy_score(Y_true, Y_pred)
-    accuracy = round(accuracy, decimals)
+    f1_weighted = _clean_score(
+        f1_score(Y_true, Y_pred, average="weighted", zero_division=np.nan), decimals
+    )
+    f1_macro = _clean_score(
+        f1_score(Y_true, Y_pred, average="macro", zero_division=np.nan), decimals
+    )
+    f1_micro = _clean_score(
+        f1_score(Y_true, Y_pred, average="micro", zero_division=np.nan), decimals
+    )
+    precision_micro = _clean_score(
+        precision_score(Y_true, Y_pred, average="micro", zero_division=np.nan), decimals
+    )
+    accuracy = _clean_score(accuracy_score(Y_true, Y_pred), decimals)
 
     # Create a table of false predictions --- --- --- --- --- --- --- --- --- --
     filter_false_prediction = (Y_true != Y_pred).any(axis=1)
@@ -574,6 +595,16 @@ def process_payload_csv(csv_str: str, cols: list[str]) -> pd.DataFrame:
         csv_buffer,
     )
     return df[cols]
+
+
+def concat_text_columns(df: pd.DataFrame, cols_text: list[str]) -> pd.Series:
+    """
+    Concatenate several text columns into a single text column,
+    joining non-null values with a double newline separator.
+    """
+    return df[cols_text].apply(
+        lambda x: "\n\n".join([str(i) for i in x if pd.notnull(i)]), axis=1
+    )
 
 
 def get_model_metrics(path_model: Path) -> dict | None:

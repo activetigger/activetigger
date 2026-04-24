@@ -1,10 +1,11 @@
 //import { omit } from 'lodash';
-import { FC, useEffect, useState } from 'react';
+import { FC, useEffect, useMemo, useState } from 'react';
 import DataTable from 'react-data-table-component';
-import { SubmitHandler, useForm, useWatch } from 'react-hook-form';
+import { Controller, SubmitHandler, useForm, useWatch } from 'react-hook-form';
 
 import { omit } from 'lodash';
 import { FaCloudDownloadAlt } from 'react-icons/fa';
+import Select from 'react-select';
 import { useAddFile, useGetPredictionsFile, usePredictOnDataset } from '../../core/api';
 import { useNotifications } from '../../core/notifications';
 import { loadFile } from '../../core/utils';
@@ -41,7 +42,7 @@ export const ImportPredictionDataset: FC<ImportPredictionDatasetProps> = ({
   const { register, control, handleSubmit, reset } = useForm<
     TextDatasetModel & { files: FileList }
   >({
-    defaultValues: {},
+    defaultValues: { cols_text: [] },
   });
   const { addFile, progression, cancel } = useAddFile();
   const predict = usePredictOnDataset(); // API call
@@ -55,6 +56,10 @@ export const ImportPredictionDataset: FC<ImportPredictionDatasetProps> = ({
       {h}
     </option>
   ));
+  const availableFields = useMemo(
+    () => data?.headers.filter((h) => !!h).map((h) => ({ value: h, label: h })) ?? [],
+    [data],
+  );
 
   // convert paquet file in csv if needed when event on files
   useEffect(() => {
@@ -79,7 +84,7 @@ export const ImportPredictionDataset: FC<ImportPredictionDatasetProps> = ({
   // action when form validated
   const onSubmit: SubmitHandler<TextDatasetModel & { files: FileList }> = async (formData) => {
     if (data) {
-      if (!formData.id || !formData.text) {
+      if (!formData.id || !formData.cols_text || formData.cols_text.length === 0) {
         notify({ type: 'error', message: 'Please fill all the fields.' });
         return;
       }
@@ -166,11 +171,34 @@ export const ImportPredictionDataset: FC<ImportPredictionDatasetProps> = ({
                 </select>
               </div>
               <div>
-                <label htmlFor="col_text">Column for text</label>
-                <select id="col_text" disabled={data === null} {...register('text')}>
-                  <option key="none"></option>
-                  {columns}
-                </select>
+                <label htmlFor="cols_text">
+                  Text columns (selected fields will be concatenated)
+                </label>
+                <Controller
+                  name="cols_text"
+                  control={control}
+                  defaultValue={[]}
+                  render={({ field: { value, onChange } }) => (
+                    <Select
+                      inputId="cols_text"
+                      options={availableFields}
+                      isMulti
+                      isDisabled={data === null}
+                      value={
+                        value
+                          ? value
+                              .map((v: string) => availableFields.find((opt) => opt.value === v))
+                              .filter(Boolean)
+                          : []
+                      }
+                      onChange={(selectedOptions) => {
+                        onChange(
+                          selectedOptions ? selectedOptions.map((option) => option?.value) : [],
+                        );
+                      }}
+                    />
+                  )}
+                />
               </div>
               <button type="submit" className="btn-submit">
                 Launch the prediction on the imported dataset

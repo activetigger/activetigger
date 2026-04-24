@@ -319,6 +319,42 @@ class Users:
             )
         return projects
 
+    def get_all_projects(self, username: str) -> list[ProjectSummaryModel]:
+        """
+        Get all existing projects regardless of auth (admin view).
+        user_right reflects the given user's auth on each project, or "none".
+        """
+        slugs = self.db_manager.projects_service.existing_projects()
+        projects = []
+        for slug in slugs:
+            project = self.db_manager.projects_service.get_project(slug)
+            if project is None:
+                continue
+            parameters = ProjectModel(**project["parameters"])
+            created_by = project["user_name"]
+            created_at = project["time_created"].strftime("%Y-%m-%d %H:%M:%S")
+            try:
+                size = round(get_dir_size(config.data_path + "/projects/" + slug), 1)
+            except Exception as e:
+                print(e)
+                size = 0.0
+            last_activity = self.db_manager.logs_service.get_last_activity_project(slug)
+            auth = self.db_manager.projects_service.get_user_auth(username, slug)
+            user_right = auth[0][1] if auth else "none"
+            projects.append(
+                ProjectSummaryModel(
+                    project_slug=slug,
+                    user_right=user_right,
+                    parameters=parameters,
+                    created_by=created_by,
+                    created_at=created_at,
+                    size=size,
+                    last_activity=last_activity,
+                )
+            )
+        projects.sort(key=lambda p: p.created_at, reverse=True)
+        return projects
+
     def reset_password(self, mail: str) -> None:
         """
         Reset password for a user with the given email

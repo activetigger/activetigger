@@ -4,6 +4,7 @@ import pandas as pd
 
 from activetigger.config import config
 from activetigger.datamodels import ProjectModel, ProjectUpdateModel
+from activetigger.functions import concat_text_columns
 from activetigger.tasks.base_task import BaseTask
 
 
@@ -84,9 +85,7 @@ class UpdateDatasets(BaseTask):
         )
         df_train = pd.read_parquet(self.path_data_train)
         df_sub = df_all.loc[df_train.index]
-        df_sub["text"] = df_sub[self.update.cols_text].apply(
-            lambda x: "\n\n".join([str(i) for i in x if pd.notnull(i)]), axis=1
-        )
+        df_sub["text"] = concat_text_columns(df_sub, self.update.cols_text)
         df_train["text"] = df_sub["text"]
         df_train.to_parquet(self.path_data_train)
         self.params.cols_text = self.update.cols_text

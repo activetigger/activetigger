@@ -92,7 +92,7 @@ class Queue:
             and (nb_active_processes_gpu + nb_active_processes_cpu) < self.nb_workers
             and len(task_gpu) > 0
         ):
-            #self.executor = get_reusable_executor(max_workers=(self.nb_workers), timeout=600)
+            # self.executor = get_reusable_executor(max_workers=(self.nb_workers), timeout=600)
             task_gpu[0].future = self.executor.submit(task_gpu[0].task)
             task_gpu[0].state = "running"
 
@@ -102,10 +102,10 @@ class Queue:
             and (nb_active_processes_gpu + nb_active_processes_cpu) < self.nb_workers
             and len(task_cpu) > 0
         ):
-            #self.executor = get_reusable_executor(max_workers=(self.nb_workers), timeout=600)
+            # self.executor = get_reusable_executor(max_workers=(self.nb_workers), timeout=600)
             task_cpu[0].future = self.executor.submit(task_cpu[0].task)
             task_cpu[0].state = "running"
-    
+
     async def _update_queue(self, timeout: float = 1) -> None:
         """
         Update the queue every X seconds.
@@ -173,7 +173,7 @@ class Queue:
         if len(element) == 0:
             raise Exception("Process not found")
         element[0].event.set()
-        element[0].state="cancelled"
+        element[0].state = "cancelled"
 
     def delete(self, ids: str | list) -> None:
         """
@@ -182,8 +182,8 @@ class Queue:
         if isinstance(ids, str):
             ids = [ids]
         for i in [t for t in self.current if t.unique_id in ids]:
-            if i.state=="cancelled":
-                print("Deleting a unfinished process",flush=True)
+            if i.state == "cancelled":
+                print("Deleting a unfinished process", flush=True)
             self.current.remove(i)
 
     def state(self) -> list[QueueStateTaskModel]:
@@ -221,23 +221,24 @@ class Queue:
         )
         return None
 
-    def clean_old_processes(self, timeout: int =2) -> None:
+    def clean_old_processes(self, timeout: int = 2) -> None:
         """
         Remove old processes
         """
         n = len(self.current)
-        terminal={"done","cancelled"}
-        old_processes_ids= [
+        terminal = {"done", "cancelled"}
+        old_processes_ids = [
             i.unique_id
             for i in self.current
             if i.state in terminal
-            or(
-            # if task life duration in the queue is more than timeout and it's not pending or running
-            (datetime.datetime.now(timezone.utc) - i.starting_time).total_seconds() / 3600 >= timeout
-            and i.state not in {"pending", "running"}
+            or (
+                # if task life duration in the queue is more than timeout and it's not pending or running
+                (datetime.datetime.now(timezone.utc) - i.starting_time).total_seconds() / 3600
+                >= timeout
+                and i.state not in {"pending", "running"}
             )
         ]
-        if len(old_processes_ids)>0:
+        if len(old_processes_ids) > 0:
             self.delete(old_processes_ids)
         if n != len(self.current):
             print(f"Cleaned {n - len(self.current)} processes")
@@ -250,4 +251,3 @@ class Queue:
         executor = get_reusable_executor(max_workers=(self.nb_workers), timeout=600)
         executor.shutdown(wait=False)
         self.current = []
-        

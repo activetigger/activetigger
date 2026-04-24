@@ -9,15 +9,16 @@ fi
 echo "(i) Python version is $(python3 --version)"
 echo "(i) uv version is $(uv --version)"
 
-if [ ! -d "${UV_PROJECT_ENVIRONMENT}/bin" ]; then
+if [ ! -f "${UV_PROJECT_ENVIRONMENT}/pyvenv.cfg" ]; then
   echo
   echo " ~"
   echo " ~ Creating python venv"
   echo " ~"
   echo
-  uv venv ${UV_PROJECT_ENVIRONMENT} --clear
+  rm -rf "${UV_PROJECT_ENVIRONMENT}"
+  uv venv "${UV_PROJECT_ENVIRONMENT}"
 fi
-source ${UV_PROJECT_ENVIRONMENT}/bin/activate
+source "${UV_PROJECT_ENVIRONMENT}/bin/activate"
 
 echo
 echo " ~"

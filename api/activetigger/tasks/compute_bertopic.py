@@ -346,7 +346,7 @@ class ComputeBertopic(BaseTask):
             texts=df[self.col_text],
             path_process=self.path_bertopic,
             model=self.parameters.embedding_model,
-            batch_size=32,
+            batch_size=self.parameters.embedding_batch_size,
             min_gpu=1,
             path_progress=path_sbert_progress,
         )
@@ -563,6 +563,7 @@ class ComputeBertopic(BaseTask):
             "umap_n_components": self.parameters.umap_n_components,
             "embedding_kind": self.parameters.embedding_kind,
             "embedding_model": self.parameters.embedding_model,
+            "embedding_batch_size": self.parameters.embedding_batch_size,
             "filter_text_length": self.parameters.filter_text_length,
         }
         setting_df = pd.DataFrame({"Parameter": settings.keys(), "Value": settings.values()})

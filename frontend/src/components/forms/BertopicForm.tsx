@@ -37,6 +37,7 @@ export const BertopicForm: FC<BertopicCreationFormProps> = ({
       umap_n_components: 5,
       // umap_min_dist: 0.0, // Removed because 0.0 is the best value to use for clustering - Axel
       embedding_model: availableModels[0],
+      embedding_batch_size: 32,
       force_compute_embeddings: false,
       filter_text_length: 50,
       input_datasets: 'train',
@@ -140,6 +141,25 @@ export const BertopicForm: FC<BertopicCreationFormProps> = ({
           </select>
           <label htmlFor="filter_text_length">Filter out texts of length lower than</label>
           <input id="filter_text_length" type="number" {...register('filter_text_length')} />
+          <label htmlFor="embedding_batch_size">
+            Embedding batch size
+            <a className="embedding_batch_size">
+              <HiOutlineQuestionMarkCircle />
+            </a>
+            <Tooltip anchorSelect=".embedding_batch_size" place="top">
+              Number of texts encoded together when computing embeddings.
+              <br />
+              Larger values speed up embedding on GPUs but use more memory — lower
+              <br />
+              it if you run out of memory, raise it for large datasets on capable hardware.
+            </Tooltip>
+          </label>
+          <input
+            id="embedding_batch_size"
+            type="number"
+            min={1}
+            {...register('embedding_batch_size', { valueAsNumber: true })}
+          />
           <label htmlFor="umap_n_components">
             Number of components (dimension reduction parameter)
             <a className="umap_n_components">

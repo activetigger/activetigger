@@ -22,6 +22,7 @@ from activetigger.datamodels import MLStatisticsModel, ReturnTaskPredictModel, T
 from activetigger.functions import (
     activate_probs,
     annotations_to_matrix,
+    concat_text_columns,
     dichotomize,
     get_device,
     get_metrics_multiclass,
@@ -57,6 +58,7 @@ class PredictBertMultiClass(BaseTask):
         statistics: list | None = None,
         event: Optional[multiprocessing.synchronize.Event] = None,
         unique_id: Optional[str] = None,
+        dataset_index: DataFrame | None = None,
         **kwargs,
     ):
         super().__init__()
@@ -72,6 +74,7 @@ class PredictBertMultiClass(BaseTask):
         self.file_name = file_name
         self.batch = batch
         self.statistics = statistics
+        self.dataset_index = dataset_index
         self.progress_path = self.path / "progress_predict"
 
         if self.df is None and path_data is not None:
@@ -123,7 +126,7 @@ class PredictBertMultiClass(BaseTask):
         df = Data.read_dataset(path_data)
 
         if self.dataset == "external" and external_dataset is not None:
-            df["text"] = df[external_dataset.text]
+            df["text"] = concat_text_columns(df, external_dataset.cols_text)
             df["index"] = df[external_dataset.id].apply(str)
             df["id_external"] = df["index"]
             df["dataset"] = "external"
@@ -133,6 +136,16 @@ class PredictBertMultiClass(BaseTask):
         if self.dataset == "all":
             df["id_external"] = df[self.col_id_external]
             df["dataset"] = "all"
+            if self.dataset_index is not None and "id_external" in self.dataset_index.columns:
+                mapping = dict(
+                    zip(
+                        self.dataset_index["id_external"].astype(str),
+                        self.dataset_index["dataset"],
+                    )
+                )
+                df["dataset"] = (
+                    df["id_external"].astype(str).map(mapping).fillna(df["dataset"])
+                )
 
         return df
 

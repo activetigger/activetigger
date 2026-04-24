@@ -30,17 +30,16 @@ import { GenModel, SupportedAPI } from '../types';
 
 interface Row {
   time: string;
-  index: string;
   batch: string;
   prompt: string;
   answer: string;
   endpoint: string;
   model: string;
   model_name: string;
+  [key: string]: string;
 }
 
-// Define the table
-const columns: readonly Column<Row>[] = [
+const buildColumns = (idColumnName: string): readonly Column<Row>[] => [
   {
     name: 'Time',
     key: 'time',
@@ -48,8 +47,8 @@ const columns: readonly Column<Row>[] = [
     width: '10%',
   },
   {
-    name: 'Id',
-    key: 'index',
+    name: idColumnName.replace('dataset_', ''),
+    key: idColumnName,
     resizable: true,
     width: '10%',
   },
@@ -487,7 +486,9 @@ export const GenPage: FC = () => {
             <DataGrid
               className="fill-grid rdg-light"
               style={{ backgroundColor: 'white' }}
-              columns={columns}
+              columns={buildColumns(
+                (currentProject?.params.col_id || 'id').replace(/^dataset_/, ''),
+              )}
               rows={(generated as unknown as Row[]) || []}
               rowHeight={80}
             />

@@ -7,7 +7,7 @@ from pathlib import Path
 import pandas as pd
 
 from activetigger.datamodels import ProjectBaseModel, ProjectModel
-from activetigger.functions import slugify
+from activetigger.functions import concat_text_columns, slugify
 from activetigger.tasks.base_task import BaseTask
 
 csv.field_size_limit(sys.maxsize)
@@ -155,9 +155,7 @@ class CreateProject(BaseTask):
                 pass
 
         # create the text column, merging the different columns
-        content["text"] = content[self.params.cols_text].apply(
-            lambda x: "\n\n".join([str(i) for i in x if pd.notnull(i)]), axis=1
-        )
+        content["text"] = concat_text_columns(content, self.params.cols_text)
 
         # convert NA texts in empty string
         content["text"] = content["text"].fillna("")

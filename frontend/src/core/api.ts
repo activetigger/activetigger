@@ -2067,7 +2067,18 @@ export function useGenerate(
       return true;
     }
     return null;
-  }, [projectSlug, modelId, prompt, n_batch, currentScheme, mode, dataset, token, notify, promptName]);
+  }, [
+    projectSlug,
+    modelId,
+    prompt,
+    n_batch,
+    currentScheme,
+    mode,
+    dataset,
+    token,
+    notify,
+    promptName,
+  ]);
 
   return { generate };
 }
@@ -3000,4 +3011,40 @@ export function useGetMonitoringData(kind: string) {
   const reFetch = useCallback(() => setFetchTrigger((f) => !f), []);
 
   return { data: getAsyncMemoData(getMonitoringData) || null, reFetchData: reFetch };
+}
+
+export function useGetAllProjects() {
+  const [fetchTrigger, setFetchTrigger] = useState<boolean>(false);
+
+  const getAllProjects = useAsyncMemo(async () => {
+    const res = await api.GET('/monitoring/projects', {});
+    if (res.data && !res.error) return res.data;
+    return null;
+  }, [fetchTrigger]);
+  const reFetch = useCallback(() => setFetchTrigger((f) => !f), []);
+
+  return { allProjects: getAsyncMemoData(getAllProjects) || null, reFetchAllProjects: reFetch };
+}
+
+export function useAddSelfAsManager(reFetchAllProjects: () => void) {
+  const { notify } = useNotifications();
+  const { authenticatedUser } = useAuth();
+  const addSelfAsManager = useCallback(
+    async (projectSlug: string) => {
+      if (!authenticatedUser?.username) return null;
+      const res = await api.POST('/users/auth/{action}', {
+        params: { path: { action: 'add' } },
+        body: {
+          project_slug: projectSlug,
+          username: authenticatedUser.username,
+          status: 'manager',
+        },
+      });
+      if (!res.error) notify({ type: 'success', message: 'Added as manager.' });
+      reFetchAllProjects();
+      return true;
+    },
+    [authenticatedUser, notify, reFetchAllProjects],
+  );
+  return { addSelfAsManager };
 }

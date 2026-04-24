@@ -139,7 +139,7 @@ def getgenerate(
     """
     test_rights(ProjectAction.GENERATE, current_user.username, project.name)
     try:
-        table = project.generations.get_generated(project.name, current_user.username, params)
+        table = project.get_generated(project.name, current_user.username, params)
         return TableOutModel(items=table.to_dict(orient="records"), total=len(table))
     except Exception as e:
         raise HTTPException(status_code=500, detail="Error in loading generated data" + str(e))

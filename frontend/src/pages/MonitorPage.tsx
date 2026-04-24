@@ -7,6 +7,8 @@ import { SendMessage } from '../components/forms/SendMessage';
 import { PageLayout } from '../components/layout/PageLayout';
 import { ManageMessages } from '../components/ManageMessages';
 import {
+  useAddSelfAsManager,
+  useGetAllProjects,
   useGetLogs,
   useGetMonitoringData,
   useGetMonitoringMetrics,
@@ -171,6 +173,8 @@ export const MonitorPage: FC = () => {
   const { userStatistics, reFetchStatistics } = useGetUserStatistics(currentUser);
   const { metrics } = useGetMonitoringMetrics();
   const { data } = useGetMonitoringData('all');
+  const { allProjects, reFetchAllProjects } = useGetAllProjects();
+  const { addSelfAsManager } = useAddSelfAsManager(reFetchAllProjects);
   useEffect(() => {
     reFetchStatistics();
   }, [currentUser, reFetchStatistics]);
@@ -276,6 +280,48 @@ export const MonitorPage: FC = () => {
                     </div>
                   </div>
                 ))}
+              </Tab>
+              <Tab eventKey="projects" title="All projects">
+                <h2 className="subtitle">All existing projects</h2>
+                <table className="table-statistics">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Slug</th>
+                      <th>Creator</th>
+                      <th>Created at</th>
+                      <th>Size (MB)</th>
+                      <th>Last activity</th>
+                      <th>My rights</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(allProjects || []).map((p) => (
+                      <tr key={p.project_slug}>
+                        <td>{p.parameters?.project_name}</td>
+                        <td>{p.project_slug}</td>
+                        <td>{p.created_by}</td>
+                        <td>{p.created_at}</td>
+                        <td>{p.size?.toFixed(1) ?? '-'}</td>
+                        <td>{p.last_activity ?? '-'}</td>
+                        <td>{p.user_right}</td>
+                        <td>
+                          {p.user_right === 'none' ? (
+                            <button
+                              className="btn btn-sm btn-primary"
+                              onClick={() => addSelfAsManager(p.project_slug)}
+                            >
+                              Add me as manager
+                            </button>
+                          ) : (
+                            <span className="text-muted">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </Tab>
               <Tab eventKey="statistics" title="Statistics">
                 {<ModelStatsTable rows={normalizeStats(metrics || {})} />}
