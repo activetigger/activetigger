@@ -35,17 +35,31 @@ class Queue:
     nb_workers_gpu: int
     current: list[QueueTaskModel]
     last_restart: datetime.datetime
+    task_timeout_seconds: int
 
-    def __init__(self, nb_workers_cpu: int = 5, nb_workers_gpu: int = 1) -> None:
+    TERMINAL_STATES = {"done", "cancelled", "failed"}
+
+    def __init__(
+        self,
+        nb_workers_cpu: int = 5,
+        nb_workers_gpu: int = 1,
+        task_timeout_seconds: int = 4 * 3600,
+    ) -> None:
         """
         Initiating the queue
         :param nb_workers_cpu: Number of CPU workers
         :param nb_workers_gpu: Number of GPU workers
+        :param task_timeout_seconds: Per-task wall-clock budget. Once a running
+            task exceeds this, its cancel event is set and it is marked
+            "failed" so the dispatcher can free the slot. Loky may keep the
+            underlying worker until the task returns, but the queue stops
+            counting it against worker capacity.
         :return: None
         """
         self.nb_workers_cpu = nb_workers_cpu
         self.nb_workers_gpu = nb_workers_gpu
         self.nb_workers = nb_workers_cpu + nb_workers_gpu
+        self.task_timeout_seconds = task_timeout_seconds
         self.current = []
 
         # manager for cross-process event signaling
@@ -68,12 +82,42 @@ class Queue:
         if hasattr(self, "manager"):
             self.manager.shutdown()
 
+    def _refresh_states(self) -> None:
+        """
+        Sync task.state with future status.
+        """
+        now = datetime.datetime.now(timezone.utc)
+        for t in self.current:
+            if t.state != "running" or t.future is None:
+                continue
+            if t.future.done():
+                t.state = "failed" if t.future.exception() else "done"
+                continue
+            if t.running_since is None:
+                continue
+            elapsed = (now - t.running_since).total_seconds()
+            if elapsed >= self.task_timeout_seconds:
+                print(
+                    f"Task {t.unique_id} ({t.kind}) exceeded timeout "
+                    f"({elapsed:.0f}s >= {self.task_timeout_seconds}s); marking as failed.",
+                    flush=True,
+                )
+                try:
+                    if t.event is not None:
+                        t.event.set()
+                except Exception as e:
+                    print(f"Failed to signal cancel event for {t.unique_id}: {e}", flush=True)
+                t.state = "failed"
+
     def _dispatch_pending_tasks(self) -> None:
         """
         Check for pending tasks and submit them to the executor.
         Runs in a thread to avoid blocking the event loop
         (executor.submit may spawn worker processes).
         """
+        # refresh state from futures so completed/timed-out tasks free their slots
+        self._refresh_states()
+
         # active tasks in the queue
         nb_active_processes_gpu = len(
             [i for i in self.current if i.queue == "gpu" and i.state == "running"]
@@ -86,6 +130,8 @@ class Queue:
         task_gpu = [i for i in self.current if i.queue == "gpu" and i.state == "pending"]
         task_cpu = [i for i in self.current if i.queue == "cpu" and i.state == "pending"]
 
+        now = datetime.datetime.now(timezone.utc)
+
         # a worker available and possible to have gpu
         if (
             nb_active_processes_gpu < self.nb_workers_gpu
@@ -95,6 +141,7 @@ class Queue:
             # self.executor = get_reusable_executor(max_workers=(self.nb_workers), timeout=600)
             task_gpu[0].future = self.executor.submit(task_gpu[0].task)
             task_gpu[0].state = "running"
+            task_gpu[0].running_since = now
 
         # a worker available and possible to have cpu
         if (
@@ -105,6 +152,7 @@ class Queue:
             # self.executor = get_reusable_executor(max_workers=(self.nb_workers), timeout=600)
             task_cpu[0].future = self.executor.submit(task_cpu[0].task)
             task_cpu[0].state = "running"
+            task_cpu[0].running_since = now
 
     async def _update_queue(self, timeout: float = 1) -> None:
         """
@@ -161,9 +209,10 @@ class Queue:
         element = [i for i in self.current if i.unique_id == unique_id]
         if len(element) == 0:
             return None
-        if element[0].future and element[0].future.done():
-            element[0].state = "done"
-        return element[0]
+        t = element[0]
+        if t.state == "running" and t.future is not None and t.future.done():
+            t.state = "failed" if t.future.exception() else "done"
+        return t
 
     def kill(self, unique_id: str) -> None:
         """
@@ -190,17 +239,27 @@ class Queue:
         """
         Return state of the queue
         """
-        return [
-            QueueStateTaskModel(
-                unique_id=process.unique_id,
-                state="done" if process.future and process.future.done() else process.state,
-                exception=str(process.future.exception())
-                if process.future and process.future.done() and process.future.exception()
-                else None,
-                kind=process.kind,
+        out: list[QueueStateTaskModel] = []
+        for process in self.current:
+            future_done = process.future is not None and process.future.done()
+            exception = (
+                str(process.future.exception())
+                if future_done and process.future.exception()
+                else None
             )
-            for process in self.current
-        ]
+            if process.state == "running" and future_done:
+                reported_state = "failed" if exception else "done"
+            else:
+                reported_state = process.state
+            out.append(
+                QueueStateTaskModel(
+                    unique_id=process.unique_id,
+                    state=reported_state,
+                    exception=exception,
+                    kind=process.kind,
+                )
+            )
+        return out
 
     def get_nb_waiting_processes(self, queue: str = "cpu") -> int:
         """
@@ -223,21 +282,27 @@ class Queue:
 
     def clean_old_processes(self, timeout: int = 2) -> None:
         """
-        Remove old processes
+        Remove old processes.
+
+        Reaps tasks that are in a terminal state, plus any task whose total
+        lifetime in the queue exceeds `timeout` hours regardless of state —
+        otherwise a task wedged in "running" or "pending" would never be
+        cleaned.
         """
         n = len(self.current)
-        terminal = {"done", "cancelled"}
-        old_processes_ids = [
-            i.unique_id
-            for i in self.current
-            if i.state in terminal
-            or (
-                # if task life duration in the queue is more than timeout and it's not pending or running
-                (datetime.datetime.now(timezone.utc) - i.starting_time).total_seconds() / 3600
-                >= timeout
-                and i.state not in {"pending", "running"}
-            )
-        ]
+        now = datetime.datetime.now(timezone.utc)
+        old_processes_ids = []
+        for i in self.current:
+            age_hours = (now - i.starting_time).total_seconds() / 3600
+            if i.state in self.TERMINAL_STATES:
+                old_processes_ids.append(i.unique_id)
+            elif age_hours >= timeout:
+                print(
+                    f"Reaping stuck task {i.unique_id} ({i.kind}) in state "
+                    f"{i.state!r} after {age_hours:.1f}h.",
+                    flush=True,
+                )
+                old_processes_ids.append(i.unique_id)
         if len(old_processes_ids) > 0:
             self.delete(old_processes_ids)
         if n != len(self.current):

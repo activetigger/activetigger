@@ -38,6 +38,7 @@ class QueueTaskModel(BaseModel):
     future: Optional[Any] = None  # Future object from concurrent.futures
     event: Any = None  # Event object for signaling
     starting_time: datetime.datetime
+    running_since: Optional[datetime.datetime] = None
     queue: str
     task: Callable[..., Any] | None
 
