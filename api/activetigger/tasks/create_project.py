@@ -224,21 +224,21 @@ class CreateProject(BaseTask):
             and self.params.n_valid == 0
         ):
             trainset = content[0 : self.params.n_train]
-        # case to force the max of label from one column
+        # case to force the max of label from all label columns
         elif self.params.force_label and len(self.params.cols_label) > 0:
-            f_notna = content[self.params.cols_label[0]].notna()
-            f_na = content[self.params.cols_label[0]].isna()
+            f_notna = content[content[self.params.cols_label].notna().any(axis=1)]
+            f_na =content[content[self.params.cols_label].isna().all(axis=1)]
             # different case regarding the number of labels
-            if f_notna.sum() > self.params.n_train:
-                trainset = content[f_notna].sample(
+            if len(f_notna) > self.params.n_train:
+                trainset =f_notna.sample(
                     self.params.n_train, random_state=self.random_seed
                 )
             else:
-                n_train_random = self.params.n_train - f_notna.sum()
+                n_train_random = self.params.n_train -len(f_notna)
                 trainset = pd.concat(
                     [
-                        content[f_notna],
-                        content[f_na].sample(n_train_random, random_state=self.random_seed),
+                        f_notna,
+                        f_na.sample(n_train_random, random_state=self.random_seed),
                     ]
                 )
         # case there is stratification on the trainset
