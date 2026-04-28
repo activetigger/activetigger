@@ -241,12 +241,13 @@ class Queue:
         """
         out: list[QueueStateTaskModel] = []
         for process in self.current:
-            future_done = process.future is not None and process.future.done()
-            exception = (
-                str(process.future.exception())
-                if future_done and process.future.exception()
-                else None
-            )
+            future = process.future
+            future_done = future is not None and future.done()
+            if future is not None and future_done:
+                exc = future.exception()
+                exception = str(exc) if exc else None
+            else:
+                exception = None
             if process.state == "running" and future_done:
                 reported_state = "failed" if exception else "done"
             else:

@@ -735,6 +735,8 @@ class Project:
         frame is the use of projection coordinates to limit the selection
         filter is a regex to use on the corpus
         """
+        element_id = None
+
         if next.scheme not in self.schemes.available():
             raise ValueError("Scheme doesn't exist")
 
@@ -929,6 +931,10 @@ class Project:
                 raise ValueError("No candidate elements have embeddings for the prompt's feature.")
             element_id = candidates.index[0]
             indicator = f"similarity: {round(float(candidates.iloc[0]), 3)}"
+        if element_id is None:
+            raise ValueError("No element available with this selection mode.")
+
+        # get prediction for the element selected
 
         if (
             next.model_active is not None
@@ -939,14 +945,14 @@ class Project:
             predict = self.get_prediction_element(
                 next.model_active.type,
                 next.model_active.value,
-                element_id,  # ty: ignore[possibly-unresolved-reference]
+                element_id,
             )
 
         # get all tags already existing for the element selected
         previous = self.schemes.projects_service.get_annotations_by_element(
             self.params.project_slug,
             next.scheme,
-            element_id,  # ty: ignore[possibly-unresolved-reference]
+            element_id,
         )
 
         if next.dataset in ["test", "valid"]:
@@ -956,17 +962,15 @@ class Project:
                 raise Exception("Train dataset is not defined")
             # get context for the single selected element
             context = dict(
-                self.data.train.loc[element_id, self.params.cols_context]
-                .fillna("NA")
-                .apply(str)  # ty: ignore[possibly-unresolved-reference]
+                self.data.train.loc[element_id, self.params.cols_context].fillna("NA").apply(str)
             )
 
-        text = df.loc[element_id, "text"]  # ty: ignore[possibly-unresolved-reference]
+        text = df.loc[element_id, "text"]
         if pd.isna(text):
             text = "NA"
 
         return ElementOutModel(
-            element_id=element_id,  # ty: ignore[possibly-unresolved-reference]
+            element_id=element_id,
             text=text,
             context=context,
             selection=next.selection,
@@ -1040,14 +1044,10 @@ class Project:
                 )
 
             # extract context
+            row = self.data.train.loc[element.element_id]
             context = cast(
                 dict[str, Any],
-                self.data.train.loc[
-                    element.element_id, self.params.cols_context
-                ]  # ty: ignore[invalid-argument-type]
-                .fillna("NA")
-                .astype(str)
-                .to_dict(),
+                row[self.params.cols_context].fillna("NA").astype(str).to_dict(),
             )
             context = {i.replace("dataset_", ""): str(context[i]) for i in context}
 
