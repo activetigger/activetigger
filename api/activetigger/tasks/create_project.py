@@ -227,14 +227,12 @@ class CreateProject(BaseTask):
         # case to force the max of label from all label columns
         elif self.params.force_label and len(self.params.cols_label) > 0:
             f_notna = content[content[self.params.cols_label].notna().any(axis=1)]
-            f_na =content[content[self.params.cols_label].isna().all(axis=1)]
+            f_na = content[content[self.params.cols_label].isna().all(axis=1)]
             # different case regarding the number of labels
             if len(f_notna) > self.params.n_train:
-                trainset =f_notna.sample(
-                    self.params.n_train, random_state=self.random_seed
-                )
+                trainset = f_notna.sample(self.params.n_train, random_state=self.random_seed)
             else:
-                n_train_random = self.params.n_train -len(f_notna)
+                n_train_random = self.params.n_train - len(f_notna)
                 trainset = pd.concat(
                     [
                         f_notna,

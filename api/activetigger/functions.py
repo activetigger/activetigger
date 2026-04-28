@@ -602,9 +602,7 @@ def concat_text_columns(df: pd.DataFrame, cols_text: list[str]) -> pd.Series:
     Concatenate several text columns into a single text column,
     joining non-null values with a double newline separator.
     """
-    return df[cols_text].apply(
-        lambda x: "\n\n".join([str(i) for i in x if pd.notnull(i)]), axis=1
-    )
+    return df[cols_text].apply(lambda x: "\n\n".join([str(i) for i in x if pd.notnull(i)]), axis=1)
 
 
 def get_model_metrics(path_model: Path) -> dict | None:

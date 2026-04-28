@@ -260,9 +260,7 @@ class LanguageModels:
         del df
 
         # add flags in params
-        params = LMParametersDbModel(
-            **params.model_dump(), exclude_labels=exclude_labels or []
-        )
+        params = LMParametersDbModel(**params.model_dump(), exclude_labels=exclude_labels or [])
 
         # Update the queue state
         self.computing.append(
