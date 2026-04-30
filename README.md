@@ -6,6 +6,7 @@
 ![React](https://img.shields.io/badge/React-18.3-blue)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.4-3178C6)
 ![Docker](https://img.shields.io/badge/Docker-Compose-2496ED)
+[![Check code sanity](https://github.com/activetigger/activetigger/actions/workflows/check-main.yml/badge.svg?branch=main)](https://github.com/activetigger/activetigger/actions/workflows/check-main.yml)
 
 Hi❗
 

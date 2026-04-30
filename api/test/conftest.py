@@ -8,13 +8,13 @@ from activetigger.app.main import app
 from activetigger.config import config
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")
 def client() -> Generator[TestClient, None, None]:
     with TestClient(app) as c:
         yield c
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")
 def superuser_headers(client: TestClient) -> dict[str, str]:
     """
     Fixture to get the headers for the superuser.

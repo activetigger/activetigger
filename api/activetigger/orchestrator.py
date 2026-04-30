@@ -176,10 +176,13 @@ class Orchestrator:
         Synchronous work for the update loop (runs in a thread to avoid
         blocking the async event loop).
         """
-        self.queue.clean_old_processes(timeout=4)
         timer = time.time()
 
-        # loop on loaded projects
+        # Run project update_processes BEFORE clean_old_processes: the queue's
+        # _refresh_states transitions completed futures to state="done", and
+        # clean_old_processes reaps anything in TERMINAL_STATES — so reaping
+        # first would drop tasks before finish_project_creation gets a chance
+        # to consume the result, leaving creating projects stuck forever.
         to_del = []
         for p, project in list(self.projects.items()):
             try:
@@ -215,6 +218,9 @@ class Orchestrator:
                 to_del.append(p)
         for p in to_del:
             self.project_creation_ongoing.pop(p, None)
+
+        # Reap terminal/stuck tasks last, after results have been consumed.
+        self.queue.clean_old_processes(timeout=4)
 
     def _collect_heavy_stats(self) -> dict:
         """
