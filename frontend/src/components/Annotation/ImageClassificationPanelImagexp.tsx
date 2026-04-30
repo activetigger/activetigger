@@ -60,29 +60,31 @@ export const ImageClassificationPanelImagexp: FC<ImageClassificationPanelImagexp
   }, []);
 
   return (
-    <div
-      className="annotation-frame"
-      style={
-        {
-          '--height': `${displayConfig.textFrameHeight}vh`,
-        } as CSSProperties
-      }
-      ref={frameRef as unknown as LegacyRef<HTMLDivElement>}
-    >
-      {element?.history && element.history[0] && element.history[0].label && (
-        <span className="position-absolute end-0 top-0 me-1">
-          <AnnotationIcon title={element.history[0].label} />
-        </span>
-      )}
-      {src ? (
-        <img
-          src={src}
-          alt={elementId}
-          style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
-        />
-      ) : (
-        <p className="text-muted">No image</p>
-      )}
+    <div>
+      <div
+        className="annotation-frame"
+        style={
+          {
+            '--height': `${displayConfig.textFrameHeight}vh`,
+          } as CSSProperties
+        }
+        ref={frameRef as unknown as LegacyRef<HTMLDivElement>}
+      >
+        {element?.history && element.history[0] && element.history[0].label && (
+          <span className="position-absolute end-0 top-0 me-1">
+            <AnnotationIcon title={element.history[0].label} />
+          </span>
+        )}
+        {src ? (
+          <img
+            src={src}
+            alt={elementId}
+            style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+          />
+        ) : (
+          <p className="text-muted">No image</p>
+        )}
+      </div>
     </div>
   );
 };

@@ -2403,6 +2403,10 @@ export interface components {
             history?: components["schemas"]["AnnotationModel"][] | null;
             /** N Sample */
             n_sample?: number | null;
+            /** Similarity */
+            similarity?: number | null;
+            /** Rank */
+            rank?: number | null;
         };
         /** EvalSetDataModel */
         EvalSetDataModel: {

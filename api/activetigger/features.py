@@ -2,7 +2,7 @@ import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Optional
 
 import pandas as pd
 import pyarrow.parquet as pq
@@ -106,10 +106,10 @@ class Features:
         # Optional hook called as `on_delete(name, kind)` after a successful
         # feature delete. Project wires this up for image projects so that
         # deleting a multimodal-embeddings feature cascades to prompts.
-        self.on_delete = None
+        self.on_delete: Optional[Callable[[str, str], None]] = None
         # Optional hook called after a full reset_features_file() — all
         # features are gone, so any prompt/cache bound to them is stale.
-        self.on_reset = None
+        self.on_reset: Optional[Callable[[], None]] = None
 
         # Experimental image projects: replace the text embedding model list
         # with image embedding models, drop fasttext/dfm/regex (text-only).
@@ -195,9 +195,10 @@ class Features:
         self.map, self.n = self.get_map()
 
         # cascade hook — every prompt/cache bound to a feature is now stale.
-        if getattr(self, "on_reset", None) is not None:
+        on_reset = self.on_reset
+        if on_reset is not None:
             try:
-                self.on_reset()
+                on_reset()
             except Exception as ex:
                 print(f"on_reset hook failed: {ex}")
 
@@ -349,9 +350,10 @@ class Features:
         self.map = self.get_map()[0]
 
         # cascade hook (set by Project for image projects to drop dependent prompts)
-        if getattr(self, "on_delete", None) is not None:
+        on_delete = self.on_delete
+        if on_delete is not None:
             try:
-                self.on_delete(name, kind)
+                on_delete(name, kind)
             except Exception as ex:
                 print(f"on_delete hook failed for feature {name}: {ex}")
 

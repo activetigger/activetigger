@@ -63,6 +63,21 @@ export const AnnotationManagement: FC = () => {
   const [element, setElement] = useState<ElementOutModel | null>(null); //state for the current element
   const [nSample, setNSample] = useState<number | null>(null); // specific info
 
+  // Metadata returned by /elements/next (selection mode, prompt similarity/rank)
+  // is keyed by element_id so it survives the navigation + getElementById round-
+  // trip and gets merged onto the displayed element. Stored in a ref because
+  // updates here should not trigger re-renders.
+  const nextSelectionMeta = useRef<
+    Record<
+      string,
+      {
+        selection?: string | null;
+        similarity?: number | null;
+        rank?: number | null;
+      }
+    >
+  >({});
+
   const [showDisplayConfig, setShowDisplayConfig] = useState<boolean>(false);
   const [showDisplayViz, setShowDisplayViz] = useState<boolean>(false);
   const [showCodebook, setShowCodebook] = useState<boolean>(false);
@@ -130,6 +145,14 @@ export const AnnotationManagement: FC = () => {
       getNextElementId().then((res) => {
         if (res && res.n_sample) setNSample(res.n_sample);
         if (res && res.element_id) {
+          // stash the prompt similarity/rank info so we can merge it onto the
+          // element after getElementById resolves (that endpoint doesn't carry
+          // the selection-time metadata).
+          nextSelectionMeta.current[res.element_id] = {
+            selection: res.selection,
+            similarity: res.similarity,
+            rank: res.rank,
+          };
           setAppContext((prev) => ({
             ...prev,
             selectionHistory: {
@@ -148,9 +171,21 @@ export const AnnotationManagement: FC = () => {
       // only if id changed compared to the previous one (otherwise, a change in phase would trigger a reload)
       if (element?.element_id !== elementId) {
         getElementById(elementId, effectivePhase)
-          .then((element) => {
-            if (element) setElement(element);
-            else {
+          .then((fetched) => {
+            if (fetched) {
+              const meta = nextSelectionMeta.current[fetched.element_id];
+              if (meta) {
+                // overlay selection-time metadata coming from /elements/next
+                setElement({
+                  ...fetched,
+                  selection: meta.selection ?? fetched.selection,
+                  similarity: meta.similarity ?? fetched.similarity,
+                  rank: meta.rank ?? fetched.rank,
+                });
+              } else {
+                setElement(fetched);
+              }
+            } else {
               navigate(`/projects/${projectName}/tag/noelement`);
               setElement(null);
             }
@@ -305,6 +340,17 @@ export const AnnotationManagement: FC = () => {
           </button>
         </div>
       )}
+      {project?.params?.kind === 'image' &&
+        element?.selection === 'prompt' &&
+        element.similarity != null && (
+          <small
+            className="text-muted d-block mb-1"
+            title="Cosine similarity between the prompt embedding and this image. Rank is the absolute position in the prompt's full ranking."
+          >
+            {element.rank != null && <>rank #{element.rank} · </>}
+            similarity {element.similarity.toFixed(3)}
+          </small>
+        )}
       {/**
        * ANNOTATION BLOCK
        **/}

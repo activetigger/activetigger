@@ -209,6 +209,8 @@ class ElementOutModel(BaseModel):
     limit: int | None  # TO REMOVE
     history: list[AnnotationModel] | None = None
     n_sample: int | None = None
+    similarity: float | None = None
+    rank: int | None = None
 
 
 class NewUserModel(BaseModel):

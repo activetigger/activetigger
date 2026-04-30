@@ -852,6 +852,8 @@ class Project:
                 "No element available with this selection mode and history. Clear the history to access previous elements."
             )
         indicator = None
+        similarity: float | None = None
+        rank: int | None = None
         n_sample = f.sum()  # use len(ss) for adding history
 
         # validate selection method
@@ -930,7 +932,17 @@ class Project:
             if candidates.empty:
                 raise ValueError("No candidate elements have embeddings for the prompt's feature.")
             element_id = candidates.index[0]
-            indicator = f"similarity: {round(float(candidates.iloc[0]), 3)}"
+            similarity = float(candidates.iloc[0])
+            # rank in the full prompt ranking (1-based), independent of the
+            # currently filtered candidate pool, so the user sees the absolute
+            # position across the whole dataset.
+            loc = ranked.index.get_loc(element_id)
+            if not isinstance(loc, int):
+                raise ValueError(
+                    f"Expected unique position for {element_id} in prompt ranking, got {type(loc).__name__}"
+                )
+            rank = loc + 1
+            indicator = f"similarity: {round(similarity, 3)}"
         if element_id is None:
             raise ValueError("No element available with this selection mode.")
 
@@ -980,6 +992,8 @@ class Project:
             limit=None,
             history=previous,
             n_sample=n_sample,
+            similarity=similarity,
+            rank=rank,
         )
 
     def get_element(

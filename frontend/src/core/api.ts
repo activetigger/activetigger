@@ -683,7 +683,13 @@ export function useGetNextElementId(
         body: body as any,
       });
       if (res.data?.element_id)
-        return { element_id: res.data?.element_id, n_sample: res.data?.n_sample };
+        return {
+          element_id: res.data?.element_id,
+          n_sample: res.data?.n_sample,
+          selection: res.data?.selection,
+          similarity: res.data?.similarity,
+          rank: res.data?.rank,
+        };
       else return null;
     } else {
       notify({ type: 'error', message: 'Select a project and scheme.' });

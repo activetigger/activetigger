@@ -1,6 +1,5 @@
-from typing import Annotated
-
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import (
     APIRouter,

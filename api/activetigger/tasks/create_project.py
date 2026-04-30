@@ -379,11 +379,11 @@ class CreateProjectImagexp(BaseTask):
             ]
 
             # Lazy import: Pillow ships with the API deps but isolate the import here
+            Image = None
+            ImageOps = None
             try:
-                from PIL import Image, ImageOps  # type: ignore[import]
+                from PIL import Image, ImageOps  # type: ignore[import,no-redef]
             except Exception as ex:
-                Image = None  # type: ignore[assignment]
-                ImageOps = None  # type: ignore[assignment]
                 print(f"Pillow not available, skipping thumbnail generation: {ex}")
 
             total_images = len(image_infos)
@@ -399,14 +399,14 @@ class CreateProjectImagexp(BaseTask):
                 # Precompute a 256px JPEG thumbnail keyed by the slugified id
                 # (id_internal). Failures on individual files are logged and
                 # skipped — the thumbnail route falls back to the original.
-                if Image is not None:
+                if Image is not None and ImageOps is not None:
                     try:
                         thumb_path = thumbs_dir.joinpath(f"{slugify(element_id)}.jpg")
                         with Image.open(target) as im:
                             im = ImageOps.exif_transpose(im)
                             if im.mode not in ("RGB", "L"):
                                 im = im.convert("RGB")
-                            im.thumbnail((256, 256), Image.LANCZOS)
+                            im.thumbnail((256, 256), Image.Resampling.LANCZOS)
                             im.save(thumb_path, "JPEG", quality=80, optimize=True)
                     except Exception as ex:
                         print(f"thumbnail generation failed for {src_name}: {ex}")
