@@ -44,6 +44,9 @@ from activetigger.datamodels import (
 )
 from activetigger.orchestrator import get_orchestrator
 
+# initialize orchestrator early so its directory setup runs before the static mount
+get_orchestrator()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
