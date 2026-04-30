@@ -38,7 +38,10 @@ type Option = {
 
 // component
 export const ProjectCreationForm: FC = () => {
-  const { resetContext } = useAppContext();
+  const {
+    appContext: { developmentMode },
+    resetContext,
+  } = useAppContext();
 
   // form management
   const maxSizeMB = 400;
@@ -317,485 +320,511 @@ export const ProjectCreationForm: FC = () => {
   // Experimental image projects — see docs/image-projects-strategy.md
   const [kind, setKind] = useState<'text' | 'image'>('text');
 
+  // Force back to text mode if experimental flag is turned off while on this page
+  useEffect(() => {
+    if (!developmentMode && kind === 'image') setKind('text');
+  }, [developmentMode, kind]);
+
   return (
     <div>
       <div className="explanations">Create a new project</div>
 
-      <div className="form-check form-switch d-flex align-items-center gap-2 mb-2 text-muted small">
-        <input
-          className="form-check-input"
-          type="checkbox"
-          role="switch"
-          id="image-kind-switch"
-          checked={kind === 'image'}
-          onChange={(e) => setKind(e.target.checked ? 'image' : 'text')}
-          style={{ filter: 'grayscale(1)' }}
-        />
-        <label className="form-check-label" htmlFor="image-kind-switch">
-          Image project (experimental)
-        </label>
-      </div>
-
-      {kind === 'image' ? (
-        <ProjectCreationFormImagexp />
-      ) : (
-      <form onSubmit={handleSubmit(onSubmit)}>
-        <label htmlFor="project_name">Project name</label>
-        <input
-          id="project_name"
-          placeholder="Name of the project (need to be unique in the system)"
-          type="text"
-          disabled={creatingProject}
-          {...register('project_name')}
-          onClick={handleClickOnText}
-        />
-
-        <div className="my-3">
-          <label style={{ cursor: 'pointer' }}>
-            <input type="radio" name="dataset-origin" onClick={() => setDataset('load')} />
-            Load Dataset from disk
-          </label>
-          <br />
-          <label style={{ cursor: 'pointer' }}>
-            <input type="radio" name="dataset-origin" onClick={() => setDataset('from-project')} />
-            Load Dataset from another project
+      {developmentMode && (
+        <div className="form-check form-switch d-flex align-items-center gap-2 mb-2 text-muted small">
+          <input
+            className="form-check-input"
+            type="checkbox"
+            role="switch"
+            id="image-kind-switch"
+            checked={kind === 'image'}
+            onChange={(e) => setKind(e.target.checked ? 'image' : 'text')}
+            style={{ filter: 'grayscale(1)' }}
+          />
+          <label className="form-check-label" htmlFor="image-kind-switch">
+            Image project (experimental)
           </label>
         </div>
+      )}
 
-        {dataset && (
-          <label>
-            Dataset{' '}
-            {dataset !== 'load' && (
-              <select
-                id="existingDataset"
-                value={dataset}
-                onChange={(e) => {
-                  setDataset(e.target.value);
-                }}
-              >
-                <option key="from-project" value="from-project"></option>
-                <optgroup label="Select project">
-                  {(datasets?.projects || []).map((d) => (
-                    <option key={d.project_slug} value={d.project_slug}>
-                      {d.project_slug}
-                    </option>
-                  ))}
-                </optgroup>
-                {datasets?.toy_datasets && datasets?.toy_datasets?.length > 0 && (
-                  <optgroup label="Select toy dataset">
-                    {(datasets?.toy_datasets || []).map((d) => (
-                      <option
-                        key={`-toy-dataset-${d.project_slug}`}
-                        value={`-toy-dataset-${d.project_slug}`}
-                      >
+      {developmentMode && kind === 'image' ? (
+        <ProjectCreationFormImagexp />
+      ) : (
+        <form onSubmit={handleSubmit(onSubmit)}>
+          <label htmlFor="project_name">Project name</label>
+          <input
+            id="project_name"
+            placeholder="Name of the project (need to be unique in the system)"
+            type="text"
+            disabled={creatingProject}
+            {...register('project_name')}
+            onClick={handleClickOnText}
+          />
+
+          <div className="my-3">
+            <label style={{ cursor: 'pointer' }}>
+              <input type="radio" name="dataset-origin" onClick={() => setDataset('load')} />
+              Load Dataset from disk
+            </label>
+            <br />
+            <label style={{ cursor: 'pointer' }}>
+              <input
+                type="radio"
+                name="dataset-origin"
+                onClick={() => setDataset('from-project')}
+              />
+              Load Dataset from another project
+            </label>
+          </div>
+
+          {dataset && (
+            <label>
+              Dataset{' '}
+              {dataset !== 'load' && (
+                <select
+                  id="existingDataset"
+                  value={dataset}
+                  onChange={(e) => {
+                    setDataset(e.target.value);
+                  }}
+                >
+                  <option key="from-project" value="from-project"></option>
+                  <optgroup label="Select project">
+                    {(datasets?.projects || []).map((d) => (
+                      <option key={d.project_slug} value={d.project_slug}>
                         {d.project_slug}
                       </option>
                     ))}
                   </optgroup>
-                )}
-              </select>
-            )}
-            {dataset === 'load' && (
+                  {datasets?.toy_datasets && datasets?.toy_datasets?.length > 0 && (
+                    <optgroup label="Select toy dataset">
+                      {(datasets?.toy_datasets || []).map((d) => (
+                        <option
+                          key={`-toy-dataset-${d.project_slug}`}
+                          value={`-toy-dataset-${d.project_slug}`}
+                        >
+                          {d.project_slug}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                </select>
+              )}
+              {dataset === 'load' && (
+                <>
+                  <input
+                    className="form-control"
+                    disabled={creatingProject}
+                    id="csvFile"
+                    type="file"
+                    {...register('files')}
+                  />
+
+                  <div
+                    className="explanations"
+                    style={{ fontSize: 'smaller', fontWeight: 'normal' }}
+                  >
+                    File format : csv, xlsx or parquet &lt; {maxSizeMB} MB
+                    <br />
+                    Example dataset:{' '}
+                    <a href="./gwsd_train_test.csv" download>
+                      "Detecting Stance in Media On Global Warming" (download)
+                    </a>
+                  </div>
+                </>
+              )}
+            </label>
+          )}
+
+          {
+            // display datable if data available
+            dataset === 'load' && data !== null && (
               <>
-                <input
-                  className="form-control"
-                  disabled={creatingProject}
-                  id="csvFile"
-                  type="file"
-                  {...register('files')}
+                <div>
+                  Size of the dataset : <b>{lengthData}</b>
+                </div>
+                <DataTable<Record<DataType['headers'][number], string | number>>
+                  columns={data.headers.map((h) => ({
+                    name: h,
+                    selector: (row) => row[h],
+                    format: (row) => {
+                      const v = row[h];
+                      return typeof v === 'bigint' ? Number(v) : v;
+                    },
+                    width: '200px',
+                  }))}
+                  data={
+                    data.data
+                      .slice(0, 5)
+                      .map((row) =>
+                        Object.fromEntries(
+                          Object.entries(row).map(([key, value]) => [key, String(value)]),
+                        ),
+                      ) as Record<keyof DataType['headers'], string>[]
+                  }
+                />
+              </>
+            )
+          }
+
+          {
+            // only display if data
+            availableFields && (
+              <>
+                <label htmlFor="col_id">Id column (must contain unique values)</label>
+                <select id="col_id" disabled={creatingProject} {...register('col_id')}>
+                  <option key="row_number" value="row_number">
+                    Row number
+                  </option>
+                  {columns
+                    .filter((h) => !!h)
+                    .map((h) => (
+                      <option key={h} value={h}>
+                        {h}
+                      </option>
+                    ))}
+                </select>
+
+                <label htmlFor="cols_text">
+                  Text columns (selected fields will be concatenated)
+                </label>
+
+                <Controller
+                  name="cols_text"
+                  control={control}
+                  defaultValue={[]}
+                  render={({ field: { value, onChange } }) => (
+                    <Select
+                      options={availableFields}
+                      isMulti
+                      isDisabled={creatingProject}
+                      value={
+                        value
+                          ? value
+                              .map((v: string) => availableFields?.find((opt) => opt.value === v))
+                              .filter(Boolean)
+                          : []
+                      }
+                      onChange={(selectedOptions) => {
+                        onChange(
+                          selectedOptions ? selectedOptions.map((option) => option?.value) : [],
+                        );
+                      }}
+                    />
+                  )}
                 />
 
-                <div className="explanations" style={{ fontSize: 'smaller', fontWeight: 'normal' }}>
-                  File format : csv, xlsx or parquet &lt; {maxSizeMB} MB
-                  <br />
-                  Example dataset:{' '}
-                  <a href="./gwsd_train_test.csv" download>
-                    "Detecting Stance in Media On Global Warming" (download)
-                  </a>
-                </div>
-              </>
-            )}
-          </label>
-        )}
-
-        {
-          // display datable if data available
-          dataset === 'load' && data !== null && (
-            <>
-              <div>
-                Size of the dataset : <b>{lengthData}</b>
-              </div>
-              <DataTable<Record<DataType['headers'][number], string | number>>
-                columns={data.headers.map((h) => ({
-                  name: h,
-                  selector: (row) => row[h],
-                  format: (row) => {
-                    const v = row[h];
-                    return typeof v === 'bigint' ? Number(v) : v;
-                  },
-                  width: '200px',
-                }))}
-                data={
-                  data.data
-                    .slice(0, 5)
-                    .map((row) =>
-                      Object.fromEntries(
-                        Object.entries(row).map(([key, value]) => [key, String(value)]),
-                      ),
-                    ) as Record<keyof DataType['headers'], string>[]
-                }
-              />
-            </>
-          )
-        }
-
-        {
-          // only display if data
-          availableFields && (
-            <>
-              <label htmlFor="col_id">Id column (must contain unique values)</label>
-              <select id="col_id" disabled={creatingProject} {...register('col_id')}>
-                <option key="row_number" value="row_number">
-                  Row number
-                </option>
-                {columns
-                  .filter((h) => !!h)
-                  .map((h) => (
-                    <option key={h} value={h}>
-                      {h}
+                <label htmlFor="language">
+                  Language of the corpus (for tokenization and word segmentation)
+                </label>
+                <select id="language" disabled={creatingProject} {...register('language')}>
+                  {langages.map((lang) => (
+                    <option key={lang.value} value={lang.value}>
+                      {lang.label}
                     </option>
                   ))}
-              </select>
+                </select>
 
-              <label htmlFor="cols_text">Text columns (selected fields will be concatenated)</label>
+                <label htmlFor="col_label">Column(s) for existing annotations (optional)</label>
+                <Controller
+                  name="cols_label"
+                  control={control}
+                  defaultValue={[]}
+                  render={({ field: { value, onChange } }) => (
+                    <Select
+                      id="cols_label"
+                      options={availableFields}
+                      isMulti
+                      value={
+                        value
+                          ? value
+                              .map((v: string) => availableFields?.find((opt) => opt.value === v))
+                              .filter(Boolean)
+                          : []
+                      }
+                      isDisabled={creatingProject}
+                      onChange={(selectedOptions) => {
+                        onChange(
+                          selectedOptions ? selectedOptions.map((option) => option?.value) : [],
+                        );
+                      }}
+                    />
+                  )}
+                />
 
-              <Controller
-                name="cols_text"
-                control={control}
-                defaultValue={[]}
-                render={({ field: { value, onChange } }) => (
-                  <Select
-                    options={availableFields}
-                    isMulti
-                    isDisabled={creatingProject}
-                    value={
-                      value
-                        ? value
-                            .map((v: string) => availableFields?.find((opt) => opt.value === v))
-                            .filter(Boolean)
-                        : []
-                    }
-                    onChange={(selectedOptions) => {
-                      onChange(
-                        selectedOptions ? selectedOptions.map((option) => option?.value) : [],
-                      );
-                    }}
-                  />
-                )}
-              />
+                <label htmlFor="cols_context">
+                  Column(s) for contextual information (optional)
+                </label>
+                <Controller
+                  name="cols_context"
+                  control={control}
+                  render={({ field: { onChange, value } }) => (
+                    <Select
+                      id="cols_context"
+                      options={availableFields}
+                      isMulti
+                      defaultValue={[]}
+                      isDisabled={creatingProject}
+                      value={
+                        value
+                          ? value
+                              .map((v: string) => availableFields?.find((opt) => opt.value === v))
+                              .filter(Boolean)
+                          : []
+                      }
+                      onChange={(selectedOptions) => {
+                        onChange(
+                          selectedOptions ? selectedOptions.map((option) => option?.value) : [],
+                        );
+                      }}
+                    />
+                  )}
+                />
 
-              <label htmlFor="language">
-                Language of the corpus (for tokenization and word segmentation)
-              </label>
-              <select id="language" disabled={creatingProject} {...register('language')}>
-                {langages.map((lang) => (
-                  <option key={lang.value} value={lang.value}>
-                    {lang.label}
-                  </option>
-                ))}
-              </select>
+                <label htmlFor="n_train">Number of rows in the train set (limit : 100,000)</label>
+                <input
+                  id="n_train"
+                  type="number"
+                  disabled={creatingProject}
+                  {...register('n_train')}
+                  max={maxTrainSet}
+                  min={1}
+                />
 
-              <label htmlFor="col_label">Column(s) for existing annotations (optional)</label>
-              <Controller
-                name="cols_label"
-                control={control}
-                defaultValue={[]}
-                render={({ field: { value, onChange } }) => (
-                  <Select
-                    id="cols_label"
-                    options={availableFields}
-                    isMulti
-                    value={
-                      value
-                        ? value
-                            .map((v: string) => availableFields?.find((opt) => opt.value === v))
-                            .filter(Boolean)
-                        : []
-                    }
-                    isDisabled={creatingProject}
-                    onChange={(selectedOptions) => {
-                      onChange(
-                        selectedOptions ? selectedOptions.map((option) => option?.value) : [],
-                      );
-                    }}
-                  />
-                )}
-              />
-
-              <label htmlFor="cols_context">Column(s) for contextual information (optional)</label>
-              <Controller
-                name="cols_context"
-                control={control}
-                render={({ field: { onChange, value } }) => (
-                  <Select
-                    id="cols_context"
-                    options={availableFields}
-                    isMulti
-                    defaultValue={[]}
-                    isDisabled={creatingProject}
-                    value={
-                      value
-                        ? value
-                            .map((v: string) => availableFields?.find((opt) => opt.value === v))
-                            .filter(Boolean)
-                        : []
-                    }
-                    onChange={(selectedOptions) => {
-                      onChange(
-                        selectedOptions ? selectedOptions.map((option) => option?.value) : [],
-                      );
-                    }}
-                  />
-                )}
-              />
-
-              <label htmlFor="n_train">Number of rows in the train set (limit : 100,000)</label>
-              <input
-                id="n_train"
-                type="number"
-                disabled={creatingProject}
-                {...register('n_train')}
-                max={maxTrainSet}
-                min={1}
-              />
-
-              <div className="explanations">
-                For machine learning best practices, see the{' '}
-                <a target="_blank" href="https://activetigger.com/documentation/" rel="noreferrer">
-                  documentation
-                </a>
-              </div>
-
-              <label htmlFor="n_valid">
-                Number of rows in the validation set (optional)
-                <a className="n_valid">
-                  <HiOutlineQuestionMarkCircle />
-                </a>
-                <Tooltip anchorSelect=".n_valid" place="top">
-                  The validation is generally used for hyperparameter tuning
-                </Tooltip>
-              </label>
-              <input
-                id="n_valid"
-                type="number"
-                disabled={creatingProject || !random_selection}
-                {...register('n_valid')}
-                min={0}
-              />
-
-              <label htmlFor="n_test">
-                Number of rows in the test set (optional)
-                <a className="n_test">
-                  <HiOutlineQuestionMarkCircle />
-                </a>
-                <Tooltip anchorSelect=".n_test" place="top">
-                  The test set will be used for final evaluation
-                </Tooltip>
-              </label>
-              <input
-                id="n_test"
-                type="number"
-                disabled={creatingProject || !random_selection}
-                {...register('n_test')}
-                min={0}
-              />
-
-              <details>
-                <summary>Advanced options</summary>
                 <div className="explanations">
-                  Check the{' '}
+                  For machine learning best practices, see the{' '}
                   <a
                     target="_blank"
                     href="https://activetigger.com/documentation/"
                     rel="noreferrer"
                   >
                     documentation
-                  </a>{' '}
-                  for further explanations
-                </div>
-                <div>
-                  <input
-                    id="random_selection"
-                    type="checkbox"
-                    disabled={creatingProject || force_label}
-                    {...register('random_selection')}
-                  />
-                  <label htmlFor="random_selection">
-                    Select rows at random{' '}
-                    <a className="rselect">
-                      <HiOutlineQuestionMarkCircle />
-                    </a>
-                    <Tooltip anchorSelect=".rselect" place="top">
-                      If unticked, will preserve order of the original dataset (note: rows without
-                      <br />
-                      text are dropped) only if no evaluation datasets (eval/test)
-                    </Tooltip>
-                  </label>
-                </div>
-                <div>
-                  <input
-                    id="force_label"
-                    type="checkbox"
-                    disabled={creatingProject || !random_selection}
-                    {...register('force_label')}
-                  />
-                  <label htmlFor="force_label">
-                    Prioritize rows with a label{' '}
-                    <a className="force_labelinfo">
-                      <HiOutlineQuestionMarkCircle />
-                    </a>
-                    <Tooltip anchorSelect=".force_labelinfo" place="top">
-                      If ticked, select rows with a label in priority for the trainset (no more
-                      random). Careful : valid/test set take priority and will still be random.
-                    </Tooltip>
-                  </label>
+                  </a>
                 </div>
 
-                <div>
-                  <input
-                    id="stratify_train"
-                    type="checkbox"
-                    disabled={creatingProject || force_label || !random_selection}
-                    {...register('stratify_train')}
-                  />
-                  <label htmlFor="stratify_train">
-                    Stratify train set{' '}
-                    <a className="stratify_train">
-                      <HiOutlineQuestionMarkCircle />
-                    </a>
-                    <Tooltip anchorSelect=".stratify_train" place="top">
-                      If ticked, ensures balanced representation of each group in the train set. See
-                      documentation.
-                    </Tooltip>
-                  </label>
-                </div>
-                <div>
-                  <input
-                    id="stratify_test"
-                    type="checkbox"
-                    disabled={creatingProject || force_label || !random_selection}
-                    {...register('stratify_test')}
-                  />
-                  <label htmlFor="stratify_test">
-                    Stratify test set{' '}
-                    <a className="stratify_train">
-                      <HiOutlineQuestionMarkCircle />
-                    </a>
-                    <Tooltip anchorSelect=".stratify_train" place="top">
-                      If ticked, ensures balanced representation of each group in the train set. See
-                      documentation.
-                    </Tooltip>
-                  </label>
-                </div>
-
-                {(stratify_train || stratify_test) && (
-                  <>
-                    <label htmlFor="cols_stratify">Column(s) used for stratification</label>
-                    <Controller
-                      name="cols_stratify"
-                      control={control}
-                      render={({ field: { onChange } }) => (
-                        <Select
-                          id="cols_stratify"
-                          options={availableFields}
-                          isMulti
-                          isDisabled={creatingProject}
-                          onChange={(selectedOptions) => {
-                            onChange(
-                              selectedOptions ? selectedOptions.map((option) => option.value) : [],
-                            );
-                          }}
-                        />
-                      )}
-                    />
-                  </>
-                )}
-                <div>
-                  <input
-                    id="clear_test"
-                    type="checkbox"
-                    disabled={creatingProject || !random_selection}
-                    {...register('clear_test')}
-                  />
-                  <label htmlFor="clear_test">Drop annotations for the testset </label>
-                </div>
-                <div className="d-flex align-items-center gap-2">
-                  <label htmlFor="compute_feature" className="m-0">
-                    <input
-                      id="compute_feature"
-                      type="checkbox"
-                      disabled={creatingProject}
-                      checked={computeFeatures}
-                      onChange={() => {
-                        setComputeFeatures(!computeFeatures);
-                      }}
-                    />
-                    Compute sentence embeddings
-                  </label>
-                  {computeFeatures && (
-                    <label className="batch-size-label">
-                      batch
-                      <input
-                        type="number"
-                        min={1}
-                        max={512}
-                        value={featureBatchSize}
-                        onChange={(e) =>
-                          setFeatureBatchSize(Math.max(1, parseInt(e.target.value) || 1))
-                        }
-                        title="Batch size for embedding computation"
-                        disabled={creatingProject}
-                      />
-                    </label>
-                  )}
-                </div>
-                <label htmlFor="n_valid" className="d-flex align-items-center">
-                  Seed
-                  <a className="ref_seed">
+                <label htmlFor="n_valid">
+                  Number of rows in the validation set (optional)
+                  <a className="n_valid">
                     <HiOutlineQuestionMarkCircle />
                   </a>
-                  <Tooltip anchorSelect=".ref_seed" place="top">
-                    Set it to ensure replicability.
+                  <Tooltip anchorSelect=".n_valid" place="top">
+                    The validation is generally used for hyperparameter tuning
                   </Tooltip>
-                  <input
-                    id="seed"
-                    type="number"
-                    disabled={creatingProject}
-                    {...register('seed', { valueAsNumber: true })}
-                    min={0}
-                    step={1}
-                    className="w-25 ms-3"
-                    placeholder="0"
-                  />
                 </label>
-              </details>
-            </>
-          )
-        }
-        {/* 
+                <input
+                  id="n_valid"
+                  type="number"
+                  disabled={creatingProject || !random_selection}
+                  {...register('n_valid')}
+                  min={0}
+                />
+
+                <label htmlFor="n_test">
+                  Number of rows in the test set (optional)
+                  <a className="n_test">
+                    <HiOutlineQuestionMarkCircle />
+                  </a>
+                  <Tooltip anchorSelect=".n_test" place="top">
+                    The test set will be used for final evaluation
+                  </Tooltip>
+                </label>
+                <input
+                  id="n_test"
+                  type="number"
+                  disabled={creatingProject || !random_selection}
+                  {...register('n_test')}
+                  min={0}
+                />
+
+                <details>
+                  <summary>Advanced options</summary>
+                  <div className="explanations">
+                    Check the{' '}
+                    <a
+                      target="_blank"
+                      href="https://activetigger.com/documentation/"
+                      rel="noreferrer"
+                    >
+                      documentation
+                    </a>{' '}
+                    for further explanations
+                  </div>
+                  <div>
+                    <input
+                      id="random_selection"
+                      type="checkbox"
+                      disabled={creatingProject || force_label}
+                      {...register('random_selection')}
+                    />
+                    <label htmlFor="random_selection">
+                      Select rows at random{' '}
+                      <a className="rselect">
+                        <HiOutlineQuestionMarkCircle />
+                      </a>
+                      <Tooltip anchorSelect=".rselect" place="top">
+                        If unticked, will preserve order of the original dataset (note: rows without
+                        <br />
+                        text are dropped) only if no evaluation datasets (eval/test)
+                      </Tooltip>
+                    </label>
+                  </div>
+                  <div>
+                    <input
+                      id="force_label"
+                      type="checkbox"
+                      disabled={creatingProject || !random_selection}
+                      {...register('force_label')}
+                    />
+                    <label htmlFor="force_label">
+                      Prioritize rows with a label{' '}
+                      <a className="force_labelinfo">
+                        <HiOutlineQuestionMarkCircle />
+                      </a>
+                      <Tooltip anchorSelect=".force_labelinfo" place="top">
+                        If ticked, select rows with a label in priority for the trainset (no more
+                        random). Careful : valid/test set take priority and will still be random.
+                      </Tooltip>
+                    </label>
+                  </div>
+
+                  <div>
+                    <input
+                      id="stratify_train"
+                      type="checkbox"
+                      disabled={creatingProject || force_label || !random_selection}
+                      {...register('stratify_train')}
+                    />
+                    <label htmlFor="stratify_train">
+                      Stratify train set{' '}
+                      <a className="stratify_train">
+                        <HiOutlineQuestionMarkCircle />
+                      </a>
+                      <Tooltip anchorSelect=".stratify_train" place="top">
+                        If ticked, ensures balanced representation of each group in the train set.
+                        See documentation.
+                      </Tooltip>
+                    </label>
+                  </div>
+                  <div>
+                    <input
+                      id="stratify_test"
+                      type="checkbox"
+                      disabled={creatingProject || force_label || !random_selection}
+                      {...register('stratify_test')}
+                    />
+                    <label htmlFor="stratify_test">
+                      Stratify test set{' '}
+                      <a className="stratify_train">
+                        <HiOutlineQuestionMarkCircle />
+                      </a>
+                      <Tooltip anchorSelect=".stratify_train" place="top">
+                        If ticked, ensures balanced representation of each group in the train set.
+                        See documentation.
+                      </Tooltip>
+                    </label>
+                  </div>
+
+                  {(stratify_train || stratify_test) && (
+                    <>
+                      <label htmlFor="cols_stratify">Column(s) used for stratification</label>
+                      <Controller
+                        name="cols_stratify"
+                        control={control}
+                        render={({ field: { onChange } }) => (
+                          <Select
+                            id="cols_stratify"
+                            options={availableFields}
+                            isMulti
+                            isDisabled={creatingProject}
+                            onChange={(selectedOptions) => {
+                              onChange(
+                                selectedOptions
+                                  ? selectedOptions.map((option) => option.value)
+                                  : [],
+                              );
+                            }}
+                          />
+                        )}
+                      />
+                    </>
+                  )}
+                  <div>
+                    <input
+                      id="clear_test"
+                      type="checkbox"
+                      disabled={creatingProject || !random_selection}
+                      {...register('clear_test')}
+                    />
+                    <label htmlFor="clear_test">Drop annotations for the testset </label>
+                  </div>
+                  <div className="d-flex align-items-center gap-2">
+                    <label htmlFor="compute_feature" className="m-0">
+                      <input
+                        id="compute_feature"
+                        type="checkbox"
+                        disabled={creatingProject}
+                        checked={computeFeatures}
+                        onChange={() => {
+                          setComputeFeatures(!computeFeatures);
+                        }}
+                      />
+                      Compute sentence embeddings
+                    </label>
+                    {computeFeatures && (
+                      <label className="batch-size-label">
+                        batch
+                        <input
+                          type="number"
+                          min={1}
+                          max={512}
+                          value={featureBatchSize}
+                          onChange={(e) =>
+                            setFeatureBatchSize(Math.max(1, parseInt(e.target.value) || 1))
+                          }
+                          title="Batch size for embedding computation"
+                          disabled={creatingProject}
+                        />
+                      </label>
+                    )}
+                  </div>
+                  <label htmlFor="n_valid" className="d-flex align-items-center">
+                    Seed
+                    <a className="ref_seed">
+                      <HiOutlineQuestionMarkCircle />
+                    </a>
+                    <Tooltip anchorSelect=".ref_seed" place="top">
+                      Set it to ensure replicability.
+                    </Tooltip>
+                    <input
+                      id="seed"
+                      type="number"
+                      disabled={creatingProject}
+                      {...register('seed', { valueAsNumber: true })}
+                      min={0}
+                      step={1}
+                      className="w-25 ms-3"
+                      placeholder="0"
+                    />
+                  </label>
+                </details>
+              </>
+            )
+          }
+          {/* 
               Quasi Modal
               overlay progression bar with cancel button 
             */}
-        {data && creatingProject && <UploadProgressBar progression={progression} cancel={cancel} />}
+          {data && creatingProject && (
+            <UploadProgressBar progression={progression} cancel={cancel} />
+          )}
 
-        {
-          <>
-            <button type="submit" className="btn-submit" disabled={creatingProject}>
-              Create
-            </button>
-          </>
-        }
-      </form>
+          {
+            <>
+              <button type="submit" className="btn-submit" disabled={creatingProject}>
+                Create
+              </button>
+            </>
+          }
+        </form>
       )}
     </div>
   );

@@ -12,7 +12,7 @@ import { AvailableProjectsModel } from '../types';
 export const ProjectsPage: FC = () => {
   // hooks
   const {
-    appContext: { currentProject, displayConfig },
+    appContext: { currentProject, displayConfig, developmentMode },
     resetContext,
   } = useAppContext();
   const currentProjectSlug = currentProject?.params.project_slug;
@@ -20,18 +20,24 @@ export const ProjectsPage: FC = () => {
   // api call
   const { projects, storageUsed, storageLimit } = useUserProjects();
 
+  // hide image projects unless experimental mode is on
+  const visibleProjects = (projects || []).filter(
+    (project) => developmentMode || project.parameters.kind !== 'image',
+  );
+
   // rows to display
   const [rows, setRows] = useState<AvailableProjectsModel[]>([]);
   useEffect(() => {
-    setRows(projects || []);
-  }, [projects]);
+    setRows(visibleProjects);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projects, developmentMode]);
 
   // handle search input
   const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
     const searchValue = e.target.value.toLowerCase();
 
     setRows(
-      (projects || []).filter((project) => {
+      visibleProjects.filter((project) => {
         const projectName = project.parameters.project_name.toLowerCase();
         const projectSlug = project.parameters.project_slug.toLowerCase();
         const createdBy = project.created_by.toLowerCase();
