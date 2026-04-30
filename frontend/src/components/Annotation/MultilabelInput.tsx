@@ -1,8 +1,10 @@
 import { FC, useCallback, useEffect, useMemo, useState } from 'react';
 import { FaCheck } from 'react-icons/fa6';
+import { useNavigate, useParams } from 'react-router-dom';
 import Select from 'react-select';
 import { ElementOutModel } from '../../types';
 import { useAppContext } from '../../core/useAppContext';
+import { useAnnotationSessionHistory } from '../../core/useHistory';
 import { reorderLabels } from '../../core/utils';
 
 interface MultilabelInputProps {
@@ -131,10 +133,26 @@ export const MultilabelInput: FC<MultilabelInputProps> = ({
   const {
     appContext: { displayConfig },
   } = useAppContext();
+  const { projectName } = useParams();
+  const navigate = useNavigate();
+  const { addElementInAnnotationSessionHistory } = useAnnotationSessionHistory();
+
   const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
   const [comment, setComment] = useState<string>(
     element?.history ? element.history[0]?.comment || '' : '',
   );
+
+  const skipAnnotation = useCallback(() => {
+    if (element)
+      addElementInAnnotationSessionHistory(
+        element.element_id,
+        element.text,
+        undefined,
+        undefined,
+        true,
+      );
+    navigate(`/projects/${projectName}/tag/`);
+  }, [navigate, projectName, addElementInAnnotationSessionHistory, element]);
 
   useEffect(() => setComment(element?.history ? element.history[0]?.comment || '' : ''), [element]);
   const availableLabels = useMemo<LabelType[]>(
@@ -170,8 +188,11 @@ export const MultilabelInput: FC<MultilabelInputProps> = ({
         postAnnotation(selectedLabels.join('|'), elementId, comment);
         setSelectedLabels([]);
       }
+      if (ev.code === 'KeyS') {
+        skipAnnotation();
+      }
     },
-    [postAnnotation, selectedLabels, elementId, comment],
+    [postAnnotation, selectedLabels, elementId, comment, skipAnnotation],
   );
 
   useEffect(() => {
@@ -298,6 +319,16 @@ export const MultilabelInput: FC<MultilabelInputProps> = ({
         >
           <FaCheck size={18} />
           <span className="fw-semibold">Validate</span>
+        </button>
+        <button
+          type="button"
+          className="btn btn-secondary d-flex align-items-center justify-content-center gap-2 px-3 py-2"
+          onClick={() => {
+            skipAnnotation();
+          }}
+        >
+          <span className="fw-semibold">Skip</span>
+          <span className="badge hotkey">S</span>
         </button>
       </div>
       <textarea
