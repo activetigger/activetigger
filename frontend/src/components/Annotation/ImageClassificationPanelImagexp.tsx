@@ -61,6 +61,15 @@ export const ImageClassificationPanelImagexp: FC<ImageClassificationPanelImagexp
 
   return (
     <div>
+      {element?.selection === 'prompt' && element.similarity != null && (
+        <small
+          className="text-muted d-block mb-1"
+          title="Cosine similarity between the prompt embedding and this image. Rank is the absolute position in the prompt's full ranking."
+        >
+          {element.rank != null && <>rank #{element.rank} · </>}
+          similarity {element.similarity.toFixed(3)}
+        </small>
+      )}
       <div
         className="annotation-frame"
         style={

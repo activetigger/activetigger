@@ -23,11 +23,11 @@ import { TagDisplayParameters } from '../TagDisplayParameters';
 import { DisplayProjection } from '../vizualisation/DisplayProjection';
 import { AnnotationHistoryList } from './AnnotationHistoryList';
 import { AnnotationModeForm } from './AnnotationMode';
-import { PromptsPanel } from './PromptsPanel';
+import { ImageClassificationPanelImagexp } from './ImageClassificationPanelImagexp';
 import { MulticlassInput } from './MulticlassInput';
 import { MultilabelInput } from './MultilabelInput';
+import { PromptsPanel } from './PromptsPanel';
 import { SelectActiveLearning } from './SelectActiveLearning';
-import { ImageClassificationPanelImagexp } from './ImageClassificationPanelImagexp';
 import { TextClassificationPanel } from './TextClassificationPanel';
 import { TextSpanPanel } from './TextSpanPanel';
 
@@ -340,17 +340,6 @@ export const AnnotationManagement: FC = () => {
           </button>
         </div>
       )}
-      {project?.params?.kind === 'image' &&
-        element?.selection === 'prompt' &&
-        element.similarity != null && (
-          <small
-            className="text-muted d-block mb-1"
-            title="Cosine similarity between the prompt embedding and this image. Rank is the absolute position in the prompt's full ranking."
-          >
-            {element.rank != null && <>rank #{element.rank} · </>}
-            similarity {element.similarity.toFixed(3)}
-          </small>
-        )}
       {/**
        * ANNOTATION BLOCK
        **/}
@@ -512,9 +501,7 @@ export const AnnotationManagement: FC = () => {
           {project?.params?.kind === 'image' && project?.params?.project_slug && (
             <PromptsPanel
               projectSlug={project.params.project_slug}
-              state={
-                (project as unknown as { prompts?: PromptsProjectStateModel | null }).prompts
-              }
+              state={(project as unknown as { prompts?: PromptsProjectStateModel | null }).prompts}
             />
           )}
         </Modal.Body>
