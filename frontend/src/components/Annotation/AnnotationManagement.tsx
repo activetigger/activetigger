@@ -348,6 +348,9 @@ export const AnnotationManagement: FC = () => {
           'annotation-block',
           (displayConfig.forceOneColumnLayout || kindScheme == 'multilabel') &&
             'force-one-column-layout',
+          project?.params?.kind === 'image' &&
+            kindScheme === 'multilabel' &&
+            'image-multilabel-wide',
         )} // add class to force bottom if settings OR multiclass label
         style={
           {

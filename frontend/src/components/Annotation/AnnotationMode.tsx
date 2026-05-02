@@ -292,6 +292,32 @@ export const AnnotationModeForm: FC<AnnotationModeFormProps> = ({
             </div>
           </div>
         )}
+        {selectionConfig.mode === 'prompt' && selectionConfig.prompt_id && (
+          <div className="at-input-group">
+            <label className="small-gray">
+              Max similarity: {(selectionConfig.similarity_range?.[1] ?? 1).toFixed(2)}
+            </label>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.01}
+              value={selectionConfig.similarity_range?.[1] ?? 1}
+              onChange={(e) => {
+                const hi = Number(e.target.value);
+                setAppContext((prev) => ({
+                  ...prev,
+                  selectionConfig: {
+                    ...prev.selectionConfig,
+                    similarity_range: hi >= 1 ? undefined : [0, hi],
+                  },
+                }));
+              }}
+              style={{ minWidth: 220 }}
+              title="Filter prompt selection to elements with similarity at most this value"
+            />
+          </div>
+        )}
       </div>
       {/* CONTENT */}
       <div>

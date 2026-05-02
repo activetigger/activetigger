@@ -676,6 +676,7 @@ export function useGetNextElementId(
         on_users: selectionConfig.users,
         model_active: activeModel,
         prompt_id: selectionConfig.prompt_id,
+        similarity_range: selectionConfig.similarity_range,
       };
       const res = await api.POST('/elements/next', {
         params: { query: { project_slug: projectSlug } },

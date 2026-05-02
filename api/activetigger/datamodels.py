@@ -165,6 +165,9 @@ class NextInModel(BaseModel):
     dataset: str = "train"
     model_active: ActiveModel | None = None
     prompt_id: str | None = None
+    # (min, max) cosine-similarity bounds for prompt selection. Inclusive on
+    # both ends. None means no filtering.
+    similarity_range: tuple[float, float] | None = None
 
 
 class ElementInModel(BaseModel):

@@ -149,6 +149,16 @@
     }
   }
 
+  // image + multilabel: the configured text-width is too narrow for an image
+  // preview. Override to a wider frame so the image is comfortably readable.
+  &.image-multilabel-wide {
+    @include media-breakpoint-up(lg) {
+      .annotation-frame {
+        width: min(85%, 1200px);
+      }
+    }
+  }
+
   .annotation-frame {
     // place in the grid (optional)
     grid-column: 1;

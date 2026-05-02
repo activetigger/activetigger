@@ -135,6 +135,9 @@ export interface SelectionConfig {
   filter?: string;
   users?: string[];
   prompt_id?: string; // saved prompt id, used when mode === 'prompt'
+  // [min, max] cosine-similarity bounds when mode === 'prompt'. Both ends are
+  // inclusive; undefined means no filtering.
+  similarity_range?: [number, number];
 }
 
 // Prompt-based image selection (multimodal). Hand-written until

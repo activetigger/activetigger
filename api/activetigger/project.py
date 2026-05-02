@@ -929,6 +929,11 @@ class Project:
             # Index.intersection preserves the order of self, so candidates
             # stays in descending-similarity order.
             candidates = ranked.loc[ranked.index.intersection(ss.index)]
+            if next.similarity_range is not None:
+                lo, hi = next.similarity_range
+                if lo > hi:
+                    lo, hi = hi, lo
+                candidates = candidates[(candidates >= lo) & (candidates <= hi)]
             if candidates.empty:
                 raise ValueError("No candidate elements have embeddings for the prompt's feature.")
             element_id = candidates.index[0]
