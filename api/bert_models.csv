@@ -26,4 +26,5 @@ microsoft/deberta-v3-small,5,,en, 550, 44,
 microsoft/deberta-v3-base,5,,en, 710, 86,
 microsoft/deberta-v3-large,5,,en, 1500, 304,
 microsoft/deberta-v2-xlarge,5,,en, 3600, 900,
+jhu-clsp/mmBERT-base,5,multi,1200,370,8000
 NbAiLab/nb-bert-large,10,,nb,1600,400,
