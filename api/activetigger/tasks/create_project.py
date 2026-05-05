@@ -302,7 +302,7 @@ class CreateProjectImagexp(BaseTask):
     kind = "create_project_imagexp"
 
     # caps (v1)
-    MAX_ZIP_BYTES = 1 * 1024 * 1024 * 1024  # 1 GB
+    MAX_ZIP_BYTES = 8 * 1024 * 1024 * 1024  # 1 GB
     MAX_IMAGE_BYTES = 100 * 1024 * 1024  # 100 MB
     ALLOWED_EXT = {".png", ".jpg", ".jpeg"}
 
