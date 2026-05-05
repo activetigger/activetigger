@@ -115,6 +115,7 @@ def tokenize(texts: Series, language: str = "fr", batch_size=100) -> Series:
         "ja": "ja_core_news_sm",
         "cn": "zh_core_web_sm",
         "es": "es_core_news_sm",
+        "nb": "nb_core_news_sm",
     }
     if language not in models:
         raise Exception(f"Language {language} is not supported")

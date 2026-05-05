@@ -55,6 +55,7 @@ export const ProjectCreationForm: FC = () => {
     { value: 'de', label: 'German' },
     { value: 'cn', label: 'Chinese' },
     { value: 'ja', label: 'Japanese' },
+    { value: 'nb', label: 'Norwegian' },
   ];
 
   const { register, control, handleSubmit, setValue, reset } = useForm<

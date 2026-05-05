@@ -5,6 +5,7 @@ from spacy.lang.de import German
 from spacy.lang.en import English
 from spacy.lang.es import Spanish
 from spacy.lang.fr import French
+from spacy.lang.nb import Norwegian
 
 from activetigger.tasks.base_task import BaseTask
 
@@ -57,6 +58,8 @@ class ComputeDfm(BaseTask):
             stop_words = list(German.Defaults.stop_words)
         elif self.language == "en":
             stop_words = list(English.Defaults.stop_words)
+        elif self.language == "nb":
+            stop_words = list(Norwegian.Defaults.stop_words)
         else:
             stop_words = list(English.Defaults.stop_words)
             print(f"Language {self.language} not supported, using English stop words.")

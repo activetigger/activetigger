@@ -26,6 +26,7 @@ export const ProjectUpdateForm: FC<{ closeModal: () => void }> = ({ closeModal }
     { value: 'de', label: 'German' },
     { value: 'cn', label: 'Chinese' },
     { value: 'ja', label: 'Japanese' },
+    { value: 'nb', label: 'Norwegian' },
   ];
   const {
     register,
