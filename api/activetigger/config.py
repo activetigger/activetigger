@@ -28,8 +28,17 @@ class MODE(StrEnum):
     PROD = "prod"
 
     @classmethod
-    def has_member_key(cls, key):
-        return key in cls.__members__
+    def parse(cls, value: str | None) -> "MODE":
+        if value is None:
+            return cls.DEV
+        normalized = value.strip().lower()
+        # accept "production" as an alias for "prod"
+        if normalized == "production":
+            return cls.PROD
+        try:
+            return cls(normalized)
+        except ValueError:
+            return cls.DEV
 
 
 # utils to cast str env variables as int or float
@@ -58,7 +67,7 @@ class Config(metaclass=_Singleton):
     # type sage configuration specification with default values coming from env variables or defaults
     data_path: str = os.environ.get("DATA_PATH", ".")
     user_hdd_max: float
-    mode: MODE = MODE(os.environ.get("MODE", str(MODE.DEV)))
+    mode: MODE = MODE.parse(os.environ.get("MODE"))
     secret_key: str = os.environ.get(
         "SECRET_KEY", "Q__zz0ew00R_YSwCFl-6VgS9dPbfDtFDnzHfd57t0EY="
     )  # FALSE KEY CHANGE IT IF NEEDED
@@ -90,12 +99,7 @@ class Config(metaclass=_Singleton):
     def __init__(self):
         # for variables which needs cast or other treatment we do that work in the constructor
         self.cpu_only = os.environ.get("CPU_ONLY", "false").lower() in ("true", "1", "yes")
-        mode_env = os.environ.get("MODE")
-        self.mode = (
-            MODE(mode_env)
-            if mode_env is not None and MODE.has_member_key(mode_env)
-            else MODE("dev")
-        )
+        self.mode = MODE.parse(os.environ.get("MODE"))
         self.user_hdd_max = parse_environ("ACTIVETIGGER_USER_HDD_MAX", float, 30.0)
         self.max_loaded_projects = parse_environ("MAX_LOADED_PROJECTS", int, 30)
         self.n_workers_gpu = parse_environ("N_WORKERS_GPU", int, 1)
