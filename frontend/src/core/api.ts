@@ -2565,7 +2565,6 @@ export async function getProjectStatus(projectSlug: string) {
  * Add file for project creation
  */
 export function useAddProjectFile() {
-  const { notify } = useNotifications();
   const { authenticatedUser } = useAuth();
 
   // state to monitor progression
@@ -2602,15 +2601,13 @@ export function useAddProjectFile() {
             },
           },
         );
-      } catch (error) {
-        notify({ type: 'error', message: `Upload failed: ${error}` });
       } finally {
         // reset internal state
         setProgression({});
         setController(undefined);
       }
     },
-    [notify, authenticatedUser, setController],
+    [authenticatedUser, setController],
   );
 
   return {
@@ -2650,8 +2647,6 @@ export function useAddFile() {
           },
         );
         notify({ type: 'success', message: 'File uploaded' });
-      } catch (error) {
-        notify({ type: 'error', message: `Upload failed: ${error}` });
       } finally {
         // reset internal state
         setProgression({});

@@ -7,6 +7,7 @@ import { omit } from 'lodash';
 import { FaCloudDownloadAlt } from 'react-icons/fa';
 import Select from 'react-select';
 import { useAddFile, useGetPredictionsFile, usePredictOnDataset } from '../../core/api';
+import { formatUploadError } from '../../core/HTTPError';
 import { useNotifications } from '../../core/notifications';
 import { loadFile } from '../../core/utils';
 import { TextDatasetModel } from '../../types';
@@ -88,17 +89,29 @@ export const ImportPredictionDataset: FC<ImportPredictionDatasetProps> = ({
         notify({ type: 'error', message: 'Please fill all the fields.' });
         return;
       }
+      const file = formData.files[0];
       setImportingDataset(true);
-      // first upload file
-      await addFile(projectSlug, formData.files[0]);
-      // then launch prediction
-      await predict(projectSlug, scheme, modelName, {
-        ...omit(formData, 'files'),
-        filename: data.filename,
-      });
-      setData(null);
-      setImportingDataset(false);
-      reset();
+      let uploaded = false;
+      try {
+        // first upload file — if this fails we must NOT call predict, otherwise
+        // the backend returns a misleading 404 because the file is not on disk.
+        await addFile(projectSlug, file);
+        uploaded = true;
+        await predict(projectSlug, scheme, modelName, {
+          ...omit(formData, 'files'),
+          filename: data.filename,
+        });
+        setData(null);
+        reset();
+      } catch (error) {
+        const message = uploaded
+          ? `Prediction failed: ${error instanceof Error ? error.message : String(error)}`
+          : formatUploadError(error, file.size);
+        notify({ type: 'error', message });
+        console.error('Prediction on imported dataset failed:', error);
+      } finally {
+        setImportingDataset(false);
+      }
     }
   };
 

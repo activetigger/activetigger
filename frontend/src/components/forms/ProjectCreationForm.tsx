@@ -6,7 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import Select from 'react-select';
 import { UploadProgressBar } from '../UploadProgressBar';
 
-import { CanceledError } from 'axios';
+import axios, { CanceledError } from 'axios';
 import { HiOutlineQuestionMarkCircle } from 'react-icons/hi';
 import { Tooltip } from 'react-tooltip';
 import {
@@ -18,6 +18,7 @@ import {
   useGetAvailableDatasets,
   useProjectNameAvailable,
 } from '../../core/api';
+import { formatUploadError } from '../../core/HTTPError';
 import { useNotifications } from '../../core/notifications';
 import { useAppContext } from '../../core/useAppContext';
 import { getRandomName, loadFile } from '../../core/utils';
@@ -293,8 +294,15 @@ export const ProjectCreationForm: FC = () => {
         }, 1000);
       } catch (error) {
         setCreatingProject(false);
-        if (!(error instanceof CanceledError)) notify({ type: 'error', message: error + '' });
-        else notify({ type: 'success', message: 'Project creation aborted.' });
+        if (error instanceof CanceledError) {
+          notify({ type: 'success', message: 'Project creation aborted.' });
+        } else if (axios.isAxiosError(error)) {
+          // axios error from the file upload — give a diagnostic message
+          const uploadedSize = files && files.length > 0 ? files[0].size : undefined;
+          notify({ type: 'error', message: formatUploadError(error, uploadedSize) });
+        } else {
+          notify({ type: 'error', message: error + '' });
+        }
       }
     }
   };
