@@ -139,13 +139,25 @@ class Projections:
         self,
         user_name: str,
         format: str = "csv",
+        col_id: str | None = None,
+        id_mapping: DataFrame | None = None,
     ) -> FileResponse:
         """
-        Export the projection for a user
+        Export the projection for a user.
+
+        The projection is internally indexed on id_internal (slugified). When
+        an id_mapping is supplied (project.data.index), expose the original
+        id values under col_id, for consistency with other exports.
         """
         if user_name not in self.available:
             raise Exception("No projection available")
-        data = self.available[user_name].data
+        data = self.available[user_name].data.copy()
+
+        if id_mapping is not None and "id_external" in id_mapping.columns:
+            column_name = (col_id or "id").removeprefix("dataset_")
+            data[column_name] = data.index.map(id_mapping["id_external"])
+            data = data.set_index(column_name)
+
         file_name = f"projection_{user_name}.{format}"
         if format == "csv":
             data.to_csv(self.path.joinpath(file_name))

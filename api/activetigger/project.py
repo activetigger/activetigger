@@ -1309,6 +1309,13 @@ class Project:
 
         data = self.features.get(features, dataset="annotable")
 
+        # expose the original id (id_external) as the index instead of id_internal,
+        # for consistency with other exports
+        column_name = (self.params.col_id or "id").removeprefix("dataset_")
+        data = data.copy()
+        data[column_name] = data.index.map(self.data.index["id_external"])
+        data = data.set_index(column_name)
+
         file_name = f"extract_schemes_{self.name}.{format}"
 
         # create files
@@ -1390,7 +1397,10 @@ class Project:
         cols = [col for col in data.columns if not (col.endswith("id_internal"))]
         data = data[cols]
         if self.params.col_id is not None:
-            data.rename(columns={"id_external": self.params.col_id}, inplace=True)
+            data.rename(
+                columns={"id_external": self.params.col_id.removeprefix("dataset_")},
+                inplace=True,
+            )
 
         # write file in the folder
         if format == "csv":

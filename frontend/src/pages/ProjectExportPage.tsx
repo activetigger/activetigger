@@ -1,5 +1,5 @@
-import { FC, useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { FC, useState } from 'react';
+import { useParams } from 'react-router-dom';
 
 import { Tab, Tabs } from 'react-bootstrap';
 import PulseLoader from 'react-spinners/PulseLoader';
@@ -12,9 +12,7 @@ import {
   useGetPredictionsFile,
   useGetProjectionFile,
   useGetRawDataFile,
-  useGetStaticUrls,
 } from '../core/api';
-import config from '../core/config';
 import { useAppContext } from '../core/useAppContext';
 import { useAuth } from '../core/useAuth';
 
@@ -77,11 +75,6 @@ export const ProjectExportPage: FC = () => {
   const { getRawDataFile } = useGetRawDataFile(projectName || null);
   // const { getPredictionsQuickModelFile } = useGetPredictionsQuickmodelFile(projectName || null);
   const { getProjectionFile } = useGetProjectionFile(projectName || null);
-  const { staticUrls, reFetchUrl } = useGetStaticUrls(projectName || null, model);
-
-  useEffect(() => {
-    reFetchUrl();
-  }, [model, reFetchUrl]);
 
   return (
     <ProjectPageLayout projectName={projectName} currentAction="export">
@@ -252,32 +245,17 @@ export const ProjectExportPage: FC = () => {
                       </button>
                     )}
                   </div>
-                  {/*
-            small fix for the direct link when no nging
-            */}
                   <div>
-                    {model &&
-                      (staticUrls && staticUrls.model ? (
-                        <Link
-                          to={
-                            config.api.url.replace(/\/$/, '') + '/static/' + staticUrls.model.path
-                          }
-                          target="_blank"
-                          download
-                          className="btn btn-secondary mt-3"
-                        >
-                          Export fine-tuned model (large file)
-                        </Link>
-                      ) : (
-                        <button
-                          className="btn-secondary-action"
-                          onClick={() => {
-                            getModelFile(model);
-                          }}
-                        >
-                          Export fine-tuned model
-                        </button>
-                      ))}
+                    {model && (
+                      <button
+                        className="btn-secondary-action"
+                        onClick={() => {
+                          getModelFile(model);
+                        }}
+                      >
+                        Export fine-tuned model
+                      </button>
+                    )}
                   </div>
                 </div>
               </Tab>
@@ -285,30 +263,14 @@ export const ProjectExportPage: FC = () => {
           </div>
           <hr className="mt-3" />
 
-          {/*
-            small fix for the direct link when no nging
-            */}
-          {staticUrls ? (
-            <>
-              <a
-                href={config.api.url.replace(/\/$/, '') + '/static/' + staticUrls.dataset.path}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mt-3"
-              >
-                Static link to the raw dataset (click right, save as...)
-              </a>
-            </>
-          ) : (
-            <button
-              className="btn btn-primary mt-3"
-              onClick={() => {
-                getRawDataFile();
-              }}
-            >
-              Export raw dataset in parquet
-            </button>
-          )}
+          <button
+            className="btn btn-primary mt-3"
+            onClick={() => {
+              getRawDataFile();
+            }}
+          >
+            Export raw dataset in parquet
+          </button>
         </div>
       </div>
     </ProjectPageLayout>

@@ -1076,11 +1076,6 @@ class StaticFileModel(BaseModel):
     path: str
 
 
-class ProjectStaticFiles(BaseModel):
-    dataset: StaticFileModel
-    model: StaticFileModel | None = None
-
-
 class FeatureDescriptionModel(BaseModel):
     name: str
     parameters: dict[str, Any]

@@ -1,4 +1,5 @@
 from io import StringIO
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import (
@@ -9,13 +10,11 @@ from fastapi import (
     Response,
 )
 from fastapi.responses import FileResponse
-from fastapi.responses import Response as FastAPIResponse
 
 from activetigger.app.dependencies import ProjectAction, get_project, test_rights, verified_user
 from activetigger.config import config
 from activetigger.datamodels import (
     ExportGenerationsParams,
-    ProjectStaticFiles,
     UserInDBModel,
 )
 from activetigger.project import Project
@@ -69,7 +68,12 @@ def export_projection(
     """
     test_rights(ProjectAction.EXPORT_DATA, current_user.username, project.name)
     try:
-        return project.projections.export(user_name=current_user.username, format=format)
+        return project.projections.export(
+            user_name=current_user.username,
+            format=format,
+            col_id=project.params.col_id,
+            id_mapping=project.data.index,
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -102,21 +106,24 @@ def export_bert(
     project: Annotated[Project, Depends(get_project)],
     current_user: Annotated[UserInDBModel, Depends(verified_user)],
     name: str = Query(),
-) -> FastAPIResponse:
+) -> FileResponse:
     """
-    Export fine-tuned BERT model - file with redirect with nginx
+    Export fine-tuned BERT model.
+
+    Behind nginx, the X-Accel-Redirect header is intercepted and nginx serves
+    the file directly. Without nginx, FastAPI streams the file itself.
     """
     test_rights(ProjectAction.EXPORT_DATA, current_user.username, project.name)
     try:
         file_path = project.languagemodels.export_bert(name=name)
-        return FastAPIResponse(
-            status_code=200,
-            headers={
-                "X-Accel-Redirect": f"/privatefiles/{file_path.path}",
-                "Content-Disposition": f'attachment; filename="{name}.tar.gz"',
-                "Content-Type": "application/octet-stream",
-            },
+        absolute_path = Path(config.data_path) / "projects" / "static" / file_path.path
+        response = FileResponse(
+            path=absolute_path,
+            filename=f"{name}.tar.gz",
+            media_type="application/octet-stream",
         )
+        response.headers["X-Accel-Redirect"] = f"/privatefiles/{file_path.path}"
+        return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -125,44 +132,24 @@ def export_bert(
 def export_raw(
     project: Annotated[Project, Depends(get_project)],
     current_user: Annotated[UserInDBModel, Depends(verified_user)],
-) -> FastAPIResponse:
+) -> FileResponse:
     """
-    Export raw data of the project
+    Export raw data of the project.
+
+    Behind nginx, the X-Accel-Redirect header is intercepted and nginx serves
+    the file directly. Without nginx, FastAPI streams the file itself.
     """
     test_rights(ProjectAction.EXPORT_DATA, current_user.username, project.name)
     try:
         file_path = project.export_raw(project.name)
-        return FastAPIResponse(
-            status_code=200,
-            headers={
-                "X-Accel-Redirect": f"/privatefiles/{file_path.path}",
-                "Content-Disposition": f'attachment; filename="{project.name}.parquet"',
-                "Content-Type": "application/octet-stream",
-            },
+        absolute_path = Path(config.data_path) / "projects" / "static" / file_path.path
+        response = FileResponse(
+            path=absolute_path,
+            filename=f"{project.name}.parquet",
+            media_type="application/octet-stream",
         )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# This is a temporary fix for the sqlite issue that will send static links only when sql database (without nginx redirection)
-@router.get("/export/static", dependencies=[Depends(verified_user)])
-def export_static(
-    project: Annotated[Project, Depends(get_project)],
-    current_user: Annotated[UserInDBModel, Depends(verified_user)],
-    model: str | None = Query(default=None),
-) -> ProjectStaticFiles | None:
-    """
-    Get static links of the project
-    """
-    test_rights(ProjectAction.EXPORT_DATA, current_user.username, project.name)
-    try:
-        # don't return nothing if not direct with sqlite
-        if "sqlite" not in config.database_url:
-            return None
-        r = ProjectStaticFiles(dataset=project.export_raw(project.name))
-        if model is not None:
-            r.model = project.languagemodels.export_bert(name=model)
-        return r
+        response.headers["X-Accel-Redirect"] = f"/privatefiles/{file_path.path}"
+        return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

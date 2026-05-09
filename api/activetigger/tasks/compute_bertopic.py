@@ -493,11 +493,14 @@ class ComputeBertopic(BaseTask):
         # Save the topics and documents informations
         topics_df: pd.DataFrame = topic_model.get_topic_info()
         if self.parameters.outlier_reduction:
-            topics_df = topics_df.loc[topics_df.Topic != -1, :]
-            # Update the counts
-            topics_df = topics_df.set_index("Topic")
-            topics_df["Count-Bis"] = pd.Series(topics).value_counts()
-            topics_df = topics_df.reset_index()
+            # After reduce_outliers, docs originally assigned to -1 have been
+            # re-assigned to real topics. Refresh Count from the actual post-
+            # reduction assignments so it matches bertopic_clusters.csv.
+            new_counts = pd.Series(topics).value_counts()
+            topics_df = topics_df.loc[topics_df.Topic != -1, :].copy()
+            topics_df["Count"] = (
+                topics_df["Topic"].map(new_counts).fillna(0).astype(int)
+            )
 
         topics_df.to_csv(self.path_run.joinpath("bertopic_topics.csv"), index=False)
         (

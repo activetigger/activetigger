@@ -339,7 +339,10 @@ class Bertopic:
         if col_id is not None:
             df = pd.read_csv(clusters_path)
             if "id_external" in df.columns:
-                df.rename(columns={"id_external": col_id}, inplace=True)
+                df.rename(
+                    columns={"id_external": col_id.removeprefix("dataset_")},
+                    inplace=True,
+                )
             export_path = path_model.joinpath("bertopic_clusters_export.csv")
             df.to_csv(export_path, index=False)
             return FileResponse(path=export_path, filename=f"bertopic_clusters_{name}.csv")
