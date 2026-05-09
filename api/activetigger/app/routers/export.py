@@ -10,6 +10,7 @@ from fastapi import (
     Response,
 )
 from fastapi.responses import FileResponse
+from fastapi.responses import Response as FastAPIResponse
 
 from activetigger.app.dependencies import ProjectAction, get_project, test_rights, verified_user
 from activetigger.config import config
@@ -106,24 +107,32 @@ def export_bert(
     project: Annotated[Project, Depends(get_project)],
     current_user: Annotated[UserInDBModel, Depends(verified_user)],
     name: str = Query(),
-) -> FileResponse:
+) -> Response:
     """
     Export fine-tuned BERT model.
 
-    Behind nginx, the X-Accel-Redirect header is intercepted and nginx serves
-    the file directly. Without nginx, FastAPI streams the file itself.
+    With sqlite (no nginx), FastAPI streams the file directly.
+    With postgres (nginx), the X-Accel-Redirect header is intercepted by nginx
+    which serves the file from the static volume.
     """
     test_rights(ProjectAction.EXPORT_DATA, current_user.username, project.name)
     try:
         file_path = project.languagemodels.export_bert(name=name)
-        absolute_path = Path(config.data_path) / "projects" / "static" / file_path.path
-        response = FileResponse(
-            path=absolute_path,
-            filename=f"{name}.tar.gz",
-            media_type="application/octet-stream",
+        if "sqlite" in config.database_url:
+            absolute_path = Path(config.data_path) / "projects" / "static" / file_path.path
+            return FileResponse(
+                path=absolute_path,
+                filename=f"{name}.tar.gz",
+                media_type="application/octet-stream",
+            )
+        return FastAPIResponse(
+            status_code=200,
+            headers={
+                "X-Accel-Redirect": f"/privatefiles/{file_path.path}",
+                "Content-Disposition": f'attachment; filename="{name}.tar.gz"',
+                "Content-Type": "application/octet-stream",
+            },
         )
-        response.headers["X-Accel-Redirect"] = f"/privatefiles/{file_path.path}"
-        return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -132,24 +141,32 @@ def export_bert(
 def export_raw(
     project: Annotated[Project, Depends(get_project)],
     current_user: Annotated[UserInDBModel, Depends(verified_user)],
-) -> FileResponse:
+) -> Response:
     """
     Export raw data of the project.
 
-    Behind nginx, the X-Accel-Redirect header is intercepted and nginx serves
-    the file directly. Without nginx, FastAPI streams the file itself.
+    With sqlite (no nginx), FastAPI streams the file directly.
+    With postgres (nginx), the X-Accel-Redirect header is intercepted by nginx
+    which serves the file from the static volume.
     """
     test_rights(ProjectAction.EXPORT_DATA, current_user.username, project.name)
     try:
         file_path = project.export_raw(project.name)
-        absolute_path = Path(config.data_path) / "projects" / "static" / file_path.path
-        response = FileResponse(
-            path=absolute_path,
-            filename=f"{project.name}.parquet",
-            media_type="application/octet-stream",
+        if "sqlite" in config.database_url:
+            absolute_path = Path(config.data_path) / "projects" / "static" / file_path.path
+            return FileResponse(
+                path=absolute_path,
+                filename=f"{project.name}.parquet",
+                media_type="application/octet-stream",
+            )
+        return FastAPIResponse(
+            status_code=200,
+            headers={
+                "X-Accel-Redirect": f"/privatefiles/{file_path.path}",
+                "Content-Disposition": f'attachment; filename="{project.name}.parquet"',
+                "Content-Type": "application/octet-stream",
+            },
         )
-        response.headers["X-Accel-Redirect"] = f"/privatefiles/{file_path.path}"
-        return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
