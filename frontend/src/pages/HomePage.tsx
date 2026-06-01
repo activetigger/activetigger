@@ -61,7 +61,7 @@ export const HomePage: FC = () => {
   const navigate = useNavigate();
   const params = new URLSearchParams(window.location.search);
   const { login } = useAuth();
-  const { version, messages } = useGetServer(null);
+  const { version, mode, messages } = useGetServer(null);
   if (params.get('username') && params.get('password')) {
     login({
       username: params.get('username'),
@@ -75,18 +75,13 @@ export const HomePage: FC = () => {
     <>
       <main className="container-fluid">
         <div className="row">
-          <center>
-            <div className="alert alert-warning mt-3">
-              ⚠️ This interface is experimental. Please save your data regularly.{' '}
-              <a
-                href="https://github.com/activetigger/activetigger/issues"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                If you encounter a problem, reach out or open an issue.
-              </a>
-            </div>
-          </center>
+          {mode === 'dev' && (
+            <center>
+              <div className="alert alert-info mt-3">
+                ℹ️ This is a <strong>development</strong> instance. Please save your data regularly.
+              </div>
+            </center>
+          )}
           <div className="col-0 col-lg-3" />
           <div className="col-12 col-lg-6">
             <center>
@@ -161,6 +156,22 @@ export const HomePage: FC = () => {
                   </div>
                 </div>
               )}
+            </center>
+            <center>
+              <div
+                className="text-muted mt-4"
+                style={{ fontSize: '0.85rem', maxWidth: '600px', margin: '2rem auto' }}
+              >
+                Active Tigger is an open source, community-driven tool.
+                <br />
+                <a
+                  href="https://github.com/activetigger/activetigger/issues"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  If you encounter a problem, reach out or open an issue.
+                </a>
+              </div>
             </center>
             <div style={{ height: '50px' }}></div>
           </div>

@@ -60,8 +60,10 @@ const _useAppContext = () => {
     const newContext = DEFAULT_CONTEXT;
     // keep the interface type
     newContext.displayConfig.interfaceType = appContext.displayConfig.interfaceType;
+    // keep the experimental (developmentMode) toggle across navigation
+    newContext.developmentMode = appContext.developmentMode;
     setAppContext(newContext);
-  }, [appContext.displayConfig.interfaceType, setAppContext]);
+  }, [appContext.displayConfig.interfaceType, appContext.developmentMode, setAppContext]);
 
   return {
     appContext,

@@ -15,7 +15,7 @@ ActiveTigger[^1] is a collaborative text annotation web tool dedicated to comput
 Designed primarily by researchers in social sciences, its use can extend to all users that need to annotate textual data.
 
 > [!IMPORTANT]
-> The app is currently 🚧 **in beta test** 🚧. The stable version is planned for May 2026.
+> The app is now available in **v1** 🎉.
 
 
 ## Run the app with Docker (recommended)

@@ -1079,6 +1079,7 @@ class MessagesOutModel(BaseModel):
 
 class ServerStateModel(BaseModel):
     version: str
+    mode: str
     cpu_only: bool = False
     queue: dict[str, dict[str, str | None]]
     active_projects: dict[str, list]

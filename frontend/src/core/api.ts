@@ -1857,6 +1857,7 @@ export function useGetServer(projectState: ProjectStateModel | null) {
 
   return {
     version: data?.version,
+    mode: data?.mode,
     queueState: data?.queue,
     activeProjects: data?.active_projects,
     gpu: data?.gpu['gpu_available'] ? data?.gpu : undefined,
