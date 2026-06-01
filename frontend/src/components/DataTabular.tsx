@@ -130,8 +130,7 @@ export const DataTabular: FC<DataTabularModel> = ({
     },
     {
       key: 'labels',
-      name:
-        kindScheme === 'multiclass' || kindScheme === 'multilabel' ? 'Label ✎' : 'Label',
+      name: kindScheme === 'multiclass' || kindScheme === 'multilabel' ? 'Label ✎' : 'Label',
       resizable: true,
 
       renderCell: (props) => (
@@ -153,8 +152,7 @@ export const DataTabular: FC<DataTabularModel> = ({
           : kindScheme === 'multilabel'
             ? renderMultilabel
             : undefined,
-      editorOptions:
-        kindScheme === 'multilabel' ? { commitOnOutsideClick: false } : undefined,
+      editorOptions: kindScheme === 'multilabel' ? { commitOnOutsideClick: false } : undefined,
       width: kindScheme === 'multilabel' ? 220 : 100,
     },
     {

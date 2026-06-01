@@ -313,10 +313,10 @@ export const UsersPage: FC = () => {
         </Modal.Header>
         <Modal.Body>
           <div className="alert alert-warning">
-            <strong>Warning:</strong> This will replace the password of user{' '}
-            <b>{resetTarget}</b> with a randomly generated one. The current password will no
-            longer work, and the new password will be shown only once. Make sure to share it
-            with the user through a secure channel.
+            <strong>Warning:</strong> This will replace the password of user <b>{resetTarget}</b>{' '}
+            with a randomly generated one. The current password will no longer work, and the new
+            password will be shown only once. Make sure to share it with the user through a secure
+            channel.
           </div>
           <div className="d-flex justify-content-end gap-2">
             <button
@@ -337,18 +337,14 @@ export const UsersPage: FC = () => {
         </Modal.Body>
       </Modal>
 
-      <Modal
-        show={generatedPassword !== null}
-        onHide={closeGeneratedPassword}
-        backdrop="static"
-      >
+      <Modal show={generatedPassword !== null} onHide={closeGeneratedPassword} backdrop="static">
         <Modal.Header closeButton>
           <Modal.Title>New password for {resetTarget}</Modal.Title>
         </Modal.Header>
         <Modal.Body>
           <div className="alert alert-info">
-            This password is shown <strong>only once</strong>. Copy it now and share it
-            securely with the user.
+            This password is shown <strong>only once</strong>. Copy it now and share it securely
+            with the user.
           </div>
           <div className="d-flex align-items-center gap-2 mb-3">
             <input
