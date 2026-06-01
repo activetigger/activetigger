@@ -184,7 +184,7 @@ Contributions are welcome! Please read the [Contributing Guide](CONTRIBUTING.md)
 
 ## Funding
 
-The development of Active Tigger is supported by : [DRARI Île-de-France](https://www.enseignementsup-recherche.gouv.fr/fr/drari-ile-de-france) [ECODEC](https://labex-ecodec.ensae.fr/) [Progedo](https://www.progedo.fr/)
+The development of Active Tigger is supported by : [DRARI Île-de-France](https://www.enseignementsup-recherche.gouv.fr/fr/drari-ile-de-france) [ECODEC](https://labex-ecodec.ensae.fr/) [Progedo](https://www.progedo.fr/) [ANR Pantagruel](https://anr.fr/Projet-ANR-23-IAS1-0001)
 
 ## How to cite
 

@@ -144,6 +144,10 @@ app.include_router(monitoring.router)
 
 
 # allow multiple servers (avoir CORS error)
+# TODO : Read allowed origins from config: `allow_origins=config.cors_origins`
+# (default to `[]` in prod). Keep `allow_credentials=True` only when origins is an explicit list.
+# Restrict methods/headers to what the frontend actually uses.
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

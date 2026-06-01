@@ -217,12 +217,51 @@ class Users:
         self.db_manager.users_service.change_password(username, hash_pwd.decode("utf8"))
         return None
 
+    def change_email(self, username: str, new_email: str, password: str) -> None:
+        """
+        Change contact email for a user.
+        Requires the current password to confirm the action.
+        """
+        new_email = new_email.strip()
+        if not new_email or "@" not in new_email:
+            raise Exception("Invalid email address")
+        user = self.get_user(username)
+        if not compare_to_hash(password, user.hashed_password):
+            raise Exception("Wrong password")
+        try:
+            existing = self.db_manager.users_service.get_user_by_mail(new_email)
+        except Exception:
+            existing = None
+        if existing is not None and existing != username:
+            raise Exception("Email already used by another account")
+        self.db_manager.users_service.change_contact(username, new_email)
+
+    def get_contact(self, username: str) -> str:
+        """
+        Get contact email for a user (empty string if not set)
+        """
+        user = self.db_manager.users_service.get_user(username)
+        return user.contact or ""
+
     def force_change_password(self, username: str, password: str) -> None:
         """
         Force change password for a user (no old password needed)
         """
         hash_pwd = get_hash(password)
         self.db_manager.users_service.change_password(username, hash_pwd.decode("utf8"))
+
+    def admin_reset_password(self, target_username: str) -> str:
+        """
+        Generate a random password for a user, persist it and return it
+        (in plain text) so the caller can hand it back to the user once.
+        """
+        if target_username == "root":
+            raise Exception("Cannot reset root password from here")
+        # Ensures the user exists and is active
+        self.get_user(target_username)
+        new_password = secrets.token_urlsafe(12)
+        self.force_change_password(target_username, new_password)
+        return new_password
 
     def get_statistics(self, username: str) -> UserStatistics:
         """

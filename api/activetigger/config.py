@@ -5,7 +5,40 @@ from pathlib import Path
 
 import pytz
 import yaml
+from cryptography.fernet import Fernet
 from dotenv import load_dotenv
+
+# Previously committed dev placeholder. Kept here so we can reject it
+# explicitly — it is public on GitHub and any token signed with it is forgeable.
+_LEAKED_DEV_SECRET = "Q__zz0ew00R_YSwCFl-6VgS9dPbfDtFDnzHfd57t0EY="
+
+
+def _load_or_create_secret_key(data_path: str) -> str:
+    env_key = os.environ.get("SECRET_KEY")
+    if env_key:
+        if env_key == _LEAKED_DEV_SECRET:
+            raise RuntimeError(
+                "SECRET_KEY is set to the published placeholder value. "
+                "Rotate it immediately — tokens signed with this key are forgeable by anyone."
+            )
+        return env_key
+
+    key_file = Path(data_path) / ".secret_key"
+    if key_file.exists():
+        stored = key_file.read_text().strip()
+        if stored == _LEAKED_DEV_SECRET:
+            raise RuntimeError(
+                f"{key_file} contains the published placeholder secret. "
+                "Delete the file (a new key will be generated) and revoke all tokens."
+            )
+        if stored:
+            return stored
+
+    new_key = Fernet.generate_key().decode()
+    key_file.parent.mkdir(parents=True, exist_ok=True)
+    key_file.write_text(new_key)
+    key_file.chmod(0o600)
+    return new_key
 
 
 #  Singleton utils
@@ -68,9 +101,7 @@ class Config(metaclass=_Singleton):
     data_path: str = os.environ.get("DATA_PATH", ".")
     user_hdd_max: float
     mode: MODE = MODE.parse(os.environ.get("MODE"))
-    secret_key: str = os.environ.get(
-        "SECRET_KEY", "Q__zz0ew00R_YSwCFl-6VgS9dPbfDtFDnzHfd57t0EY="
-    )  # FALSE KEY CHANGE IT IF NEEDED
+    secret_key: str
     database_url: str
     root_password: str | None = os.environ.get("ROOT_PASSWORD", None)
     # orchestrator
@@ -110,6 +141,7 @@ class Config(metaclass=_Singleton):
             "DATABASE_URL",
             f"sqlite:///{os.path.join(self.data_path, 'projects', 'activetigger.db')}",
         )
+        self.secret_key = _load_or_create_secret_key(self.data_path)
         self.model_path = os.environ.get("MODEL_PATH", os.path.join(self.data_path, "models"))
         self.timezone = pytz.timezone("Europe/Paris")
         if self.mail_server and self.mail_account and self.mail_password:

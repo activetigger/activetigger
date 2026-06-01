@@ -408,12 +408,20 @@ class LanguageModels:
         out_path = self.path.joinpath(name).joinpath(out_name)
         if not out_path.exists() or out_path.stat().st_mtime < path.stat().st_mtime:
             df = pd.read_parquet(path)
-            # rename id_external to original column name (without dataset_ prefix)
-            # and move it to the first position for consistency with other exports
-            if col_id is not None and "id_external" in df.columns:
-                clean_col_id = col_id.removeprefix("dataset_")
-                df.rename(columns={"id_external": clean_col_id}, inplace=True)
-                df = df[[clean_col_id] + [c for c in df.columns if c != clean_col_id]]
+            # rename id_external to original column name and move it to the first
+            # position for consistency with other exports. For predictions on an
+            # external dataset, prefer the id column from the sidecar metadata
+            # (the external dataset's own id) over the project's internal col_id.
+            target_col = None
+            meta_path = self.path.joinpath(name).joinpath(f"{file_name}.meta.json")
+            if meta_path.exists():
+                with open(meta_path) as f:
+                    target_col = json.load(f).get("col_id")
+            elif col_id is not None:
+                target_col = col_id.removeprefix("dataset_")
+            if target_col is not None and "id_external" in df.columns:
+                df.rename(columns={"id_external": target_col}, inplace=True)
+                df = df[[target_col] + [c for c in df.columns if c != target_col]]
             if format == "csv":
                 df.to_csv(out_path, index=False)
             else:

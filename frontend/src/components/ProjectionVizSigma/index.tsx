@@ -24,6 +24,9 @@ interface Props {
   setSelectedId: (id?: string) => void;
   // color
   labelColorMapping: { [key: string]: string };
+  // scheme metadata (used to enable per-label "focus" filter on multilabel schemes)
+  schemeKind?: string;
+  availableLabels?: string[];
 }
 
 const sigmaStyle = { height: '100%', width: '100%' };
@@ -83,6 +86,9 @@ export const ProjectionVizSigma: FC<Props> = ({
   setSelectedId,
   // color dictionary
   labelColorMapping,
+  // scheme metadata
+  schemeKind,
+  availableLabels,
 }) => {
   // internal bbox used by marquee. This state will be updated with setFrameBbox once drawing is done.
   // app state is used as default value
@@ -126,6 +132,10 @@ export const ProjectionVizSigma: FC<Props> = ({
   // column to use for color mapping
   const [selectedColumn, setSelectedColumn] = useState<'labels' | 'predictions'>('labels');
 
+  // for multilabel schemes: focus on a single label (others are greyed)
+  const [labelFilter, setLabelFilter] = useState<string>('');
+  const showLabelFilter = schemeKind === 'multilabel';
+
   // prepare graph for sigma from data props
   const graph = useMemo(() => {
     console.log('compute graph');
@@ -159,7 +169,14 @@ export const ProjectionVizSigma: FC<Props> = ({
         selectedColumn === 'predictions' && node.prediction ? node.prediction : node.true_label;
 
       // apply color for nodes
-      if (clusterHighlight) {
+      if (labelFilter) {
+        const atoms = colorLabel.toString().split('|');
+        if (atoms.includes(labelFilter)) {
+          res.color = colorMapping[labelFilter] || colorMapping[colorLabel] || colorMapping['NA'];
+        } else {
+          res.color = colorMapping['NA'];
+        }
+      } else if (clusterHighlight) {
         if (clusterHighlight === colorLabel.toString()) {
           res.color = colorMapping[colorLabel] || colorMapping['NA'];
         } else {
@@ -179,7 +196,7 @@ export const ProjectionVizSigma: FC<Props> = ({
       }
       return res;
     },
-    [selectedId, colorMapping, clusterHighlight, selectedColumn],
+    [selectedId, colorMapping, clusterHighlight, selectedColumn, labelFilter],
   );
 
   // Keep settings stable so SigmaContainer doesn't recreate the WebGL context.
@@ -205,6 +222,23 @@ export const ProjectionVizSigma: FC<Props> = ({
           >
             <option value="labels">Annotated elements</option>
             <option value="predictions">Predicted elements for {data.active_model?.value}</option>
+          </select>
+        </>
+      )}
+      {showLabelFilter && (
+        <>
+          <div className="alert alert-info py-2 my-2" role="alert">
+            This is a multilabel scheme: each element can have more than one label. Use the focus
+            selector below to color elements carrying a specific label; others are greyed out.
+          </div>
+          <label className="ms-3">Focus label: </label>
+          <select value={labelFilter} onChange={(e) => setLabelFilter(e.target.value)}>
+            <option value="">All</option>
+            {(availableLabels ?? []).map((l) => (
+              <option key={l} value={l}>
+                {l}
+              </option>
+            ))}
           </select>
         </>
       )}

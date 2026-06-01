@@ -49,6 +49,7 @@ export const ImportPredictionDataset: FC<ImportPredictionDatasetProps> = ({
   const predict = usePredictOnDataset(); // API call
   const { notify } = useNotifications();
   const [importingDataset, setImportingDataset] = useState<boolean>(false); // state for the data
+  const [phase, setPhase] = useState<'uploading' | 'finalizing' | 'queuing' | null>(null);
   const [data, setData] = useState<DataType | null>(null);
   const files = useWatch({ control, name: 'files' });
   // available columns
@@ -91,12 +92,14 @@ export const ImportPredictionDataset: FC<ImportPredictionDatasetProps> = ({
       }
       const file = formData.files[0];
       setImportingDataset(true);
+      setPhase('uploading');
       let uploaded = false;
       try {
         // first upload file — if this fails we must NOT call predict, otherwise
         // the backend returns a misleading 404 because the file is not on disk.
         await addFile(projectSlug, file);
         uploaded = true;
+        setPhase('queuing');
         await predict(projectSlug, scheme, modelName, {
           ...omit(formData, 'files'),
           filename: data.filename,
@@ -104,13 +107,27 @@ export const ImportPredictionDataset: FC<ImportPredictionDatasetProps> = ({
         setData(null);
         reset();
       } catch (error) {
-        const message = uploaded
-          ? `Prediction failed: ${error instanceof Error ? error.message : String(error)}`
-          : formatUploadError(error, file.size);
+        let message: string;
+        if (uploaded) {
+          // The upload reached the server; the failure is in the prediction kickoff.
+          const raw = error instanceof Error ? error.message : String(error);
+          if (/timeout/i.test(raw)) {
+            message =
+              'Prediction request timed out. The server accepted the file but the kickoff is taking longer than expected — it may still be queued. Refresh the page in a minute to check, or retry on a smaller file.';
+          } else if (/unreachable|network/i.test(raw)) {
+            message =
+              'Could not reach the server when starting the prediction. The file was uploaded — check your connection and retry.';
+          } else {
+            message = `Prediction kickoff failed: ${raw}`;
+          }
+        } else {
+          message = formatUploadError(error, file.size);
+        }
         notify({ type: 'error', message });
         console.error('Prediction on imported dataset failed:', error);
       } finally {
         setImportingDataset(false);
+        setPhase(null);
       }
     }
   };
@@ -220,7 +237,30 @@ export const ImportPredictionDataset: FC<ImportPredictionDatasetProps> = ({
           )
         }
       </form>
-      {data && importingDataset && <UploadProgressBar progression={progression} cancel={cancel} />}
+      {data &&
+        importingDataset &&
+        (() => {
+          const bytesDone =
+            phase === 'uploading' &&
+            !!progression.loaded &&
+            !!progression.total &&
+            progression.loaded >= progression.total;
+          const statusMessage =
+            phase === 'queuing'
+              ? 'Starting prediction on the server…'
+              : bytesDone
+                ? 'Finalizing upload on the server (writing file to disk)…'
+                : 'Uploading dataset';
+          const showProgress = phase === 'uploading' && !bytesDone;
+          return (
+            <UploadProgressBar
+              progression={progression}
+              cancel={phase === 'uploading' ? cancel : undefined}
+              statusMessage={statusMessage}
+              showProgress={showProgress}
+            />
+          );
+        })()}
     </div>
   );
 };

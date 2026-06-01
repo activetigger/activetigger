@@ -35,6 +35,12 @@ export const DisplayProjection: FC<DisplayProjectionProps> = ({
   // available projections
   const availableProjections = useMemo(() => project?.projections, [project?.projections]);
 
+  // scheme metadata used to enable the per-label focus selector on multilabel schemes
+  const schemeInfo =
+    currentScheme && project?.schemes.available[currentScheme]
+      ? project.schemes.available[currentScheme]
+      : undefined;
+
   // fetch projection if needed and set it in the context
   useEffect(() => {
     // case a first projection is added
@@ -63,6 +69,8 @@ export const DisplayProjection: FC<DisplayProjectionProps> = ({
           data={currentProjection}
           selectedId={currentElement?.element_id}
           labelColorMapping={labelColorMapping || {}}
+          schemeKind={schemeInfo?.kind}
+          availableLabels={(schemeInfo?.labels as string[] | undefined) ?? []}
         />
       ) : (
         <>No projection computed</>

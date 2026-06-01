@@ -181,7 +181,7 @@ export const QuickModelForm: FC<QuickModelFormProps> = ({
               ></input>
               <label htmlFor="balance_classes">
                 <input type="checkbox" id="balance_classes" {...register('balance_classes')} />
-                Automatically balance classes
+                Automatically balance labels
               </label>
             </div>
           )) ||
@@ -207,7 +207,7 @@ export const QuickModelForm: FC<QuickModelFormProps> = ({
                 ></input>
                 <label htmlFor="balance_classes">
                   <input type="checkbox" id="balance_classes" {...register('balance_classes')} />
-                  Automatically balance classes
+                  Automatically balance labels
                 </label>
               </div>
             )) ||
@@ -243,7 +243,7 @@ export const QuickModelForm: FC<QuickModelFormProps> = ({
                 ></input>
                 <label htmlFor="balance_classes">
                   <input type="checkbox" id="balance_classes" {...register('balance_classes')} />
-                  Automatically balance classes
+                  Automatically balance labels
                 </label>
               </div>
             ))

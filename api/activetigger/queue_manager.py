@@ -216,11 +216,13 @@ class Queue:
 
     def kill(self, unique_id: str) -> None:
         """
-        Send a kill process with the event manager
+        Send a kill process with the event manager.
+        Idempotent: silently no-ops if the process is no longer in the queue
+        (already finished, cleaned up, or never existed).
         """
         element = [i for i in self.current if i.unique_id == unique_id]
         if len(element) == 0:
-            raise Exception("Process not found")
+            return
         element[0].event.set()
         element[0].state = "cancelled"
 

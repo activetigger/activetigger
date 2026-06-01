@@ -1,6 +1,6 @@
 import { FC, useState } from 'react';
 import { SubmitHandler, useForm } from 'react-hook-form';
-import { MdOutlineDeleteOutline } from 'react-icons/md';
+import { MdLockReset, MdOutlineDeleteOutline } from 'react-icons/md';
 
 import { Modal } from 'react-bootstrap';
 import { FaPlusCircle } from 'react-icons/fa';
@@ -11,6 +11,7 @@ import {
   useCreateUser,
   useDeleteUser,
   useDeleteUserAuthProject,
+  useResetUserPassword,
   useUserProjects,
   useUsers,
   useUsersAuth,
@@ -43,6 +44,42 @@ export const UsersPage: FC = () => {
 
   const { deleteUser } = useDeleteUser(reFetchUsers);
   const { createUser } = useCreateUser(reFetchUsers);
+  const { resetUserPassword } = useResetUserPassword();
+
+  // Reset password flow: confirm warning -> show generated password once
+  const [showResetConfirm, setShowResetConfirm] = useState<boolean>(false);
+  const [resetTarget, setResetTarget] = useState<string | null>(null);
+  const [resetInProgress, setResetInProgress] = useState<boolean>(false);
+  const [generatedPassword, setGeneratedPassword] = useState<string | null>(null);
+  const [passwordCopied, setPasswordCopied] = useState<boolean>(false);
+
+  const handleConfirmReset = async () => {
+    if (!resetTarget) return;
+    setResetInProgress(true);
+    const pwd = await resetUserPassword(resetTarget);
+    setResetInProgress(false);
+    setShowResetConfirm(false);
+    if (pwd) {
+      setGeneratedPassword(pwd);
+      setPasswordCopied(false);
+    }
+  };
+
+  const handleCopyPassword = async () => {
+    if (!generatedPassword) return;
+    try {
+      await navigator.clipboard.writeText(generatedPassword);
+      setPasswordCopied(true);
+    } catch {
+      notify({ type: 'warning', message: 'Unable to access clipboard.' });
+    }
+  };
+
+  const closeGeneratedPassword = () => {
+    setGeneratedPassword(null);
+    setResetTarget(null);
+    setPasswordCopied(false);
+  };
 
   const { deleteUserAuth } = useDeleteUserAuthProject(currentProjectSlug, reFetchUsersAuth);
   const { addUserAuth } = useAddUserAuthProject(currentProjectSlug, reFetchUsersAuth);
@@ -107,6 +144,25 @@ export const UsersPage: FC = () => {
                     }}
                   >
                     <MdOutlineDeleteOutline size={30} />
+                  </button>
+                  <button
+                    className="btn btn p-0 ms-2"
+                    title="Reset password"
+                    disabled={!currentUser || currentUser === 'root'}
+                    onClick={() => {
+                      if (!currentUser) {
+                        notify({ type: 'warning', message: 'Select a user first.' });
+                        return;
+                      }
+                      if (currentUser === 'root') {
+                        notify({ type: 'warning', message: 'Cannot reset root password here.' });
+                        return;
+                      }
+                      setResetTarget(currentUser);
+                      setShowResetConfirm(true);
+                    }}
+                  >
+                    <MdLockReset size={28} />
                   </button>
                 </>
               ) : (
@@ -247,6 +303,72 @@ export const UsersPage: FC = () => {
           <div className="col-0 col-sm-1 col-md-2" />
         </div>
       </div>
+
+      <Modal
+        show={showResetConfirm}
+        onHide={() => (resetInProgress ? null : setShowResetConfirm(false))}
+      >
+        <Modal.Header closeButton={!resetInProgress}>
+          <Modal.Title>Reset password</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <div className="alert alert-warning">
+            <strong>Warning:</strong> This will replace the password of user{' '}
+            <b>{resetTarget}</b> with a randomly generated one. The current password will no
+            longer work, and the new password will be shown only once. Make sure to share it
+            with the user through a secure channel.
+          </div>
+          <div className="d-flex justify-content-end gap-2">
+            <button
+              className="btn btn-secondary"
+              onClick={() => setShowResetConfirm(false)}
+              disabled={resetInProgress}
+            >
+              Cancel
+            </button>
+            <button
+              className="btn btn-danger"
+              onClick={handleConfirmReset}
+              disabled={resetInProgress}
+            >
+              {resetInProgress ? 'Resetting...' : 'Confirm reset'}
+            </button>
+          </div>
+        </Modal.Body>
+      </Modal>
+
+      <Modal
+        show={generatedPassword !== null}
+        onHide={closeGeneratedPassword}
+        backdrop="static"
+      >
+        <Modal.Header closeButton>
+          <Modal.Title>New password for {resetTarget}</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <div className="alert alert-info">
+            This password is shown <strong>only once</strong>. Copy it now and share it
+            securely with the user.
+          </div>
+          <div className="d-flex align-items-center gap-2 mb-3">
+            <input
+              type="text"
+              className="form-control font-monospace"
+              readOnly
+              value={generatedPassword ?? ''}
+              onFocus={(e) => e.target.select()}
+            />
+            <button className="btn btn-outline-primary" onClick={handleCopyPassword}>
+              {passwordCopied ? 'Copied' : 'Copy'}
+            </button>
+          </div>
+          <div className="d-flex justify-content-end">
+            <button className="btn btn-primary" onClick={closeGeneratedPassword}>
+              Close
+            </button>
+          </div>
+        </Modal.Body>
+      </Modal>
     </PageLayout>
   );
 };

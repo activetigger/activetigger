@@ -498,9 +498,7 @@ class ComputeBertopic(BaseTask):
             # reduction assignments so it matches bertopic_clusters.csv.
             new_counts = pd.Series(topics).value_counts()
             topics_df = topics_df.loc[topics_df.Topic != -1, :].copy()
-            topics_df["Count"] = (
-                topics_df["Topic"].map(new_counts).fillna(0).astype(int)
-            )
+            topics_df["Count"] = topics_df["Topic"].map(new_counts).fillna(0).astype(int)
 
         topics_df.to_csv(self.path_run.joinpath("bertopic_topics.csv"), index=False)
         (

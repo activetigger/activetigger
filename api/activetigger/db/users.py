@@ -81,6 +81,15 @@ class UsersService:
         with self.SessionMaker.begin() as session:
             _ = session.execute(update(Users).filter_by(user_name=user_name).values(key=password))
 
+    def change_contact(self, user_name: str, contact: str) -> None:
+        """
+        Change contact email for a specific user
+        """
+        with self.SessionMaker.begin() as session:
+            _ = session.execute(
+                update(Users).filter_by(user_name=user_name).values(contact=contact)
+            )
+
     def get_current_users(self, timespan: int = 600):
         with self.SessionMaker() as session:
             time_threshold = datetime.datetime.now(timezone.utc) - datetime.timedelta(

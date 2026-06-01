@@ -4,9 +4,16 @@ import ClipLoader from 'react-spinners/ClipLoader';
 interface UploadProgressBarProps {
   progression: { loaded?: number; total?: number };
   cancel?: AbortController;
+  statusMessage?: string;
+  showProgress?: boolean;
 }
 
-export const UploadProgressBar: FC<UploadProgressBarProps> = ({ progression, cancel }) => {
+export const UploadProgressBar: FC<UploadProgressBarProps> = ({
+  progression,
+  cancel,
+  statusMessage = 'Uploading dataset',
+  showProgress = true,
+}) => {
   const formatProgression = (loaded: number, total: number) => {
     if (!loaded || !total || total === 0) return '--';
     return ((loaded / total) * 100).toFixed(0);
@@ -15,15 +22,17 @@ export const UploadProgressBar: FC<UploadProgressBarProps> = ({ progression, can
     <div id="progress-bar-window">
       <div id="progress-bar-container">
         <div className="horizontal center">
-          <ClipLoader /> <span>Uploading dataset</span>{' '}
+          <ClipLoader /> <span>{statusMessage}</span>{' '}
         </div>
-        <div id="progress-container">
-          {progression.loaded && progression.total ? (
-            <span>{formatProgression(progression.loaded, progression.total)}%</span>
-          ) : null}
+        {showProgress && (
+          <div id="progress-container">
+            {progression.loaded && progression.total ? (
+              <span>{formatProgression(progression.loaded, progression.total)}%</span>
+            ) : null}
 
-          <progress id="upload-progress" value={progression.loaded} max={progression.total} />
-        </div>
+            <progress id="upload-progress" value={progression.loaded} max={progression.total} />
+          </div>
+        )}
         {cancel && (
           <button
             className="btn-submit-danger"

@@ -24,7 +24,7 @@ export const DEFAULT_CONTEXT: AppContextValue = {
     displayFormat: 'cards',
   },
   selectionConfig: {
-    mode: 'fixed',
+    mode: 'random',
     sample: 'all',
     frameSelection: false,
     frame: [],

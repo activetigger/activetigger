@@ -28,6 +28,8 @@ site/
 .vscode
 api/activetigger/db/__pycache__/
 api/key.yaml
+.secret_key
+**/.secret_key
 api/activetigger/generation/__pycache__/
 api/activetigger/tasks/__pycache__/
 **/__pycache__/

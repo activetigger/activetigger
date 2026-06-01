@@ -310,7 +310,7 @@ export function usePredictOnDataset() {
   const predictOnDataset = useCallback(
     async (projectSlug: string, scheme: string, model_name: string, data: TextDatasetModel) => {
       // do the new projects POST call
-      const res = await api.POST('/models/predict', {
+      const res = await api_withouttimeout.POST('/models/predict', {
         // POST has a body
         params: {
           query: {
@@ -2142,12 +2142,69 @@ export function useChangePassword() {
         },
       });
       if (!res.error) notify({ type: 'success', message: 'Password changed.' });
-      return true;
+      return !res.error;
     },
     [notify],
   );
 
   return { changePassword };
+}
+
+/**
+ * Admin: reset a user's password.
+ * Returns the new password once, or null on failure.
+ */
+export function useResetUserPassword() {
+  const { notify } = useNotifications();
+  const resetUserPassword = useCallback(
+    async (username: string): Promise<string | null> => {
+      const res = await api.POST('/users/admin-resetpwd', {
+        params: { query: { username } },
+      });
+      if (res.error || !res.data) {
+        notify({ type: 'error', message: formatApiError(res.error) });
+        return null;
+      }
+      return res.data.new_password;
+    },
+    [notify],
+  );
+  return { resetUserPassword };
+}
+
+/**
+ * Change email (contact)
+ */
+export function useChangeEmail() {
+  const { notify } = useNotifications();
+  const changeEmail = useCallback(
+    async (email: string, password: string) => {
+      const res = await api.POST('/users/changemail', {
+        body: { email, password },
+      });
+      if (res.error) {
+        notify({ type: 'error', message: formatApiError(res.error) });
+        return false;
+      }
+      notify({ type: 'success', message: 'Email updated.' });
+      return true;
+    },
+    [notify],
+  );
+
+  return { changeEmail };
+}
+
+/**
+ * Get current user info (username, status, contact email)
+ */
+export function useCurrentUser(refreshKey: unknown = 0) {
+  const result = useAsyncMemo(async () => {
+    const res = await api.GET('/users/me', {});
+    if (res.data && !res.error) return res.data;
+    return null;
+  }, [refreshKey]);
+  return { currentUser: getAsyncMemoData(result) };
 }
 
 export function useGetActiveUsers() {
@@ -2280,6 +2337,7 @@ export function useStopProcesses(projectSlug: string | null) {
         },
       });
       if (!res.error) notify({ type: 'success', message: 'Processes ended.' });
+      else notify({ type: 'error', message: formatApiError(res.error) });
       return true;
     },
     [notify, projectSlug],

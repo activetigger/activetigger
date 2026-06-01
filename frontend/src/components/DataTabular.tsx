@@ -9,6 +9,7 @@ import { MdSkipNext, MdSkipPrevious } from 'react-icons/md';
 import { Modal } from 'react-bootstrap';
 import { HiOutlineQuestionMarkCircle } from 'react-icons/hi';
 import { Link } from 'react-router-dom';
+import Select from 'react-select';
 import { Tooltip } from 'react-tooltip';
 import { useAddTableAnnotations, useTableElements } from '../core/api';
 import { ImageThumbnailImagexp } from './ImageThumbnailImagexp';
@@ -129,7 +130,8 @@ export const DataTabular: FC<DataTabularModel> = ({
     },
     {
       key: 'labels',
-      name: kindScheme === 'multiclass' ? 'Label ✎' : 'Label',
+      name:
+        kindScheme === 'multiclass' || kindScheme === 'multilabel' ? 'Label ✎' : 'Label',
       resizable: true,
 
       renderCell: (props) => (
@@ -145,8 +147,15 @@ export const DataTabular: FC<DataTabularModel> = ({
           {props.row.labels}
         </div>
       ),
-      renderEditCell: kindScheme === 'multiclass' ? renderDropdown : undefined,
-      width: 100,
+      renderEditCell:
+        kindScheme === 'multiclass'
+          ? renderDropdown
+          : kindScheme === 'multilabel'
+            ? renderMultilabel
+            : undefined,
+      editorOptions:
+        kindScheme === 'multilabel' ? { commitOnOutsideClick: false } : undefined,
+      width: kindScheme === 'multilabel' ? 220 : 100,
     },
     {
       key: 'user',
@@ -200,6 +209,46 @@ export const DataTabular: FC<DataTabularModel> = ({
     },
     { key: 'timestamp', name: 'Changed', resizable: true, width: 100 },
   ];
+
+  // multi-select editor for multilabel schemes: chips with remove + dropdown to add
+  function renderMultilabel({ row, onRowChange }: RenderEditCellProps<Row>) {
+    const current = row.labels ? row.labels.split('|').filter(Boolean) : [];
+    const options = (availableLabels as string[]).map((l) => ({ value: l, label: l }));
+    return (
+      <Select
+        isMulti
+        autoFocus
+        defaultMenuIsOpen
+        closeMenuOnSelect={false}
+        blurInputOnSelect={false}
+        menuPortalTarget={document.body}
+        menuPosition="fixed"
+        options={options}
+        value={current.map((l) => ({ value: l, label: l }))}
+        onChange={(selected) => {
+          const next = (selected || []).map((o) => o.value).join('|');
+          onRowChange({ ...row, labels: next }, false);
+          setModifiedRows((prev) => ({
+            ...prev,
+            [row.id_internal]: {
+              element_id: row.id_internal,
+              label: next,
+              scheme: currentScheme as string,
+              project_slug: projectSlug as string,
+              dataset: currentDataset,
+            },
+          }));
+        }}
+        onBlur={() => onRowChange(row, true)}
+        styles={{
+          container: (base) => ({ ...base, width: '100%' }),
+          control: (base) => ({ ...base, minHeight: 30, fontSize: 12 }),
+          menu: (base) => ({ ...base, fontSize: 12 }),
+          menuPortal: (base) => ({ ...base, zIndex: 9999 }),
+        }}
+      />
+    );
+  }
 
   // specific function to have a select component
   function renderDropdown({ row, onRowChange }: RenderEditCellProps<Row>) {

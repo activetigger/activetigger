@@ -80,6 +80,11 @@ class PredictBertMultiClass(BaseTask):
         self.path_valid = path_valid
         self.path_test = path_test
         self.progress_path = self.path / "progress_predict"
+        # for external datasets, remember the original id column so the export
+        # can use it instead of the project's internal col_id (issue #1033)
+        self.external_id_col = (
+            external_dataset.id if dataset == "external" and external_dataset else None
+        )
 
         if self.df is None and path_data is not None:
             self.df = self.__load_external_file(path_data, external_dataset)
@@ -390,6 +395,10 @@ class PredictBertMultiClass(BaseTask):
             pred = self.__transform_to_dataframe(proba_predictions, id2label=models_id2label)
             # save the prediction to file
             pred.to_parquet(self.path.joinpath(self.file_name))
+            if self.external_id_col is not None:
+                meta_path = self.path.joinpath(f"{self.file_name}.meta.json")
+                with open(meta_path, "w") as f:
+                    json.dump({"col_id": self.external_id_col}, f)
 
             # compute statistics if required
             if self.statistics:

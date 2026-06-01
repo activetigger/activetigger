@@ -278,7 +278,7 @@ export const ModelCreationForm: FC<ModelCreationFormProps> = ({
         <input type="number" step="0.1" min="0" max="0.9" {...registerNewModel('test_size')} />
 
         <label>
-          Class threshold{' '}
+          Label threshold{' '}
           <a className="class_min_freq">
             <HiOutlineQuestionMarkCircle />
           </a>
@@ -290,7 +290,7 @@ export const ModelCreationForm: FC<ModelCreationFormProps> = ({
 
         <label>
           <input type="checkbox" {...registerNewModel('class_balance')} />
-          Balance classes
+          Balance labels
           <a className="class_balance">
             <HiOutlineQuestionMarkCircle />
           </a>

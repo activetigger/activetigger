@@ -452,7 +452,13 @@ class Schemes:
             if batch.on_users:
                 f_labels = f_labels & df["user"].isin(batch.on_users)
             if batch.on_labels:
-                f_labels = f_labels & df["labels"].isin(batch.on_labels)
+                if self.available()[batch.scheme].kind == "multilabel":
+                    on_set = set(batch.on_labels)
+                    f_labels = f_labels & df["labels"].fillna("").apply(
+                        lambda s: bool(on_set.intersection(s.split("|")))
+                    )
+                else:
+                    f_labels = f_labels & df["labels"].isin(batch.on_labels)
 
             # filter for patterns
             f_contains = pd.Series([True] * len(df), index=df.index)

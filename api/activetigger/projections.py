@@ -155,7 +155,7 @@ class Projections:
 
         if id_mapping is not None and "id_external" in id_mapping.columns:
             column_name = (col_id or "id").removeprefix("dataset_")
-            data[column_name] = data.index.map(id_mapping["id_external"])
+            data[column_name] = data.index.map(id_mapping["id_external"].to_dict())
             data = data.set_index(column_name)
 
         file_name = f"projection_{user_name}.{format}"
