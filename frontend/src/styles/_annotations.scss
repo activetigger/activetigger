@@ -93,6 +93,23 @@
   @include media-breakpoint-down(lg) {
     --tag-action-width: 100%;
   }
+
+  // compact variant used in the visualization annotation panel
+  &.compact {
+    --tag-action-width: 140px;
+    --tag-action-column-gap: 0.5rem;
+    --tag-action-row-gap: 0.4rem;
+
+    .tag-action-container {
+      --tag-action-height: 30px;
+    }
+    .btn-annotate-action,
+    .btn-annotate-general-action,
+    .btn-annotate-predicted-action {
+      font-size: 0.85rem;
+      padding: 0.2rem 0.5rem;
+    }
+  }
   // only one column
   grid-template-columns: 100%;
 

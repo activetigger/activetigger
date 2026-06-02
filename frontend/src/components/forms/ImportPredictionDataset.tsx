@@ -136,8 +136,8 @@ export const ImportPredictionDataset: FC<ImportPredictionDatasetProps> = ({
     <div>
       <form onSubmit={handleSubmit(onSubmit)}>
         <div className="explanations">
-          One predicted, you can export them in Export as the external dataset. If you predict on a
-          new dataset, it will erase the previous one.
+          Once the prediction is over, export by clicking Export entire dataset. Watch out: if you
+          predict on a new dataset, this will erase the previous one.
         </div>
         {availablePredictionExternal && (
           <div className="alert alert-warning">

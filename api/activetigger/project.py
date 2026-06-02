@@ -1972,10 +1972,11 @@ class Project:
                             self.db_manager.projects_service.update_project(
                                 self.params.project_slug, jsonable_encoder(self.params)
                             )
-                            # reset the features file and load the dataset again
+                            # load the new eval set before resetting features so the
+                            # features file is rebuilt with the full train+valid+test index
+                            self.data.load_dataset(eval_dataset)
                             self.features.reset_features_file()
                             self.quickmodels.drop_models(which="all")
-                            self.data.load_dataset(eval_dataset)
             except Exception as ex:
                 print(f"Error in {e.kind} : {ex}")
                 self.errors.add(f"Error in {e.kind} : {str(ex)}")

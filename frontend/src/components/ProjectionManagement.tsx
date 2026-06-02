@@ -251,7 +251,7 @@ export const ProjectionManagement: FC<ProjectionManagementProps> = ({
           {(element, clearSelection) => (
             <>
               <h5 className="subsection">Annotate this element</h5>
-              <div className="annotation-block force-one-column-layout">
+              <div className="annotation-block force-one-column-layout compact">
                 {kindScheme == 'multiclass' && (
                   <MulticlassInput
                     elementId={element.element_id}

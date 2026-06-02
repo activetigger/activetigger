@@ -73,7 +73,7 @@ def verified_user(request: Request, token: Annotated[str, Depends(oauth2_scheme)
     except JWTError:
         raise HTTPException(status_code=401, detail="Problem with token")
     except Exception as e:
-        raise HTTPException(status_code=403) from e
+        raise HTTPException(status_code=401, detail="Problem with token") from e
 
     # get user caracteristics
     try:

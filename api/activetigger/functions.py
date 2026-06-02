@@ -673,6 +673,9 @@ def matrix_to_label(row: list[int], id2label: dict[int, str]) -> list[str]:
     For a row of labels: [1,0,1] => ["label1", "label3"]
     return the labels associated to the columns with a 1
     """
+    if np.isscalar(row):
+        return [id2label[int(row)]]  # ty: ignore[invalid-argument-type]
+
     return [id2label[i] for i, value in enumerate(row) if value == 1]
 
 

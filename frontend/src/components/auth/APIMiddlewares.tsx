@@ -41,7 +41,9 @@ export const APIMiddlewares: FC<PropsWithChildren> = ({ children }) => {
         const clonedResponse = response.clone();
 
         // if session is expired or invalid we catch the 401 and redirect to login page
-        if ([401, 403].includes(response.status)) {
+        // 403 means permission denied (not a session issue) — let it fall through to the
+        // generic error branch so the user sees a toast instead of being logged out.
+        if (response.status === 401) {
           redirectToLogin('Invalid user session: redirecting you to login page...');
         } else {
           if (response.status !== 200) {

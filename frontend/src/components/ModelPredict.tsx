@@ -47,7 +47,7 @@ export const ModelPredict: FC<{ currentModel: string | null }> = ({ currentModel
             }}
             disabled={isComputing}
           >
-            Prediction external dataset
+            Prediction on an external dataset
           </button>
         )}
         {model && (
@@ -59,7 +59,7 @@ export const ModelPredict: FC<{ currentModel: string | null }> = ({ currentModel
             }}
             disabled={isComputing}
           >
-            Prediction complete dataset (+ imported)
+            Prediction on the entire dataset
           </button>
         )}
         {model && (

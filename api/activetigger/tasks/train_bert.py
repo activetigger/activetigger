@@ -107,25 +107,33 @@ def compute_class_weights(dataset, label_key="labels"):
 # CustomTrainer is a subclass of Trainer that allows for custom loss computation.
 # https://stackoverflow.com/questions/70979844/using-weights-with-transformers-huggingface
 class CustomTrainer(Trainer):
-    def __init__(self, *args, class_weights=None, **kwargs):
+    def __init__(self, *args, **kwargs):
+        self.class_weights = kwargs.pop("class_weights", None)
+        self.training_kind = kwargs.pop("training_kind", "multiclass")
         super().__init__(*args, **kwargs)
-        self.class_weights = class_weights
+        self._loss_fct = None  # avoid device mismatch
         print("CustomTrainer initialized with class weights:", self.class_weights)
 
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):  # ty: ignore[invalid-method-override]
-        labels = inputs.get("labels")
+        labels = inputs.pop("labels")
         outputs = model(**inputs)
         logits = outputs.get("logits")
-
-        # Convert one-hot labels to class indices for CrossEntropyLoss
-        label_indices = labels.argmax(dim=-1)
-        loss_fct = nn.CrossEntropyLoss(
-            weight=self.class_weights.to(logits.device),  # ty: ignore[unresolved-attribute]
-        )
-        loss = loss_fct(
-            logits.view(-1, self.model.config.num_labels),  # ty: ignore[unresolved-attribute]
-            label_indices.view(-1),
-        )
+        if self._loss_fct is None:
+            weights = self.class_weights.to(logits.device) if self.class_weights is not None else None  # fmt:skip
+            if self.training_kind == "multiclass":  # AO:Left multiclass by default
+                self._loss_fct = nn.CrossEntropyLoss(weight=weights)
+            elif self.training_kind == "multilabel":
+                self._loss_fct = nn.BCEWithLogitsLoss(weight=weights)
+            else:
+                raise ValueError(f"Training kind {self.training_kind} not recognized.")
+        if self.training_kind == "multiclass":
+            label_indices = labels.argmax(dim=-1)
+            loss = self._loss_fct(
+                logits.view(-1, self.model.config.num_labels),  # ty: ignore[unresolved-attribute]
+                label_indices.view(-1),
+            )
+        else:
+            loss = self._loss_fct(logits, labels.float())
         return (loss, outputs) if return_outputs else loss
 
 
@@ -293,19 +301,27 @@ class TrainBert(BaseTask):
         training"""
         ids = df.reset_index()["id"].copy().to_list()
         texts = df[col_text].copy().to_list()
+        one_hot = "weight" in self.loss.lower() if self.loss is not None else False
+        print(f"One hot encoding: {one_hot}", flush=True)
         if training_kind == "multiclass":
             print("Preprocess multiclass")
-            labels_as_list = df[col_label].copy().replace(label2id)
-            labels_as_matrix = [
-                [int(id_label == i_column) for i_column in range(len(label2id))]
-                for id_label in labels_as_list
-            ]
+            labels_as_list = df[col_label].copy().replace(label2id).tolist()  # maybe map useful
+            if one_hot:
+                labels = torch.tensor(
+                    [[int(i == j) for j in range(len(label2id))] for i in labels_as_list],
+                    dtype=torch.float32,
+                )
+            else:
+                labels = torch.tensor(labels_as_list, dtype=torch.long)
         elif training_kind == "multilabel":
             print("Preprocess multilabel")
-            labels_as_matrix = annotations_to_matrix(df[col_label], list(label2id.keys())).tolist()
+            labels = torch.tensor(
+                annotations_to_matrix(df[col_label], list(label2id.keys())).tolist(),
+                dtype=torch.float32,
+            )
 
         return datasets.Dataset.from_dict(
-            {"id": ids, "text": texts, "labels": torch.Tensor(labels_as_matrix)}  # ty: ignore[possibly-unresolved-reference]
+            {"id": ids, "text": texts, "labels": labels}  # ty: ignore[possibly-unresolved-reference]
         ).with_format("torch")
 
     def __load_tokenizer(self, base_model: str):
@@ -545,7 +561,7 @@ class TrainBert(BaseTask):
             trust_remote_code=True,
             problem_type="multi_label_classification"
             if self.training_kind == "multilabel"
-            else None,
+            else "single_label_classification",
         ).to(device=device)
         bert_model.config.use_cache = False
         self.logger.info(f"Model loaded on {bert_model.device}")
