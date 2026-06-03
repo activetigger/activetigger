@@ -824,10 +824,17 @@ class Schemes:
         if len(set(df[annotationsdata.col_id])) != len(df):
             raise Exception("Duplicate IDs after slugify in the column selected as ID")
 
+        # keep only id and label, and rename the label to avoid clashes with train columns
+        # (e.g. text, dataset, id_external) when the user re-imports an exported file
+        label_col = "__imported_label__"
+        df = df[[annotationsdata.col_id, annotationsdata.col_label]].rename(
+            columns={annotationsdata.col_label: label_col}
+        )
+
         # match to the internal index and keep only annotated
         df = df.set_index(annotationsdata.col_id)
         df = self.data.train.join(df, on="id_external")
-        col = df[annotationsdata.col_label].dropna().astype(str)
+        col = df[label_col].dropna().astype(str)
 
         # if needed, create the labels in the scheme
         for i in col.unique():
