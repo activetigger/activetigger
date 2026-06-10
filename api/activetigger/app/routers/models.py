@@ -31,6 +31,7 @@ router = APIRouter(tags=["models"])
 # Reusable query-param validator for any user-supplied model name. Mirrors
 # the same regex used in BertModelModel.name / ImageModelModel.name so query
 # routes (delete, rename) can't slip a "../" past the body validator.
+
 ModelName = Annotated[str, Query(pattern=MODEL_NAME_PATTERN)]
 
 

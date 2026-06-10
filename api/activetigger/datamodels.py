@@ -10,10 +10,8 @@ from sklearn.base import BaseEstimator
 # Data model to use of the API
 
 # Model-name validator: safe filesystem character set with a length cap.
-# Used as a Pydantic constraint on BertModelModel.name / ImageModelModel.name
-# to prevent path traversal — the same string flows into Path.joinpath,
-# shutil.make_archive, shutil.rmtree, os.remove and DB primary keys, so it
-# must never contain "/", "..", or other path separators.
+# Used as a Pydantic constraint
+
 MODEL_NAME_PATTERN = r"^[A-Za-z0-9_\-]{1,64}$"
 
 
