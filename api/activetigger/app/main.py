@@ -44,8 +44,8 @@ from activetigger.datamodels import (
 )
 from activetigger.orchestrator import get_orchestrator
 
-# initialize orchestrator early so its directory setup runs before the static mount
-get_orchestrator()
+# ensure the static dir exists before the mount below; orchestrator init runs in lifespan
+(Path(config.data_path) / "projects" / "static").mkdir(parents=True, exist_ok=True)
 
 
 @asynccontextmanager
