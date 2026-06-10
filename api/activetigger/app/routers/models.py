@@ -4,6 +4,7 @@ from fastapi import (
     APIRouter,
     Depends,
     HTTPException,
+    Query,
 )
 
 from activetigger.app.dependencies import (
@@ -13,7 +14,9 @@ from activetigger.app.dependencies import (
     verified_user,
 )
 from activetigger.datamodels import (
+    MODEL_NAME_PATTERN,
     BertModelModel,
+    ImageModelModel,
     ModelInformationsModel,
     QuickModelInModel,
     QuickModelOutModel,
@@ -24,6 +27,11 @@ from activetigger.orchestrator import get_orchestrator
 from activetigger.project import Project
 
 router = APIRouter(tags=["models"])
+
+# Reusable query-param validator for any user-supplied model name. Mirrors
+# the same regex used in BertModelModel.name / ImageModelModel.name so query
+# routes (delete, rename) can't slip a "../" past the body validator.
+ModelName = Annotated[str, Query(pattern=MODEL_NAME_PATTERN)]
 
 
 @router.post("/models/quick/train", dependencies=[Depends(verified_user)])
@@ -88,8 +96,8 @@ def delete_quickmodel(
 def rename_quickmodel(
     project: Annotated[Project, Depends(get_project)],
     current_user: Annotated[UserInDBModel, Depends(verified_user)],
-    former_name: str,
-    new_name: str,
+    former_name: ModelName,
+    new_name: ModelName,
 ) -> None:
     """
     Rename quickmodel
@@ -137,16 +145,27 @@ def get_quickmodel(
 
 @router.get("/models/information", dependencies=[Depends(verified_user)])
 def get_model_information(
-    project: Annotated[Project, Depends(get_project)], name: str, kind: str
+    project: Annotated[Project, Depends(get_project)],
+    current_user: Annotated[UserInDBModel, Depends(verified_user)],
+    name: ModelName,
+    kind: str,
 ) -> ModelInformationsModel:
     """
-    Get model information
+    Get model information.
+
+    Guarded by ProjectAction.GET so an authenticated user can't read
+    parameters / metrics for a project they don't have access to.
     """
+    test_rights(ProjectAction.GET, current_user.username, project.name)
     try:
         if kind == "bert":
             return project.languagemodels.get_informations(name)
         elif kind == "quick":
             return project.quickmodels.get_informations(name)
+        elif kind == "image":
+            if project.imagemodels is None:
+                raise Exception("Image models are only available for image projects")
+            return project.imagemodels.get_informations(name)
         else:
             raise Exception(f"Model kind {kind} not recognized")
     except Exception as e:
@@ -158,7 +177,7 @@ def get_model_information(
 def predict(
     project: Annotated[Project, Depends(get_project)],
     current_user: Annotated[UserInDBModel, Depends(verified_user)],
-    model_name: str,
+    model_name: ModelName,
     scheme: str,
     kind: str,
     dataset_type: str = "annotable",
@@ -178,7 +197,7 @@ def predict(
     test_rights(ProjectAction.ADD, current_user.username, project.name)
     try:
         # types of prediction
-        if kind not in ["quick", "bert"]:
+        if kind not in ["quick", "bert", "image"]:
             raise Exception(f"Model kind {kind} not recognized")
 
         if dataset_type not in ["annotable", "external", "all"]:
@@ -228,6 +247,16 @@ def predict(
                 scheme_name=scheme,
                 model_name=model_name,
             )
+
+        if kind == "image":
+            project.start_image_model_prediction(
+                username=current_user.username,
+                dataset_type=dataset_type,
+                datasets=datasets,
+                scheme_name=scheme,
+                model_name=model_name,
+                batch_size=batch_size,
+            )
         get_orchestrator().log_action(
             current_user.username,
             f"PREDICT MODEL: {model_name} - {kind} DATASET: {dataset_type}",
@@ -275,7 +304,7 @@ def post_bert(
 def delete_bert(
     project: Annotated[Project, Depends(get_project)],
     current_user: Annotated[UserInDBModel, Depends(verified_user)],
-    bert_name: str,
+    bert_name: ModelName,
 ) -> None:
     """
     Delete trained bert model
@@ -303,8 +332,8 @@ def delete_bert(
 def rename_bert(
     project: Annotated[Project, Depends(get_project)],
     current_user: Annotated[UserInDBModel, Depends(verified_user)],
-    former_name: str,
-    new_name: str,
+    former_name: ModelName,
+    new_name: ModelName,
 ) -> None:
     """
     Rename bertmodel
@@ -319,6 +348,92 @@ def rename_bert(
         get_orchestrator().log_action(
             current_user.username,
             f"INFO RENAME MODEL: {former_name} -> {new_name}",
+            project.name,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/models/image/train", dependencies=[Depends(verified_user)])
+def post_image(
+    project: Annotated[Project, Depends(get_project)],
+    current_user: Annotated[UserInDBModel, Depends(verified_user)],
+    image: ImageModelModel,
+) -> None:
+    """
+    Fine-tune an image-classification model on an image project.
+    """
+    test_rights(ProjectAction.ADD, current_user.username, project.name)
+    if getattr(project.params, "kind", "text") != "image":
+        raise HTTPException(
+            status_code=400, detail="Image models are only supported for image projects"
+        )
+    try:
+        orchestrator = get_orchestrator()
+        if not orchestrator.available_storage(current_user.username):
+            raise HTTPException(
+                status_code=403,
+                detail="Storage limit exceeded. Please delete models or contact the administrator.",
+            )
+        project.start_image_model_training(image=image, username=current_user.username)
+        orchestrator.log_action(
+            current_user.username, f"TRAIN IMAGE MODEL: {image.name}", project.name
+        )
+        return None
+    except Exception as e:
+        print(f"ERROR /models/image/train: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/models/image/delete", dependencies=[Depends(verified_user)])
+def delete_image(
+    project: Annotated[Project, Depends(get_project)],
+    current_user: Annotated[UserInDBModel, Depends(verified_user)],
+    image_name: ModelName,
+) -> None:
+    """
+    Delete a trained image-classification model + its derived features.
+    """
+    test_rights(ProjectAction.DELETE, current_user.username, project.name)
+    if getattr(project.params, "kind", "text") != "image":
+        raise HTTPException(
+            status_code=400, detail="Image models are only supported for image projects"
+        )
+    if project.imagemodels is None:
+        raise HTTPException(status_code=400, detail="Image manager not initialized")
+    try:
+        project.imagemodels.delete(image_name)
+        for f in [i for i in project.features.map.keys() if image_name.replace("__", "_") in i]:
+            project.features.delete(f)
+        get_orchestrator().log_action(
+            current_user.username, f"DELETE IMAGE MODEL + FEATURES: {image_name}", project.name
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/models/image/rename", dependencies=[Depends(verified_user)])
+def rename_image(
+    project: Annotated[Project, Depends(get_project)],
+    current_user: Annotated[UserInDBModel, Depends(verified_user)],
+    former_name: ModelName,
+    new_name: ModelName,
+) -> None:
+    """
+    Rename an image-classification model.
+    """
+    test_rights(ProjectAction.UPDATE, current_user.username, project.name)
+    if getattr(project.params, "kind", "text") != "image":
+        raise HTTPException(
+            status_code=400, detail="Image models are only supported for image projects"
+        )
+    if project.imagemodels is None:
+        raise HTTPException(status_code=400, detail="Image manager not initialized")
+    try:
+        project.imagemodels.rename(former_name, new_name)
+        get_orchestrator().log_action(
+            current_user.username,
+            f"INFO RENAME IMAGE MODEL: {former_name} -> {new_name}",
             project.name,
         )
     except Exception as e:

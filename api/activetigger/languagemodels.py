@@ -93,9 +93,9 @@ class LanguageModels:
                 },
             ]
 
-        # create the directory for models
-        if not self.path.exists():
-            os.mkdir(self.path)
+        # create the directory for models; exist_ok handles the TOCTOU race
+        # when two concurrent project loads both pass the exists() check.
+        os.makedirs(self.path, exist_ok=True)
 
     def available(self) -> dict[str, dict[str, LMStatusModel]]:
         """

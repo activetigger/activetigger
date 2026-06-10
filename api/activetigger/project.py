@@ -31,6 +31,7 @@ from activetigger.datamodels import (
     GenerationModel,
     GenerationRequest,
     GenerationResult,
+    ImageModelModel,
     LMComputing,
     NextInModel,
     NextProjectStateModel,
@@ -64,6 +65,7 @@ from activetigger.functions import (
     sanitize_query_expression,
 )
 from activetigger.generation.generations import Generations
+from activetigger.imagemodels import ImageModels
 from activetigger.languagemodels import LanguageModels
 from activetigger.messages import Messages
 from activetigger.monitoring import Monitoring
@@ -257,6 +259,17 @@ class Project:
             self.db_manager,
             config.file_bert_models,
         )
+        # Image fine-tuning is only meaningful for image projects.
+        self.imagemodels: ImageModels | None = None
+        if getattr(self.params, "kind", "text") == "image":
+            self.imagemodels = ImageModels(
+                project_slug,
+                self.params.dir,
+                self.queue,
+                self.computing,
+                self.db_manager,
+                config.file_image_models,
+            )
         self.quickmodels = QuickModels(
             project_slug, self.params.dir, self.queue, self.computing, self.db_manager
         )
@@ -687,6 +700,7 @@ class Project:
         Get prediction of a model or raise an error
         - quickmodel
         - languagemodel
+        - imagemodel
         """
         if type == "quickmodel":
             if not self.quickmodels.exists(name):
@@ -698,6 +712,10 @@ class Project:
                 raise Exception("Languagemodel doesn't exist")
             else:
                 prediction = self.languagemodels.get_prediction(name)
+        elif type == "imagemodel":
+            if self.imagemodels is None or not self.imagemodels.exists(name):
+                raise Exception("Image model doesn't exist")
+            prediction = self.imagemodels.get_prediction(name)
         else:
             raise Exception("Model type not recognized")
         return prediction
@@ -1195,6 +1213,10 @@ class Project:
             data["prediction"] = self.languagemodels.get_prediction(active_model.value)[
                 "prediction"
             ]
+        elif active_model is not None and active_model.type == "imagemodel":
+            if self.imagemodels is None or not self.imagemodels.exists(active_model.value):
+                raise Exception("Image model doesn't exist")
+            data["prediction"] = self.imagemodels.get_prediction(active_model.value)["prediction"]
 
         if "prediction" in data:
             predictions = data["prediction"].to_list()
@@ -1273,6 +1295,7 @@ class Project:
             prompts=self.prompts.state() if self.prompts is not None else None,
             quickmodel=self.quickmodels.state(),
             languagemodels=self.languagemodels.state(),
+            imagemodels=self.imagemodels.state() if self.imagemodels is not None else None,
             projections=self.projections.state(),
             generations=self.generations.state(),
             bertopic=self.bertopic.state(),
@@ -1615,6 +1638,140 @@ class Project:
             user_name=username,
         )
 
+    def start_image_model_training(self, image: ImageModelModel, username: str) -> None:
+        """
+        Launch an image-classification fine-tuning process for an image project.
+        """
+        if self.imagemodels is None:
+            raise Exception("Image fine-tuning is only available for image projects")
+        # Cross-manager check: forbid stacking an image training on top of an
+        # existing BERT process (and vice versa) for the same user.
+        already = self.languagemodels.current_user_processes(
+            username
+        ) + self.imagemodels.current_user_processes(username)
+        if len(already) > 0:
+            raise Exception(
+                "User already has a process launched, please wait before launching another one"
+            )
+
+        # Labelled rows from the train split. Schemes return a DataFrame whose
+        # `text` column carries the image path for image projects.
+        df = self.schemes.get_scheme(image.scheme, datasets=["train"], complete=True)
+        df = df[["text", "labels"]].dropna()
+
+        scheme = self.schemes.available()[image.scheme]
+        scheme_labels = scheme.labels
+        training_kind = scheme.kind
+        if training_kind not in ["multiclass", "multilabel"]:
+            raise Exception(
+                f"Training does not support this type of scheme (kind: {training_kind})"
+            )
+
+        # Apply class_min_freq and exclude_labels (no dichotomization for images in v1).
+        label_counts = get_number_occurrences_per_label(df["labels"], scheme_labels)
+        for label_to_exclude in image.exclude_labels:
+            label_counts[label_to_exclude] = -1
+        df, scheme_labels = remove_labels_without_enough_annotations(
+            df, "labels", label_counts, image.class_min_freq
+        )
+        df = df[df["labels"].notna()]
+
+        if image.class_balance and training_kind == "multiclass":
+            min_freq = df["labels"].value_counts().sort_values().min()
+            df = df.groupby("labels").sample(n=min_freq)
+
+        process_id = self.imagemodels.start_training_process(
+            name=image.name,
+            project=self.name,
+            user=username,
+            scheme=image.scheme,
+            df=df,
+            training_kind=training_kind,
+            scheme_labels=scheme_labels,
+            col_text=df.columns[0],
+            col_label=df.columns[1],
+            base_model=image.base_model,
+            params=image.params,
+            test_size=image.test_size,
+            loss=image.loss,
+            class_balance=image.class_balance,
+            class_min_freq=image.class_min_freq,
+            exclude_labels=image.exclude_labels,
+            fp16=image.fp16,
+        )
+        self.monitoring.register_process(
+            process_name=process_id,
+            kind="train_imagemodel",
+            parameters={},
+            user_name=username,
+        )
+
+    def start_image_model_prediction(
+        self,
+        username: str,
+        dataset_type: str,
+        datasets: list[str] | None,
+        scheme_name: str,
+        model_name: str,
+        batch_size: int = 32,
+    ) -> None:
+        """
+        Launch an image-classification prediction process.
+
+        Only "annotable" and "all" are supported for v1; external-dataset
+        prediction would need an image-upload flow we don't have yet.
+        """
+        if self.imagemodels is None:
+            raise Exception("Image prediction is only available for image projects")
+        if dataset_type == "external":
+            raise Exception("External-dataset prediction is not supported for image models yet")
+
+        path_train = None
+        path_valid = None
+        path_test = None
+        if dataset_type == "all":
+            df = None
+            col_label = None
+            datasets = None
+            path_data = self.data.path_data_all
+            path_train = self.data.path_train
+            path_valid = self.data.path_valid if self.data.path_valid.exists() else None
+            path_test = self.data.path_test if self.data.path_test.exists() else None
+        elif dataset_type == "annotable":
+            if datasets is None:
+                raise Exception("No dataset available for prediction")
+            df = self.schemes.get_scheme(
+                scheme=scheme_name, complete=True, datasets=datasets, id_external=True
+            )
+            col_label = "labels"
+            path_data = None
+        else:
+            raise Exception(f"Dataset {dataset_type} not recognized")
+
+        scheme_ = self.schemes.available()[scheme_name]
+        training_kind = scheme_.kind
+        if training_kind not in ["multiclass", "multilabel"]:
+            raise Exception(
+                f"Prediction does not support this type of scheme (kind: {training_kind})"
+            )
+        scheme_labels = scheme_.labels
+        self.imagemodels.start_predicting_process(
+            project_slug=self.name,
+            name=model_name,
+            user=username,
+            df=df,
+            training_kind=training_kind,
+            scheme_labels=scheme_labels,
+            col_label=col_label,
+            dataset=dataset_type,
+            batch_size=batch_size,
+            statistics=datasets,
+            path_data=path_data,
+            path_train=path_train,
+            path_valid=path_valid,
+            path_test=path_test,
+        )
+
     def start_language_model_prediction(
         self,
         username: str,
@@ -1905,6 +2062,24 @@ class Project:
                         ):
                             add_predictions["predict_" + prediction.model_name] = results.path
                         self.languagemodels.add(prediction)
+                    case "train_image":
+                        if self.imagemodels is None:
+                            continue
+                        model = cast(LMComputing, e)
+                        events = cast(EventsModel, results)
+                        self.imagemodels.add(model)
+                        self.monitoring.close_process(model.unique_id, events)
+                    case "predict_image":
+                        if self.imagemodels is None:
+                            continue
+                        prediction = cast(LMComputing, e)
+                        if (
+                            results is not None
+                            and results.path
+                            and "predict_annotable.parquet" in results.path
+                        ):
+                            add_predictions["predict_" + prediction.model_name] = results.path
+                        self.imagemodels.add(prediction)
                     case "train_quickmodel":
                         sm = cast(QuickModelComputing, e)
 
@@ -1987,6 +2162,11 @@ class Project:
                         bert_task = cast(LMComputing, e)
                         self.db_manager.language_models_service.delete_model(
                             self.name, bert_task.model_name
+                        )
+                    case "train_image":
+                        image_task = cast(LMComputing, e)
+                        self.db_manager.language_models_service.delete_model(
+                            self.name, image_task.model_name
                         )
             # clean the process from the list and the queue
             finally:

@@ -171,6 +171,7 @@
   }
 
   .model-pill#create-new,
+  .model-pill#create-new-image,
   .model-pill#compute-validate {
     font-size: normal;
     background-color: $primary;
@@ -178,6 +179,7 @@
     font-weight: bold;
   }
   .model-pill.disabled#create-new,
+  .model-pill.disabled#create-new-image,
   .model-pill.disabled#compute-validate {
     pointer-events: none;
     opacity: 0.8;

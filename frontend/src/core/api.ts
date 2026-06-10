@@ -25,6 +25,7 @@ import {
   SupportedAPI,
   TextDatasetModel,
   newBertModel,
+  newImageModel,
 } from '../types';
 import config from './config';
 import { HttpError, formatApiError } from './HTTPError';
@@ -1344,6 +1345,98 @@ export function useDeleteBertModel(projectSlug: string | null) {
   );
 
   return { deleteBertModel };
+}
+
+/**
+ * Train an image-classification model on an image project.
+ */
+export function useTrainImageModel(projectSlug: string | null, scheme: string | null) {
+  const { notify } = useNotifications();
+  const trainImageModel = useCallback(
+    async (dataForm: newImageModel) => {
+      if (projectSlug && scheme && dataForm) {
+        const res = await api.POST('/models/image/train', {
+          params: {
+            query: { project_slug: projectSlug },
+          },
+          body: {
+            project_slug: projectSlug,
+            scheme: scheme,
+            base_model: dataForm.base,
+            name: dataForm.name || '',
+            test_size: dataForm.test_size ?? 0.2,
+            params: dataForm.parameters,
+            class_balance: dataForm.class_balance || false,
+            loss: dataForm.loss || 'cross_entropy',
+            class_min_freq: dataForm.class_min_freq || 1,
+            exclude_labels: dataForm.exclude_labels || [],
+            fp16: dataForm.fp16,
+          },
+        });
+        if (!res.error) notify({ type: 'warning', message: 'Image model training.' });
+        return true;
+      }
+      return null;
+    },
+    [projectSlug, notify, scheme],
+  );
+
+  return { trainImageModel };
+}
+
+/**
+ * Rename image-classification model
+ */
+export function useRenameImageModel(projectSlug: string | null) {
+  const { notify } = useNotifications();
+  const renameImageModel = useCallback(
+    async (former_model_name: string, new_model_name: string) => {
+      if (projectSlug) {
+        const res = await api.POST('/models/image/rename', {
+          params: {
+            query: {
+              project_slug: projectSlug,
+              former_name: former_model_name,
+              new_name: new_model_name,
+            },
+          },
+        });
+        if (!res.error) notify({ type: 'success', message: 'Model renamed.' });
+        return true;
+      }
+      return null;
+    },
+    [projectSlug, notify],
+  );
+
+  return { renameImageModel };
+}
+
+/**
+ * Delete image-classification model
+ */
+export function useDeleteImageModel(projectSlug: string | null) {
+  const { notify } = useNotifications();
+  const deleteImageModel = useCallback(
+    async (model_name: string) => {
+      if (projectSlug) {
+        const res = await api.POST('/models/image/delete', {
+          params: {
+            query: {
+              project_slug: projectSlug,
+              image_name: model_name,
+            },
+          },
+        });
+        if (!res.error) notify({ type: 'success', message: 'Model deleted.' });
+        return true;
+      }
+      return null;
+    },
+    [projectSlug, notify],
+  );
+
+  return { deleteImageModel };
 }
 
 /**

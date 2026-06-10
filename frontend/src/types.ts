@@ -200,6 +200,18 @@ export interface newBertModel {
   auto_max_length: boolean;
 }
 
+export interface newImageModel {
+  name?: string;
+  base: string;
+  parameters: LMParametersModel;
+  class_balance?: boolean;
+  loss?: string;
+  class_min_freq?: number;
+  test_size?: number;
+  exclude_labels: string[];
+  fp16: boolean;
+}
+
 export interface EvalSetModel {
   col_id: string;
   cols_text: string[];

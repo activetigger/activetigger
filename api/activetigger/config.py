@@ -121,6 +121,7 @@ class Config(metaclass=_Singleton):
     features_file: str = "features.parquet"
     data_all: str = "data_all.parquet"
     file_bert_models: str = "bert_models.csv"
+    file_image_models: str = "image_models.csv"
     file_embeddings_models: str = "embeddings.yaml"
     default_scheme: str = "default"
     mail_server: str | None = os.environ.get("MAIL_SERVER", None)

@@ -24,6 +24,7 @@ export interface DisplayTrainingProcessesProps {
   processStatus?: string;
   displayStopButton?: boolean;
   showLossChart?: boolean;
+  stopKind?: string;
 }
 
 interface LossData {
@@ -38,6 +39,7 @@ export const DisplayTrainingProcesses: FC<DisplayTrainingProcessesProps> = ({
   processStatus,
   displayStopButton = false,
   showLossChart = true,
+  stopKind = 'bert',
 }) => {
   // track the highest progress seen per process to avoid regression to 0%
   const maxProgressRef = useRef<Record<string, number>>({});
@@ -79,7 +81,7 @@ export const DisplayTrainingProcesses: FC<DisplayTrainingProcessesProps> = ({
     <div className="overflow-x-auto my-4">
       {displayStopButton && (
         <div className="mb-3">
-          <StopProcessButton projectSlug={projectSlug} kind="bert" />
+          <StopProcessButton projectSlug={projectSlug} kind={stopKind} />
         </div>
       )}
 

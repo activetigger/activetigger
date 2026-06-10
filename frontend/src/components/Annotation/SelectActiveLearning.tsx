@@ -59,8 +59,15 @@ export const SelectActiveLearning: FC<SelectActiveLearningProps> = ({
     () => project?.languagemodels.available[currentScheme || ''] || {},
     [project?.languagemodels, currentScheme],
   );
+  const availableImageModels = useMemo(
+    () => project?.imagemodels?.available[currentScheme || ''] || {},
+    [project?.imagemodels, currentScheme],
+  );
 
   const availableBertModelsWithPrediction = Object.entries(availableBertModels || {})
+    .filter(([_, v]) => v && v.predicted)
+    .map(([k, _]) => k);
+  const availableImageModelsWithPrediction = Object.entries(availableImageModels || {})
     .filter(([_, v]) => v && v.predicted)
     .map(([k, _]) => k);
 
@@ -94,6 +101,21 @@ export const SelectActiveLearning: FC<SelectActiveLearningProps> = ({
             label: excluded.length > 0 ? e + ' (labels dropped)' : e,
             type: 'languagemodel',
             time: availableBertModels?.[e]?.time ?? '',
+            labels_excluded: excluded,
+          };
+        }),
+    },
+    {
+      label: 'Image Models',
+      options: (availableImageModelsWithPrediction ?? [])
+        .filter((e) => e)
+        .map((e) => {
+          const excluded = availableImageModels?.[e]?.exclude_labels ?? [];
+          return {
+            value: e,
+            label: excluded.length > 0 ? e + ' (labels dropped)' : e,
+            type: 'imagemodel',
+            time: availableImageModels?.[e]?.time ?? '',
             labels_excluded: excluded,
           };
         }),
@@ -152,7 +174,14 @@ export const SelectActiveLearning: FC<SelectActiveLearningProps> = ({
     ) {
       setAppContext((prev) => ({ ...prev, activeModel: null }));
     }
-  }, [availableQuickModels, activeModel, setAppContext, availableBertModels]);
+    if (
+      activeModel &&
+      !Object.keys(availableImageModels)?.includes(activeModel.value) &&
+      activeModel.type === 'imagemodel'
+    ) {
+      setAppContext((prev) => ({ ...prev, activeModel: null }));
+    }
+  }, [availableQuickModels, activeModel, setAppContext, availableBertModels, availableImageModels]);
 
   // fastrack active learning model
   useEffect(() => {

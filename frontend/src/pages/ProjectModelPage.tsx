@@ -6,15 +6,24 @@ import { Tooltip } from 'react-tooltip';
 import { ProjectPageLayout } from '../components/layout/ProjectPageLayout';
 import { ModelEvaluation } from '../components/ModelEvaluation';
 import { ModelManagement } from '../components/ModelManagement';
+import { ImageModelEvaluation } from '../components/ImageModelEvaluation';
+import { ImageModelManagement } from '../components/ImageModelManagement';
+import { useAppContext } from '../core/useAppContext';
 
 /**
- * Component to manage model training
+ * Component to manage model training. Dispatches on project kind:
+ * text projects get the BERT-based UI, image projects get the image-classification UI
+ * (ViT, ConvNeXt, EfficientNet, ...).
  */
 
 export const ProjectModelPage: FC = () => {
   const { projectName: projectSlug } = useParams();
+  const {
+    appContext: { currentProject },
+  } = useAppContext();
 
   const [activeKey, setActiveKey] = useState<string>('models');
+  const isImage = currentProject?.params?.kind === 'image';
 
   return (
     <ProjectPageLayout projectName={projectSlug} currentAction="model">
@@ -28,8 +37,10 @@ export const ProjectModelPage: FC = () => {
               onSelect={(k) => setActiveKey(k || 'models')}
             >
               <Tab eventKey="models" title="Training">
-                <div className="explanations ms-3">Train quick and BERT models</div>
-                <ModelManagement />
+                <div className="explanations ms-3">
+                  {isImage ? 'Train quick and image models' : 'Train quick and BERT models'}
+                </div>
+                {isImage ? <ImageModelManagement /> : <ModelManagement />}
               </Tab>
               <Tab eventKey="evaluation" title="Evaluation">
                 <div className="explanations ms-3">
@@ -44,7 +55,7 @@ export const ProjectModelPage: FC = () => {
                   generalization scores of the best model (do not choose models based on this)
                   <br />
                 </Tooltip>
-                <ModelEvaluation />
+                {isImage ? <ImageModelEvaluation /> : <ModelEvaluation />}
               </Tab>
             </Tabs>
           </div>

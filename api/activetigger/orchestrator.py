@@ -465,9 +465,19 @@ class Orchestrator:
 
         # define the processes to kill
         if kind == "all":
-            kind = ["train_bert", "predict_bert", "generation", "feature", "bertopic"]
+            kind = [
+                "train_bert",
+                "predict_bert",
+                "train_image",
+                "predict_image",
+                "generation",
+                "feature",
+                "bertopic",
+            ]
         if kind == "bert":
             kind = ["train_bert", "predict_bert"]
+        if kind == "image":
+            kind = ["train_image", "predict_image"]
         if kind is None:
             kind = "all"
         if isinstance(kind, str) and kind != "all":
@@ -479,7 +489,7 @@ class Orchestrator:
             for project in processes:
                 for process in processes[project]:
                     self.queue.kill(process.unique_id)
-                    if process.kind == "train_bert":
+                    if process.kind in ("train_bert", "train_image"):
                         process = cast(LMComputing, process)
                         self.db_manager.language_models_service.delete_model(
                             project, process.model_name
@@ -491,7 +501,7 @@ class Orchestrator:
             processes_project = self.projects[project_slug].get_process(kind, username)
             for process in processes_project:
                 self.queue.kill(process.unique_id)
-                if process.kind == "train_bert":
+                if process.kind in ("train_bert", "train_image"):
                     process = cast(LMComputing, process)
                     self.db_manager.language_models_service.delete_model(
                         project_slug, process.model_name

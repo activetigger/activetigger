@@ -17,12 +17,13 @@ from pandas import DataFrame
 from torch import nn
 from transformers import (
     AutoModelForSequenceClassification,
-    AutoTokenizer,  # ty: ignore[possibly-missing-import]
+    AutoTokenizer,
     Trainer,
     TrainerCallback,
     TrainerControl,
     TrainerState,
     TrainingArguments,
+    set_seed,
 )
 
 from activetigger.config import config
@@ -114,7 +115,7 @@ class CustomTrainer(Trainer):
         self._loss_fct = None  # avoid device mismatch
         print("CustomTrainer initialized with class weights:", self.class_weights)
 
-    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):  # ty: ignore[invalid-method-override]
+    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
         labels = inputs.pop("labels")
         outputs = model(**inputs)
         logits = outputs.get("logits")
@@ -321,7 +322,11 @@ class TrainBert(BaseTask):
             )
 
         return datasets.Dataset.from_dict(
-            {"id": ids, "text": texts, "labels": labels}  # ty: ignore[possibly-unresolved-reference]
+            {
+                "id": ids,
+                "text": texts,
+                "labels": labels,
+            }  # ty: ignore[possibly-unresolved-reference]
         ).with_format("torch")
 
     def __load_tokenizer(self, base_model: str):
@@ -396,6 +401,7 @@ class TrainBert(BaseTask):
         eval_steps = max(eval_steps, 1)
 
         # Load the training arguments
+        seed = int(config.random_seed)
         training_args = TrainingArguments(
             # Directories
             output_dir=str(current_path.joinpath("train")),
@@ -420,6 +426,10 @@ class TrainBert(BaseTask):
             greater_is_better=False if has_test else None,
             load_best_model_at_end=params.best if has_test else False,
             use_cpu=config.cpu_only or not bool(params.gpu),  # deactivate gpu
+            # Reproducibility: seed Trainer's model init / DataLoader shuffling
+            # and dataset shuffling. config.random_seed defaults to 42.
+            seed=seed,
+            data_seed=seed,
         )
 
         callback = CustomLoggingCallback(self.event, current_path=current_path, logger=self.logger)
@@ -520,6 +530,14 @@ class TrainBert(BaseTask):
         task_timer = TaskTimer(compulsory_steps=["setup", "train", "evaluate", "save_files"])
         task_timer.start("setup")
 
+        # Seed everything (python random, numpy, torch, torch.cuda) so that
+        # successive runs of the same training produce the same model.
+        # HF Trainer also gets seed via TrainingArguments below; both layers
+        # are needed because operations that run before Trainer.__init__
+        # (datasets shuffle, train_test_split) don't use HF's seed.
+        seed = int(config.random_seed)
+        set_seed(seed)
+
         current_path, log_path = self.__init_paths()
         self.logger = self.__init_logger(log_path)
         device = get_device()
@@ -547,7 +565,7 @@ class TrainBert(BaseTask):
 
         # Build train/test dataset for dev eval
         if self.test_size > 0:
-            self.ds = self.ds.train_test_split(test_size=self.test_size)
+            self.ds = self.ds.train_test_split(test_size=self.test_size, seed=seed)
         else:
             self.ds = datasets.DatasetDict({"train": self.ds})
         self.logger.info("Train/test dataset created")
@@ -580,12 +598,18 @@ class TrainBert(BaseTask):
 
             # predict on the data (separation validation set and training set)
             task_timer.start("evaluate")
-            predictions_train = trainer.predict(self.ds["train"])  # ty: ignore[invalid-argument-type]
+            predictions_train = trainer.predict(
+                self.ds["train"]
+            )  # ty: ignore[invalid-argument-type]
 
             # Compute the metrics
-            df_train_results = self.ds["train"].to_pandas().set_index("id")  # ty: ignore[unresolved-attribute]
+            df_train_results = (
+                self.ds["train"].to_pandas().set_index("id")
+            )  # ty: ignore[unresolved-attribute]
 
-            df_train_results["true_label-matrix"] = predictions_train.label_ids.tolist()  # ty: ignore[unresolved-attribute]
+            df_train_results["true_label-matrix"] = (
+                predictions_train.label_ids.tolist()
+            )  # ty: ignore[unresolved-attribute]
             df_train_results["true_label"] = [
                 "|".join(matrix_to_label(row, id2label))  # ty: ignore[invalid-argument-type]
                 for row in predictions_train.label_ids  # ty: ignore[not-iterable]
@@ -635,10 +659,16 @@ class TrainBert(BaseTask):
                 )
 
             if "test" in self.ds:
-                predictions_test = trainer.predict(self.ds["test"])  # ty: ignore[invalid-argument-type]
-                df_test_results = self.ds["test"].to_pandas().set_index("id")  # ty: ignore[unresolved-attribute]
+                predictions_test = trainer.predict(
+                    self.ds["test"]
+                )  # ty: ignore[invalid-argument-type]
+                df_test_results = (
+                    self.ds["test"].to_pandas().set_index("id")
+                )  # ty: ignore[unresolved-attribute]
 
-                df_test_results["true_label-matrix"] = predictions_test.label_ids.tolist()  # ty: ignore[unresolved-attribute]
+                df_test_results["true_label-matrix"] = (
+                    predictions_test.label_ids.tolist()
+                )  # ty: ignore[unresolved-attribute]
                 df_test_results["true_label"] = [
                     "|".join(matrix_to_label(row, id2label))  # ty: ignore[invalid-argument-type]
                     for row in predictions_test.label_ids  # ty: ignore[not-iterable]
@@ -653,7 +683,9 @@ class TrainBert(BaseTask):
                         y_prob_pred, strategy="max", force_max_1_per_row=True
                     )
                 else:
-                    y_label_pred = activate_probs(y_prob_pred, threshold, strategy="threshold")  # ty: ignore[possibly-unresolved-reference]
+                    y_label_pred = activate_probs(
+                        y_prob_pred, threshold, strategy="threshold"
+                    )  # ty: ignore[possibly-unresolved-reference]
                 df_test_results["predicted_label-matrix"] = y_prob_pred.tolist()
                 df_test_results["predicted_label"] = [
                     "|".join(matrix_to_label(row, id2label)) for row in y_label_pred
@@ -685,7 +717,9 @@ class TrainBert(BaseTask):
                 {
                     "training_kind": self.training_kind,
                     "test_size": self.test_size,
-                    "threshold": threshold if self.training_kind == "multilabel" else None,  # ty: ignore[possibly-unresolved-reference]
+                    "threshold": threshold
+                    if self.training_kind == "multilabel"
+                    else None,  # ty: ignore[possibly-unresolved-reference]
                     "use_dichotomization": self.use_dichotomization,
                     "label_for_dichotomization": self.label_for_dichotomization,
                     "base_model": self.base_model,

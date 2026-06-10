@@ -4,10 +4,17 @@ from pathlib import Path
 from typing import Annotated, Any, Callable, Literal, Optional
 
 from pandas import DataFrame
-from pydantic import BaseModel, BeforeValidator, ConfigDict  # for dataframe
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field  # for dataframe
 from sklearn.base import BaseEstimator
 
 # Data model to use of the API
+
+# Model-name validator: safe filesystem character set with a length cap.
+# Used as a Pydantic constraint on BertModelModel.name / ImageModelModel.name
+# to prevent path traversal — the same string flows into Path.joinpath,
+# shutil.make_archive, shutil.rmtree, os.remove and DB primary keys, so it
+# must never contain "/", "..", or other path separators.
+MODEL_NAME_PATTERN = r"^[A-Za-z0-9_\-]{1,64}$"
 
 
 class ChangePasswordModel(BaseModel):
@@ -371,7 +378,7 @@ class BertModelModel(BaseModel):
 
     project_slug: str
     scheme: str
-    name: str
+    name: str = Field(pattern=MODEL_NAME_PATTERN)
     base_model: str
     params: LMParametersModel
     test_size: float = 0.2
@@ -382,6 +389,27 @@ class BertModelModel(BaseModel):
     exclude_labels: list[str] = []
     max_length: int = 512
     auto_max_length: bool = False
+
+
+class ImageModelModel(BaseModel):
+    """
+    Request for fine-tuning an image-classification model on an image
+    project. Works with any HuggingFace AutoModelForImageClassification
+    backbone (ViT, ConvNeXt, EfficientNet, Swin, BEiT, ...). Mirrors
+    BertModelModel but drops text-only fields (max_length, dichotomize).
+    """
+
+    project_slug: str
+    scheme: str
+    name: str = Field(pattern=MODEL_NAME_PATTERN)
+    base_model: str = "google/vit-large-patch16-384"
+    params: LMParametersModel
+    test_size: float = 0.2
+    class_min_freq: int = 1
+    class_balance: bool = False
+    loss: str = "cross_entropy"
+    exclude_labels: list[str] = []
+    fp16: bool = True
 
 
 class UmapModel(BaseModel):
@@ -902,6 +930,13 @@ class LanguageModelsProjectStateModel(BaseModel):
     base_parameters: LMParametersModel
 
 
+class ImageModelsProjectStateModel(BaseModel):
+    options: list[dict[str, Any]]
+    available: dict[str, dict[str, LMStatusModel]]
+    training: dict[str, LMComputingOutModel]
+    base_parameters: LMParametersModel
+
+
 class ProjectionsProjectStateModel(BaseModel):
     options: dict[str, dict[str, Any]]
     available: dict[str, str | int]
@@ -944,6 +979,7 @@ class ProjectStateModel(BaseModel):
     prompts: PromptsProjectStateModel | None = None
     quickmodel: QuickModelsProjectStateModel
     languagemodels: LanguageModelsProjectStateModel
+    imagemodels: ImageModelsProjectStateModel | None = None
     projections: ProjectionsProjectStateModel
     generations: GenerationsProjectStateModel
     bertopic: BertopicProjectStateModel
