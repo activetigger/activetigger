@@ -783,7 +783,11 @@ class Project:
         if next.sample == "untagged":
             f = df["labels"].isna()
         elif next.sample == "not_by_me":
-            f = df["labels"].isna() | (df["user"] != username)
+            user_rows = self.db_manager.projects_service.get_scheme_elements(
+                self.project_slug, next.scheme, [next.dataset], user=username
+            )
+            user_annotated_ids = {row[0] for row in user_rows if row[2] is not None}
+            f = ~df.index.isin(user_annotated_ids)
         elif next.sample == "tagged":
             # on specific labels
             if next.on_labels is not None and len(next.on_labels) > 0:
