@@ -340,6 +340,10 @@ class PredictImage(BaseTask):
                 os.remove(self.progress_path)
             self.df = None
             self.event = None
+            try:
+                del model, image_processor
+            except Exception:
+                pass
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.synchronize()

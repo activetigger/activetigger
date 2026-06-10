@@ -287,6 +287,7 @@ export const MonitorPage: FC = () => {
                   <thead>
                     <tr>
                       <th>Name</th>
+                      <th>Type</th>
                       <th>Slug</th>
                       <th>Creator</th>
                       <th>Created at</th>
@@ -300,6 +301,7 @@ export const MonitorPage: FC = () => {
                     {(allProjects || []).map((p) => (
                       <tr key={p.project_slug}>
                         <td>{p.parameters?.project_name}</td>
+                        <td>{p.parameters?.kind ?? 'text'}</td>
                         <td>{p.project_slug}</td>
                         <td>{p.created_by}</td>
                         <td>{p.created_at}</td>

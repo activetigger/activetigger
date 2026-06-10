@@ -416,6 +416,10 @@ class PredictBertMultiClass(BaseTask):
             # clean memory
             self.df = None
             self.event = None
+            try:
+                del model, tokenizer
+            except Exception:
+                pass
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
