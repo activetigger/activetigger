@@ -282,6 +282,29 @@ class ProjectsService:
                 for row in results
             ]
 
+    def get_elements_annotated_by_user(
+        self, project_slug: str, scheme: str, dataset: list[str], user: str
+    ) -> list[str]:
+        """
+        Element ids the user has ever given a non-null annotation to.
+        Used by the "not_by_me" filter so elements the user labelled in the
+        past stay excluded even if a later row (delete, label removal) cleared
+        the annotation.
+        """
+        with self.Session() as session:
+            stmt = (
+                select(Annotations.element_id)
+                .where(
+                    Annotations.scheme_name == scheme,
+                    Annotations.project_slug == project_slug,
+                    Annotations.dataset.in_(dataset),
+                    Annotations.user_name == user,
+                    Annotations.annotation.is_not(None),
+                )
+                .distinct()
+            )
+            return [row.element_id for row in session.execute(stmt)]
+
     def get_recent_annotations(
         self, project_slug: str, user_name: str, scheme: str, limit: int, dataset: str = "train"
     ):
