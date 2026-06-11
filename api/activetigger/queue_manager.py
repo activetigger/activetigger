@@ -314,8 +314,30 @@ class Queue:
 
     def restart(self) -> None:
         """
-        Restart the queue by getting the executor and closing it
+        Restart the queue: drop pending state, tear down the executor and
+        the Manager, and rebuild both. Without rebuilding `self.executor`,
+        every subsequent `executor.submit` fails with "cannot schedule new
+        futures after shutdown" and the queue silently wedges.
         """
-        executor = get_reusable_executor(max_workers=(self.nb_workers), timeout=600)
-        executor.shutdown(wait=False)
         self.current = []
+
+        try:
+            # kill_workers: terminate busy workers too — a wedged task would
+            # otherwise survive the restart and keep its GPU memory forever
+            self.executor.shutdown(wait=False, kill_workers=True)
+        except Exception as e:
+            print(f"Error shutting down old executor: {e}", flush=True)
+
+        # The Manager backs the Events held by the tasks we just dropped;
+        # rebuild it so newly-added tasks get fresh, live Events.
+        try:
+            self.manager.shutdown()
+        except Exception as e:
+            print(f"Error shutting down manager: {e}", flush=True)
+        self.manager = multiprocessing.Manager()
+
+        # loky's reusable executor is a process-global singleton; after
+        # shutdown the next get_reusable_executor call returns a fresh one.
+        self.executor = get_reusable_executor(
+            max_workers=self.nb_workers, timeout=600
+        )

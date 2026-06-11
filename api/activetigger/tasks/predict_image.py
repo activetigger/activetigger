@@ -345,9 +345,15 @@ class PredictImage(BaseTask):
             except Exception:
                 pass
             gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
-                torch.cuda.empty_cache()
-                torch.cuda.ipc_collect()
+            # guard the CUDA release: on a corrupted context synchronize()
+            # raises, and an exception here would mask the real error from
+            # the prediction loop
+            try:
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+                    torch.cuda.empty_cache()
+                    torch.cuda.ipc_collect()
+            except Exception as e:
+                print("Error in cleaning GPU memory", e)
 
         return ReturnTaskPredictModel(path=str(self.path.joinpath(self.file_name)), metrics=metrics)
