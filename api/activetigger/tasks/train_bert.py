@@ -749,6 +749,14 @@ class TrainBert(BaseTask):
         except Exception as e:
             print("Error in training", e)
             shutil.rmtree(current_path)
+            # PyTorch can fail with a cryptic "NVML_SUCCESS == r INTERNAL ASSERT
+            # FAILED at CUDACachingAllocator.cpp" while formatting an OOM error
+            # (see pytorch#157535): both cases are GPU out-of-memory.
+            if isinstance(e, torch.cuda.OutOfMemoryError) or "NVML_SUCCESS" in str(e):
+                raise Exception(
+                    "GPU ran out of memory during training. "
+                    "Reduce the batch size or increase gradient accumulation."
+                ) from e
             raise e
         finally:
             print("Cleaning memory")
