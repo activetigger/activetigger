@@ -109,6 +109,24 @@ class Queue:
                     print(f"Failed to signal cancel event for {t.unique_id}: {e}", flush=True)
                 t.state = "failed"
 
+    def _submit_task(self, t: QueueTaskModel, now: datetime.datetime) -> None:
+        """
+        Submit a task to the executor, rebuilding the executor if it is
+        broken. When a worker dies (host OOM kill, CUDA crash), loky marks
+        the executor broken and every submit raises; without a rebuild the
+        task would stay "pending" and the queue would wedge forever.
+        """
+        try:
+            t.future = self.executor.submit(t.task)
+        except Exception as e:
+            print(f"Executor unusable ({e}); rebuilding executor.", flush=True)
+            # loky's reusable executor singleton returns a fresh executor
+            # when the previous one is broken or shut down
+            self.executor = get_reusable_executor(max_workers=self.nb_workers, timeout=600)
+            t.future = self.executor.submit(t.task)
+        t.state = "running"
+        t.running_since = now
+
     def _dispatch_pending_tasks(self) -> None:
         """
         Check for pending tasks and submit them to the executor.
@@ -138,10 +156,7 @@ class Queue:
             and (nb_active_processes_gpu + nb_active_processes_cpu) < self.nb_workers
             and len(task_gpu) > 0
         ):
-            # self.executor = get_reusable_executor(max_workers=(self.nb_workers), timeout=600)
-            task_gpu[0].future = self.executor.submit(task_gpu[0].task)
-            task_gpu[0].state = "running"
-            task_gpu[0].running_since = now
+            self._submit_task(task_gpu[0], now)
 
         # a worker available and possible to have cpu
         if (
@@ -149,10 +164,7 @@ class Queue:
             and (nb_active_processes_gpu + nb_active_processes_cpu) < self.nb_workers
             and len(task_cpu) > 0
         ):
-            # self.executor = get_reusable_executor(max_workers=(self.nb_workers), timeout=600)
-            task_cpu[0].future = self.executor.submit(task_cpu[0].task)
-            task_cpu[0].state = "running"
-            task_cpu[0].running_since = now
+            self._submit_task(task_cpu[0], now)
 
     async def _update_queue(self, timeout: float = 1) -> None:
         """
