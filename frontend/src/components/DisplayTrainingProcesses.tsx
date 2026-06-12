@@ -1,4 +1,4 @@
-import { FC, useRef } from 'react';
+import { FC, useEffect, useRef } from 'react';
 // import { useStopProcesses } from '../core/api';
 import { StopProcessButton } from './StopProcessButton';
 import { LossChart } from './vizualisation/lossChart';
@@ -43,6 +43,19 @@ export const DisplayTrainingProcesses: FC<DisplayTrainingProcessesProps> = ({
 }) => {
   // track the highest progress seen per process to avoid regression to 0%
   const maxProgressRef = useRef<Record<string, number>>({});
+
+  // drop stored maxima for processes that are gone, so a new run of the
+  // same model does not inherit the previous run's percentage
+  useEffect(() => {
+    const activeKeys = new Set(
+      Object.entries(processes ?? {}).map(([user, v]) => `${user}:${v?.name}`),
+    );
+    for (const key of Object.keys(maxProgressRef.current)) {
+      if (!activeKeys.has(key)) {
+        delete maxProgressRef.current[key];
+      }
+    }
+  }, [processes]);
 
   const formatProgress = (val: number | string | null, key: string) => {
     if (val === null || val === undefined) {

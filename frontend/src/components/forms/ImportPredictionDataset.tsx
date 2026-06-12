@@ -25,6 +25,7 @@ export interface ImportPredictionDatasetProps {
   scheme: string;
   modelName: string;
   availablePredictionExternal?: boolean;
+  batchSize?: number;
 }
 
 // component
@@ -33,6 +34,7 @@ export const ImportPredictionDataset: FC<ImportPredictionDatasetProps> = ({
   scheme,
   modelName,
   availablePredictionExternal,
+  batchSize,
 }) => {
   const maxSizeMB = 300;
   const maxSize = maxSizeMB * 1024 * 1024; // 100 MB in bytes
@@ -100,10 +102,16 @@ export const ImportPredictionDataset: FC<ImportPredictionDatasetProps> = ({
         await addFile(projectSlug, file);
         uploaded = true;
         setPhase('queuing');
-        await predict(projectSlug, scheme, modelName, {
-          ...omit(formData, 'files'),
-          filename: data.filename,
-        });
+        await predict(
+          projectSlug,
+          scheme,
+          modelName,
+          {
+            ...omit(formData, 'files'),
+            filename: data.filename,
+          },
+          batchSize,
+        );
         setData(null);
         reset();
       } catch (error) {

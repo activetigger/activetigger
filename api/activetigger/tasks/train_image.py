@@ -197,6 +197,16 @@ class TrainImage(BaseTask):
         logger.info(f"Start {self.base_model}")
         return logger
 
+    def __listen_stop_event(self) -> None:
+        """
+        Raise if the user requested cancellation. Called in the long phases
+        (pre-flight scan, evaluation, saving) that the training callback
+        does not cover — without these checks a kill is only honored
+        during training steps and the GPU slot stays occupied.
+        """
+        if self.event is not None and self.event.is_set():
+            raise Exception("Process interrupted by user")
+
     def __check_data(self, df: pd.DataFrame, col_label: str, col_text: str) -> pd.DataFrame:
         """
         Drop rows with missing labels, missing paths, unrecognised labels,
@@ -246,7 +256,13 @@ class TrainImage(BaseTask):
             ):
                 return False
 
-        readable = df[col_text].apply(_readable)
+        readable_flags = []
+        for i, p in enumerate(df[col_text]):
+            # the scan opens every image sequentially; keep it cancellable
+            if i % 100 == 0:
+                self.__listen_stop_event()
+            readable_flags.append(_readable(p))
+        readable = pd.Series(readable_flags, index=df.index)
         n_dropped = int((~readable).sum())
         if n_dropped > 0:
             df = df[readable]
@@ -468,53 +484,60 @@ class TrainImage(BaseTask):
         self.logger = self.__init_logger(log_path)
         device = get_device()
 
-        self.df = self.__check_data(self.df, self.col_label, self.col_text)
-        labels, label2id, id2label = self.__retrieve_labels(self.scheme_labels)
-
-        ds_base = self.__transform_to_dataset(
-            self.training_kind, self.df, self.col_label, self.col_text, label2id
-        )
-
-        # Build a fresh image processor for this base model and reuse it both
-        # for transforms and for save_pretrained / inference.
-        image_processor = AutoImageProcessor.from_pretrained(self.base_model)
-        transform_fn = self.__make_transform(image_processor)
-
-        if self.test_size > 0:
-            split = ds_base.train_test_split(test_size=self.test_size, seed=seed)
-            # Capture id / path lists BEFORE with_transform — once the transform
-            # is set, column-name access through ds[col] is replaced by the
-            # transform output (pixel_values, labels) and the raw columns become
-            # unreachable, which breaks post-train evaluation.
-            train_ids = list(split["train"]["id"])
-            train_paths = list(split["train"]["path"])
-            test_ids = list(split["test"]["id"])
-            test_paths = list(split["test"]["path"])
-            split["train"] = split["train"].with_transform(transform_fn)
-            split["test"] = split["test"].with_transform(transform_fn)
-            self.ds = split
-        else:
-            train_ids = list(ds_base["id"])
-            train_paths = list(ds_base["path"])
-            test_ids = None
-            test_paths = None
-            self.ds = datasets.DatasetDict({"train": ds_base.with_transform(transform_fn)})
-        self.logger.info("Train/test dataset created")
-
-        model = AutoModelForImageClassification.from_pretrained(
-            self.base_model,
-            num_labels=len(labels),
-            id2label=id2label,
-            label2id=label2id,
-            ignore_mismatched_sizes=True,
-            problem_type="multi_label_classification"
-            if self.training_kind == "multilabel"
-            else "single_label_classification",
-        ).to(device=device)
-        model.config.use_cache = False
-        self.logger.info(f"Model loaded on {model.device}")
+        # bound before the try so the finally can clean them up even when
+        # setup fails partway (model download, OOM on .to(device), ...)
+        image_processor = None
+        model = None
+        trainer = None
 
         try:
+            self.df = self.__check_data(self.df, self.col_label, self.col_text)
+            labels, label2id, id2label = self.__retrieve_labels(self.scheme_labels)
+
+            ds_base = self.__transform_to_dataset(
+                self.training_kind, self.df, self.col_label, self.col_text, label2id
+            )
+
+            # Build a fresh image processor for this base model and reuse it both
+            # for transforms and for save_pretrained / inference.
+            image_processor = AutoImageProcessor.from_pretrained(self.base_model)
+            transform_fn = self.__make_transform(image_processor)
+
+            if self.test_size > 0:
+                split = ds_base.train_test_split(test_size=self.test_size, seed=seed)
+                # Capture id / path lists BEFORE with_transform — once the transform
+                # is set, column-name access through ds[col] is replaced by the
+                # transform output (pixel_values, labels) and the raw columns become
+                # unreachable, which breaks post-train evaluation.
+                train_ids = list(split["train"]["id"])
+                train_paths = list(split["train"]["path"])
+                test_ids = list(split["test"]["id"])
+                test_paths = list(split["test"]["path"])
+                split["train"] = split["train"].with_transform(transform_fn)
+                split["test"] = split["test"].with_transform(transform_fn)
+                self.ds = split
+            else:
+                train_ids = list(ds_base["id"])
+                train_paths = list(ds_base["path"])
+                test_ids = None
+                test_paths = None
+                self.ds = datasets.DatasetDict({"train": ds_base.with_transform(transform_fn)})
+            self.logger.info("Train/test dataset created")
+
+            self.__listen_stop_event()
+            model = AutoModelForImageClassification.from_pretrained(
+                self.base_model,
+                num_labels=len(labels),
+                id2label=id2label,
+                label2id=label2id,
+                ignore_mismatched_sizes=True,
+                problem_type="multi_label_classification"
+                if self.training_kind == "multilabel"
+                else "single_label_classification",
+            ).to(device=device)
+            model.config.use_cache = False
+            self.logger.info(f"Model loaded on {model.device}")
+
             trainer = self.__load_trainer(
                 current_path, self.ds, model, self.params, self.loss or "cross_entropy"
             )
@@ -527,6 +550,7 @@ class TrainImage(BaseTask):
 
             # ----- post-training evaluation -----
             task_timer.start("evaluate")
+            self.__listen_stop_event()
             predictions_train = trainer.predict(self.ds["train"])
 
             df_train_results = pd.DataFrame({"id": train_ids}).set_index("id")
@@ -572,6 +596,7 @@ class TrainImage(BaseTask):
                 )
 
             if "test" in self.ds:
+                self.__listen_stop_event()
                 predictions_test = trainer.predict(self.ds["test"])
                 df_test_results = pd.DataFrame({"id": test_ids}).set_index("id")
                 df_test_results["path"] = test_paths
@@ -614,6 +639,8 @@ class TrainImage(BaseTask):
             task_timer.stop("evaluate")
 
             task_timer.start("save_files")
+            # last cancellation point before saving + archiving the model dir
+            self.__listen_stop_event()
             params_to_save = self.params.model_dump()
             params_to_save.update(
                 {
@@ -653,22 +680,22 @@ class TrainImage(BaseTask):
             raise e
         finally:
             print("Cleaning memory")
+            # release references one by one: a single failed del must not
+            # skip the CUDA cleanup (a polluted reused worker breaks the
+            # next GPU task in the queue)
+            trainer = None
+            model = None
+            image_processor = None
+            self.df = None
+            self.ds = None
+            self.event = None
+            gc.collect()
             try:
-                del (
-                    trainer,
-                    model,
-                    image_processor,
-                    self.df,
-                    self.ds,
-                    device,
-                    self.event,
-                )
                 if torch.cuda.is_available():
                     torch.cuda.synchronize()
                     torch.cuda.empty_cache()
                     torch.cuda.ipc_collect()
-                gc.collect()
             except Exception as e:
-                print("Error in cleaning memory", e)
+                print("Error in cleaning GPU memory", e)
 
         return EventsModel(events=task_timer.get_events())
