@@ -317,6 +317,12 @@ class LanguageModels:
         if not (self.path.joinpath(name)).exists():
             raise Exception("The model does not exist")
 
+        # remove stale progress left by a previous run whose worker died
+        # before cleanup; otherwise the frontend shows the old percentage
+        stale_progress = self.path.joinpath(name).joinpath("progress_predict")
+        if stale_progress.exists():
+            stale_progress.unlink()
+
         # case of external loading
         if df is None and dataset not in ["all", "external"]:
             raise Exception("Dataframe is required for this dataset")
