@@ -84,6 +84,7 @@ export const ModelPredict: FC<{ currentModel: string | null }> = ({ currentModel
             modelName={currentModel || ''}
             scheme={currentScheme || ''}
             availablePredictionExternal={availablePredictionExternal || false}
+            batchSize={batchSize}
           />
         )}
         <DisplayTrainingProcesses

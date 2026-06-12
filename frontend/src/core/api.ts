@@ -309,7 +309,13 @@ export function useDropEvalSet(projectSlug: string | null) {
 export function usePredictOnDataset() {
   const { notify } = useNotifications();
   const predictOnDataset = useCallback(
-    async (projectSlug: string, scheme: string, model_name: string, data: TextDatasetModel) => {
+    async (
+      projectSlug: string,
+      scheme: string,
+      model_name: string,
+      data: TextDatasetModel,
+      batchSize?: number,
+    ) => {
       // do the new projects POST call
       const res = await api_withouttimeout.POST('/models/predict', {
         // POST has a body
@@ -320,6 +326,7 @@ export function usePredictOnDataset() {
             dataset_type: 'external',
             scheme: scheme,
             kind: 'bert',
+            batch_size: batchSize,
           },
         },
         body: data,
