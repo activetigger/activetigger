@@ -53,6 +53,10 @@ When reporting a bug, include:
 - Your environment (OS, browser, Docker or local install, Python version).
 - Relevant logs or screenshots if available.
 
+## General
+  Make sur that the app starts and works before submetting
+
+
 ## Questions?
 
 If you are unsure whether a change is appropriate, feel free to open an issue to ask. We are happy to discuss ideas before any code is written.
