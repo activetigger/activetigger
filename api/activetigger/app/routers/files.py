@@ -31,9 +31,14 @@ from activetigger.project import Project
 router = APIRouter(tags=["files"])
 
 _ALLOWED_UPLOAD_EXTENSIONS = (".csv", ".parquet", ".xlsx")
+_ALLOWED_IMAGE_UPLOAD_EXTENSIONS = (".zip",)
 
 
-def _safe_upload_path(directory: Path, filename: str | None) -> Path:
+def _safe_upload_path(
+    directory: Path,
+    filename: str | None,
+    allowed_extensions: tuple[str, ...] = _ALLOWED_UPLOAD_EXTENSIONS,
+) -> Path:
     """
     Return a path inside `directory` that is safe to write to.
 
@@ -50,8 +55,11 @@ def _safe_upload_path(directory: Path, filename: str | None) -> Path:
     if not safe_name:
         raise HTTPException(status_code=400, detail="Invalid filename")
 
-    if not safe_name.lower().endswith(_ALLOWED_UPLOAD_EXTENSIONS):
-        raise HTTPException(status_code=400, detail="Only csv, parquet and xlsx files are allowed")
+    if not safe_name.lower().endswith(allowed_extensions):
+        allowed_str = ", ".join(ext.lstrip(".") for ext in allowed_extensions)
+        raise HTTPException(
+            status_code=400, detail=f"Only {allowed_str} files are allowed"
+        )
 
     directory_resolved = directory.resolve()
     target = (directory_resolved / safe_name).resolve()
@@ -107,7 +115,10 @@ def upload_file_project(
         project_path = Path(f"{config.data_path}/projects/{project_slug}")
         os.makedirs(project_path)
 
-        target = _safe_upload_path(project_path, file.filename)
+        allowed = (
+            _ALLOWED_IMAGE_UPLOAD_EXTENSIONS if kind == "image" else _ALLOWED_UPLOAD_EXTENSIONS
+        )
+        target = _safe_upload_path(project_path, file.filename, allowed)
 
         # Read and write the file synchronously
         with open(target, "wb") as out_file:
