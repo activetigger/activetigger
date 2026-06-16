@@ -1,6 +1,8 @@
 # Contributing to ActiveTigger
 
-Thank you for your interest in contributing to ActiveTigger! To keep the project organized and avoid wasted effort, please follow the workflow below. We are a scientific software, so we would like to take some thoughts on what we put on our code.
+ActiveTigger is a community tool and all help and good will is welcomed.
+
+To keep the project organized and focus our efforts, we try to follow a few guidelines. We are a scientific software, so we would like to take some thoughts on what we put on our code.
 
 ## 1. Start with an issue
 
