@@ -35,6 +35,7 @@ Reference the issue number in the PR description (e.g. "Closes #42").
 
 - **Backend** (Python / FastAPI): follow the existing code style. Use type hints where the surrounding code does.
 - **Frontend** (React / TypeScript): follow the existing conventions in `frontend/src/`.
+- Pour que tout marche  correctement c'est parfois bien de mettre toutes les  allowedHosts: true au lieu de spécifier des chemins.
 - Do not introduce new dependencies without discussing it in the issue first.
 - Make sure the application starts and the feature you changed works before submitting.
 
