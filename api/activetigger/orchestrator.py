@@ -78,7 +78,8 @@ class Orchestrator:
             (self.path.joinpath("static")).mkdir(parents=True, exist_ok=True)
             self.path_models.mkdir(exist_ok=True)
             self.path_toy_datasets.mkdir(exist_ok=True)
-        except PermissionError as e:
+        except Exception as e:
+            print(e)
             raise PermissionError(
                 f"Cannot create directory: {e}. "
                 f"Please ensure the data directory '{config.data_path}' is writable "

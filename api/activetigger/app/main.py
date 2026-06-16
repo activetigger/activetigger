@@ -119,6 +119,7 @@ async def log_requests(request: Request, call_next):
 
 
 # add static folder
+get_orchestrator()  # fix to create all folders
 app.mount(
     "/static", StaticFiles(directory=Path(config.data_path) / "projects" / "static"), name="static"
 )
