@@ -11,15 +11,205 @@ import numpy as np
 import pandas as pd
 from scipy.stats import entropy
 from sklearn.base import BaseEstimator
-from sklearn.model_selection import (
-    KFold,
-    cross_val_predict,
-)
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import GridSearchCV, KFold, cross_val_predict
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.neighbors import KNeighborsClassifier
 
-from activetigger.datamodels import EventsModel, MLStatisticsModel, QuickModelComputed
+from activetigger.config import config
+from activetigger.datamodels import (
+    EventsModel,
+    KnnParams,
+    LogisticL1Params,
+    LogisticL2Params,
+    MLStatisticsModel,
+    Multi_naivebayesParams,
+    QuickModelComputed,
+    RandomforestParams,
+)
 from activetigger.functions import get_metrics_multiclass
 from activetigger.monitoring import TaskTimer
 from activetigger.tasks.base_task import BaseTask
+
+PARAM_GRIDS = {
+    "logistic-l1": {"C": [0.01, 0.1, 1, 10, 100]},
+    "logistic-l2": {"C": [0.01, 0.1, 1, 10, 100]},
+    "knn": {"n_neighbors": [3, 5, 7, 9]},
+    "multi_naivebayes": {"alpha": [0.1, 0.5, 1.0, 2.0]},
+}
+
+
+SKLEARN_TO_PYDANTIC = {
+    "logistic-l1": {"C": "costLogL1"},
+    "logistic-l2": {"C": "costLogL2"},
+    "knn": {},
+    "randomforest": {},
+    "multi_naivebayes": {},
+}
+
+
+def build_model(
+    model_type: str, model_params: dict, balance_classes: bool
+) -> tuple[BaseEstimator, dict, bool]:
+
+    if model_type == "knn":
+        params_knn = KnnParams(**model_params)
+        model = KNeighborsClassifier(n_neighbors=int(params_knn.n_neighbors), n_jobs=-1)
+        balance_classes = False
+        model_params = params_knn.model_dump()
+        return model, model_params, balance_classes
+
+    if model_type == "logistic-l1":
+        params_libL1 = LogisticL1Params(**model_params)
+        model = LogisticRegression(
+            penalty="l1",
+            solver="saga",
+            C=params_libL1.costLogL1,
+            class_weight="balanced" if balance_classes else None,
+            n_jobs=-1,
+            random_state=config.random_seed,
+        )
+        model_params = params_libL1.model_dump()
+        return model, model_params, balance_classes
+
+    if model_type == "logistic-l2":
+        params_libL2 = LogisticL2Params(**model_params)
+        model = LogisticRegression(
+            penalty="l2",
+            solver="lbfgs",
+            C=params_libL2.costLogL2,
+            class_weight="balanced" if balance_classes else None,
+            n_jobs=-1,
+            random_state=config.random_seed,
+        )
+        model_params = params_libL2.model_dump()
+        return model, model_params, balance_classes
+
+    if model_type == "randomforest":
+        # params  Num. trees mtry  Sample fraction
+        # Number of variables randomly sampled as candidates at each split:
+        # it is “mtry” in R and it is “max_features” Python
+        #  The sample.fraction parameter specifies the fraction of observations to be used in each tree
+        params_rf = RandomforestParams(**model_params)
+        model = RandomForestClassifier(
+            n_estimators=int(params_rf.n_estimators),
+            max_features=(
+                int(params_rf.max_features) if params_rf.max_features is not None else None
+            ),
+            class_weight="balanced"
+            if balance_classes
+            else None,  # AM: Need to choose between balanced and balanced_subsample
+            n_jobs=-1,
+            random_state=config.random_seed,
+        )
+        model_params = params_rf.model_dump()
+        return model, model_params, balance_classes
+
+    if model_type == "multi_naivebayes":
+        # small workaround for parameters
+        params_nb = Multi_naivebayesParams(**model_params)
+        if params_nb.class_prior is not None:
+            class_prior = params_nb.class_prior
+        else:
+            class_prior = None
+        # Only with dtf or tfidf for features
+        # TODO: calculate class prior for docfreq & termfreq
+        model = MultinomialNB(
+            alpha=params_nb.alpha,
+            fit_prior=params_nb.fit_prior,
+            class_prior=class_prior,
+        )
+        balance_classes = False  # Force the parameter to be set as False
+        model_params = params_nb.model_dump()
+        return model, model_params, balance_classes
+
+
+def _randomforest_grid(n_features: int) -> dict[str, list]:
+    """ """
+    candidates = [max(1, int(n_features**0.5)), max(1, int(n_features / 3)), n_features]
+    values = sorted({v for v in candidates if 1 <= v <= n_features})
+    return {"max_features": values}
+
+
+def optimize_hyperparameters(
+    model_type: str,
+    X_train: pd.DataFrame,
+    Y_train: pd.Series,
+    balance_classes: bool,
+    cv: int = 10,
+    n_jobs: int = -1,
+    model_params: dict = {},
+) -> dict:
+    """ """
+    if model_type == "randomforest":
+        param_grid = _randomforest_grid(X_train.shape[1])
+    elif model_type in PARAM_GRIDS:
+        param_grid = PARAM_GRIDS[model_type]
+
+    base_estimator, _, _ = build_model(model_type, model_params, balance_classes)
+
+    search = GridSearchCV(
+        estimator=base_estimator,
+        param_grid=param_grid,
+        scoring="f1_macro",
+        cv=cv,
+        n_jobs=n_jobs,
+    )
+    search.fit(X_train, Y_train)
+
+    rename = SKLEARN_TO_PYDANTIC[model_type]
+    best = {rename.get(k, k): v for k, v in search.best_params_.items()}
+    return best
+
+
+def check_data(
+    X: pd.DataFrame, Y: pd.Series, exclude_labels: list[str]
+) -> tuple[pd.DataFrame, pd.Series]:
+
+    rows_to_exclude = np.logical_or(np.isin(Y, exclude_labels), Y.isna())
+    rows_to_keep = np.invert(rows_to_exclude)
+    return X.loc[rows_to_keep, :], Y[rows_to_keep]
+
+
+def cv_score(model, X, Y, num_folds, random_seed) -> float:
+    """ """
+    num_folds = 10
+    kf = KFold(n_splits=num_folds, shuffle=True, random_state=random_seed)
+
+    f = Y.notnull()
+
+    Y_pred_10cv = pd.Series(cross_val_predict(model, X[f], Y[f], cv=kf), index=Y[f].index)
+
+    statistics_cv10 = get_metrics_multiclass(
+        Y[f],
+        Y_pred_10cv,
+    )
+
+    statistics_cv10.false_predictions = None
+
+    return statistics_cv10
+
+
+def split_test(
+    X, Y, random_seed, test_size: float = 0.2
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]:
+    """
+    Remove null elements and return train/test splits
+    (equivalent of train_test_split from sklearn)
+    """
+    index = X.copy().index.to_series()
+    index = index.sample(frac=1.0, random_state=random_seed)
+    n_total = len(index)
+    n_test = math.ceil(n_total * test_size)
+    n_train = n_total - n_test
+    index_train = index.head(n_train)
+    index_test = index.tail(n_test)
+    X_train = X.loc[index_train.index, :]
+    Y_train = Y.loc[index_train.index]
+    X_test = X.loc[index_test.index, :]
+    Y_test = Y.loc[index_test.index]
+    return X_train, X_test, Y_train, Y_test
 
 
 class TrainMLMultiClass(BaseTask):
@@ -91,29 +281,13 @@ class TrainMLMultiClass(BaseTask):
         self, X: pd.DataFrame, Y: pd.Series, exclude_labels: list[str]
     ) -> tuple[pd.DataFrame, pd.Series]:
         """Remove labels to exclude and nan values"""
-        rows_to_exclude = np.logical_or(np.isin(Y, exclude_labels), Y.isna())
-        rows_to_keep = np.invert(rows_to_exclude)
-        return X.loc[rows_to_keep, :], Y[rows_to_keep]
+        return check_data(X, Y, exclude_labels)
 
     def __split_set(
         self, X, Y, test_size: float = 0.2
     ) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]:
-        """
-        Remove null elements and return train/test splits
-        (equivalent of train_test_split from sklearn)
-        """
-        index = X.copy().index.to_series()
-        index = index.sample(frac=1.0, random_state=self.random_seed)
-        n_total = len(index)
-        n_test = math.ceil(n_total * test_size)
-        n_train = n_total - n_test
-        index_train = index.head(n_train)
-        index_test = index.tail(n_test)
-        X_train = X.loc[index_train.index, :]
-        Y_train = Y.loc[index_train.index]
-        X_test = X.loc[index_test.index, :]
-        Y_test = Y.loc[index_test.index]
-        return X_train, X_test, Y_train, Y_test
+        """ """
+        return split_test(X, Y, self.random_seed, test_size)
 
     def __compute_metrics(self, y_true: pd.Series, y_pred: pd.Series) -> MLStatisticsModel:
         """
@@ -132,18 +306,8 @@ class TrainMLMultiClass(BaseTask):
         Compute cv (predict and compute metrics)
         """
         num_folds = 10
-        kf = KFold(n_splits=num_folds, shuffle=True, random_state=self.random_seed)
-        f = self.Y.notnull()
-        Y_pred_10cv = pd.Series(
-            cross_val_predict(self.model, self.X[f], self.Y[f], cv=kf), index=self.Y[f].index
-        )
 
-        statistics_cv10 = get_metrics_multiclass(
-            self.Y[f],
-            Y_pred_10cv,
-        )
-        # overwrite false_predictions
-        statistics_cv10.false_predictions = None
+        statistics_cv10 = cv_score(self.model, self.X, self.Y, num_folds, self.random_seed)
 
         return statistics_cv10
 

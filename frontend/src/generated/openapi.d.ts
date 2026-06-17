@@ -146,6 +146,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/users/admin-resetpwd": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Admin Reset Password
+         * @description Reset a user's password (admin action). Generates a new random
+         *     password, stores it, and returns it once to the caller.
+         */
+        post: operations["admin_reset_password_users_admin_resetpwd_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/users/changemail": {
         parameters: {
             query?: never;
@@ -160,26 +181,6 @@ export interface paths {
          * @description Change the contact email of the current user
          */
         post: operations["change_email_users_changemail_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/users/admin-resetpwd": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Admin Reset Password
-         * @description Reset a user's password (admin action). Returns the new password once.
-         */
-        post: operations["admin_reset_password_users_admin_resetpwd_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -235,7 +236,15 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Reset Password */
+        /**
+         * Reset Password
+         * @description Trigger a password reset email.
+         *
+         *     Always returns a constant response, regardless of whether the address is
+         *     registered or the mailer succeeded. This prevents account enumeration via
+         *     response variance and prevents the mailer's error messages from leaking.
+         *     Rate limits are applied per source IP and per target mail to bound abuse.
+         */
         post: operations["reset_password_users_resetpwd_post"];
         delete?: never;
         options?: never;
@@ -997,7 +1006,11 @@ export interface paths {
         };
         /**
          * Export Bert
-         * @description Export fine-tuned BERT model - file with redirect with nginx
+         * @description Export fine-tuned BERT model.
+         *
+         *     With sqlite (no nginx), FastAPI streams the file directly.
+         *     With postgres (nginx), the X-Accel-Redirect header is intercepted by nginx
+         *     which serves the file from the static volume.
          */
         get: operations["export_bert_export_bert_get"];
         put?: never;
@@ -1017,29 +1030,13 @@ export interface paths {
         };
         /**
          * Export Raw
-         * @description Export raw data of the project
+         * @description Export raw data of the project.
+         *
+         *     With sqlite (no nginx), FastAPI streams the file directly.
+         *     With postgres (nginx), the X-Accel-Redirect header is intercepted by nginx
+         *     which serves the file from the static volume.
          */
         get: operations["export_raw_export_raw_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/export/static": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Export Static
-         * @description Get static links of the project
-         */
-        get: operations["export_static_export_static_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1257,7 +1254,10 @@ export interface paths {
         };
         /**
          * Get Model Information
-         * @description Get model information
+         * @description Get model information.
+         *
+         *     Guarded by ProjectAction.GET so an authenticated user can't read
+         *     parameters / metrics for a project they don't have access to.
          */
         get: operations["get_model_information_models_information_get"];
         put?: never;
@@ -1839,6 +1839,7 @@ export interface paths {
         /**
          * Get All Projects
          * @description Get summary of all existing projects (admin view).
+         *     user_right reflects current user's auth on each project, or "none".
          */
         get: operations["get_all_projects_monitoring_projects_get"];
         put?: never;
@@ -2242,31 +2243,13 @@ export interface components {
         };
         /** Body_upload_file_dataset_files_add_dataset_post */
         Body_upload_file_dataset_files_add_dataset_post: {
-            /**
-             * File
-             * Format: binary
-             */
+            /** File */
             file: string;
         };
         /** Body_upload_file_project_files_add_project_post */
         Body_upload_file_project_files_add_project_post: {
-            /**
-             * File
-             * Format: binary
-             */
+            /** File */
             file: string;
-        };
-        /**
-         * ChangePasswordModel
-         * @description Model for changing password
-         */
-        ChangePasswordModel: {
-            /** Pwdold */
-            pwdold: string;
-            /** Pwd1 */
-            pwd1: string;
-            /** Pwd2 */
-            pwd2: string;
         };
         /**
          * ChangeEmailModel
@@ -2279,14 +2262,16 @@ export interface components {
             password: string;
         };
         /**
-         * ResetPasswordResultModel
-         * @description Result of an admin password reset
+         * ChangePasswordModel
+         * @description Model for changing password
          */
-        ResetPasswordResultModel: {
-            /** Username */
-            username: string;
-            /** New Password */
-            new_password: string;
+        ChangePasswordModel: {
+            /** Pwdold */
+            pwdold: string;
+            /** Pwd1 */
+            pwd1: string;
+            /** Pwd2 */
+            pwd2: string;
         };
         /** CodebookModel */
         CodebookModel: {
@@ -2737,7 +2722,10 @@ export interface components {
             name: string;
             /** Time */
             time: string;
-            /** Exclude Labels */
+            /**
+             * Exclude Labels
+             * @default []
+             */
             exclude_labels: string[];
         };
         /** LanguageModelsProjectStateModel */
@@ -2764,15 +2752,15 @@ export interface components {
             training_kind?: string | null;
             /** F1 Label */
             f1_label?: {
-                [key: string]: number | undefined;
+                [key: string]: (number | null) | undefined;
             } | null;
             /** Precision Label */
             precision_label?: {
-                [key: string]: number | undefined;
+                [key: string]: (number | null) | undefined;
             } | null;
             /** Recall Label */
             recall_label?: {
-                [key: string]: number | undefined;
+                [key: string]: (number | null) | undefined;
             } | null;
             /** F1 Weighted */
             f1_weighted?: number | null;
@@ -2782,11 +2770,11 @@ export interface components {
             f1_macro?: number | null;
             /** Accuracy */
             accuracy?: number | {
-                [key: string]: number | undefined;
+                [key: string]: (number | null) | undefined;
             } | null;
             /** Precision */
             precision?: number | {
-                [key: string]: number | undefined;
+                [key: string]: (number | null) | undefined;
             } | null;
             /** Confusion Matrix */
             confusion_matrix?: number[][] | null;
@@ -3286,11 +3274,6 @@ export interface components {
             /** Last Activity */
             last_activity?: string | null;
         };
-        /** ProjectStaticFiles */
-        ProjectStaticFiles: {
-            dataset: components["schemas"]["StaticFileModel"];
-            model?: components["schemas"]["StaticFileModel"] | null;
-        };
         /** ProjectSummaryModel */
         ProjectSummaryModel: {
             /** Project Slug */
@@ -3447,6 +3430,11 @@ export interface components {
              * @default 0.2
              */
             test_size: number;
+            /**
+             * Optimize
+             * @default false
+             */
+            optimize: boolean;
         };
         /**
          * QuickModelOutModel
@@ -3550,6 +3538,17 @@ export interface components {
             cohen_kappa?: number | null;
         };
         /**
+         * ResetPasswordResultModel
+         * @description Result of an admin password reset: the newly generated password,
+         *     returned once to the requester.
+         */
+        ResetPasswordResultModel: {
+            /** Username */
+            username: string;
+            /** New Password */
+            new_password: string;
+        };
+        /**
          * SchemeModel
          * @description Specific scheme
          */
@@ -3614,13 +3613,6 @@ export interface components {
             mail_available: boolean;
             /** Messages */
             messages: components["schemas"]["MessagesOutModel"][];
-        };
-        /** StaticFileModel */
-        StaticFileModel: {
-            /** Name */
-            name: string;
-            /** Path */
-            path: string;
         };
         /**
          * TableAnnotationsModel
@@ -3753,6 +3745,10 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+            /** Input */
+            input?: unknown;
+            /** Context */
+            ctx?: Record<string, never>;
         };
         /**
          * WaitingModel
@@ -4102,7 +4098,9 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": {
+                        [key: string]: string | undefined;
+                    };
                 };
             };
             /** @description Validation Error */
@@ -4395,7 +4393,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": string | null;
                 };
             };
             /** @description Validation Error */
@@ -5429,38 +5427,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    export_static_export_static_get: {
-        parameters: {
-            query: {
-                model?: string | null;
-                project_slug: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProjectStaticFiles"] | null;
                 };
             };
             /** @description Validation Error */
