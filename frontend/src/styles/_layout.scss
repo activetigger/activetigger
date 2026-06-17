@@ -110,9 +110,9 @@
 }
 
 
-#status-notch-codebookreminder {
+#codebookreminder {
   position: fixed;
-  bottom: 0;
+  bottom: 30px;
   right: 0;
   height: 150px;
   width: 300px;
@@ -151,35 +151,9 @@ transform: scaleX(-1) scaleY(-1);
   }*/
 }
 
-#status-notch-codebookreminder-controls {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding-bottom: 8px;
-  border-bottom: 0.5px black solid;
-  margin-bottom: 8px;
-
-  button {
-    border: 1px solid $primary;
-    background: orange;
-    border-radius: 50%;
-    cursor: pointer;
-    width: 24px;
-    height: 24px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: bold;
-  }
-
-  span {
-    font-size: 0.75rem;
-  }
-}
-
-#status-notch-codebookreminder-toggle {
+#codebookreminder-toggle {
   position: fixed;
-  bottom: 0;
+  bottom: 30px;
   right: 0;
   z-index: 1001;
   border: 1px solid $primary;
