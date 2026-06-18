@@ -16,7 +16,14 @@ services:
       - ${PROJECT_PATH}/docker/certificates:/etc/letsencrypt/live/activetigger/
     command: ["bash", "/scripts/template_start.sh"]
     depends_on:
-      - api
-      - frontend
+      api:
+        condition: service_healthy
+      frontend:
+        condition: service_completed_successfully
+  api:
+    environment:
+      - EXPECTED_MODE=prod
   frontend:
     restart: "no"
+    environment:
+      - EXPECTED_MODE=prod
