@@ -21,6 +21,7 @@ from activetigger.datamodels import (
     AvailableProjectsModel,
     DatasetModel,
     EvalSetDataModel,
+    EvalSetImageModel,
     ProjectAuthsModel,
     ProjectBaseModel,
     ProjectDescriptionModel,
@@ -220,7 +221,7 @@ def add_testdata(
     project: Annotated[Project, Depends(get_project)],
     current_user: Annotated[UserInDBModel, Depends(verified_user)],
     dataset: str,
-    evalset: EvalSetDataModel,
+    evalset: EvalSetDataModel | EvalSetImageModel,
 ) -> str | None:
     """
     Delete existing eval/test dataset or

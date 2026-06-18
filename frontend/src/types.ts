@@ -220,6 +220,17 @@ export interface EvalSetModel {
   n_eval: number;
 }
 
+// Mirrors api/activetigger/datamodels.py::EvalSetImageModel. Defined locally
+// because the openapi-generated client has not been regenerated yet.
+export interface EvalSetImageModel {
+  filename: string;
+  n_eval?: number | null;
+  labels_filename?: string | null;
+  col_id?: string | null;
+  col_label?: string | null;
+  scheme?: string | null;
+}
+
 export type SupportedAPI = 'Ollama' | 'OpenAI' | 'HuggingFace';
 
 export type GenModelAPI = { models: GenModel[] } & (

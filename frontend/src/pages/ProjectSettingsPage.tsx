@@ -6,6 +6,7 @@ import Tabs from 'react-bootstrap/Tabs';
 
 import { FeaturesManagement } from '../components/FeaturesManagement';
 import { EvalSetsManagement } from '../components/forms/EvalSetsManagement';
+import { EvalSetsManagementImage } from '../components/forms/EvalSetsManagementImage';
 import { ImportAnnotations } from '../components/forms/ImportAnnotations';
 import { ProjectPageLayout } from '../components/layout/ProjectPageLayout';
 import { useAppContext } from '../core/useAppContext';
@@ -72,19 +73,37 @@ export const ProjectSettingsPage: FC = () => {
             currentScheme={currentScheme || null}
           />
           <hr />
-          <EvalSetsManagement
-            projectSlug={projectSlug}
-            currentScheme={currentScheme || ''}
-            dataset={'valid'}
-            exist={project?.params.valid}
-          />
+          {project?.params.kind === 'image' ? (
+            <EvalSetsManagementImage
+              projectSlug={projectSlug}
+              currentScheme={currentScheme || ''}
+              dataset={'valid'}
+              exist={project?.params.valid}
+            />
+          ) : (
+            <EvalSetsManagement
+              projectSlug={projectSlug}
+              currentScheme={currentScheme || ''}
+              dataset={'valid'}
+              exist={project?.params.valid}
+            />
+          )}
           <hr />
-          <EvalSetsManagement
-            projectSlug={projectSlug}
-            currentScheme={currentScheme || ''}
-            dataset={'test'}
-            exist={project?.params.test}
-          />
+          {project?.params.kind === 'image' ? (
+            <EvalSetsManagementImage
+              projectSlug={projectSlug}
+              currentScheme={currentScheme || ''}
+              dataset={'test'}
+              exist={project?.params.test}
+            />
+          ) : (
+            <EvalSetsManagement
+              projectSlug={projectSlug}
+              currentScheme={currentScheme || ''}
+              dataset={'test'}
+              exist={project?.params.test}
+            />
+          )}
         </Tab>
 
         <Tab eventKey="session" title="Session history">

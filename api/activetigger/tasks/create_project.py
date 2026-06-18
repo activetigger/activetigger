@@ -1,6 +1,7 @@
 import csv
 import shutil
 import sys
+import uuid
 import zipfile
 from pathlib import Path
 
@@ -8,6 +9,15 @@ import pandas as pd
 
 from activetigger.datamodels import ProjectBaseModel, ProjectModel
 from activetigger.functions import concat_text_columns, slugify
+from activetigger.functions_image import (
+    ALLOWED_EXT as IMAGE_ALLOWED_EXT,
+)
+from activetigger.functions_image import (
+    MAX_IMAGE_BYTES,
+    MAX_ZIP_BYTES,
+    filter_readable_images,
+    generate_thumbnail,
+)
 from activetigger.tasks.base_task import BaseTask
 
 csv.field_size_limit(sys.maxsize)
@@ -301,10 +311,11 @@ class CreateProjectImagexp(BaseTask):
 
     kind = "create_project_imagexp"
 
-    # caps (v1)
-    MAX_ZIP_BYTES = 8 * 1024 * 1024 * 1024  # 1 GB
-    MAX_IMAGE_BYTES = 100 * 1024 * 1024  # 100 MB
-    ALLOWED_EXT = {".png", ".jpg", ".jpeg"}
+    # Caps and accepted extensions live in functions_image so the same limits
+    # are enforced by the eval-set import path.
+    MAX_ZIP_BYTES = MAX_ZIP_BYTES
+    MAX_IMAGE_BYTES = MAX_IMAGE_BYTES
+    ALLOWED_EXT = IMAGE_ALLOWED_EXT
 
     def __init__(
         self,
@@ -378,14 +389,6 @@ class CreateProjectImagexp(BaseTask):
                 i for i in infos if Path(i.filename).suffix.lower() in {".csv", ".parquet"}
             ]
 
-            # Lazy import: Pillow ships with the API deps but isolate the import here
-            Image = None
-            ImageOps = None
-            try:
-                from PIL import Image, ImageOps  # type: ignore[import,no-redef]
-            except Exception as ex:
-                print(f"Pillow not available, skipping thumbnail generation: {ex}")
-
             total_images = len(image_infos)
             progress_file = self.params.dir.joinpath("creation_progress")
             for idx, info in enumerate(image_infos, 1):
@@ -399,17 +402,7 @@ class CreateProjectImagexp(BaseTask):
                 # Precompute a 256px JPEG thumbnail keyed by the slugified id
                 # (id_internal). Failures on individual files are logged and
                 # skipped — the thumbnail route falls back to the original.
-                if Image is not None and ImageOps is not None:
-                    try:
-                        thumb_path = thumbs_dir.joinpath(f"{slugify(element_id)}.jpg")
-                        with Image.open(target) as im:
-                            im = ImageOps.exif_transpose(im)
-                            if im.mode not in ("RGB", "L"):
-                                im = im.convert("RGB")
-                            im.thumbnail((256, 256), Image.Resampling.LANCZOS)
-                            im.save(thumb_path, "JPEG", quality=80, optimize=True)
-                    except Exception as ex:
-                        print(f"thumbnail generation failed for {src_name}: {ex}")
+                generate_thumbnail(target, thumbs_dir.joinpath(f"{slugify(element_id)}.jpg"))
 
                 # Write progress
                 progress_pct = round((idx / total_images) * 100, 1)
@@ -444,6 +437,26 @@ class CreateProjectImagexp(BaseTask):
                 except OSError:
                     pass
 
+        # Drop unreadable / corrupt images now, so the train pool only
+        # contains images the rest of the pipeline can actually load.
+        if rows:
+            readable_flags = filter_readable_images([r["path"] for r in rows])
+            n_dropped = sum(1 for f in readable_flags if not f)
+            if n_dropped > 0:
+                kept = []
+                for row, ok in zip(rows, readable_flags):
+                    if ok:
+                        kept.append(row)
+                    else:
+                        try:
+                            Path(row["path"]).unlink(missing_ok=True)
+                        except OSError:
+                            pass
+                rows = kept
+                print(f"Dropped {n_dropped} unreadable/corrupt images", flush=True)
+        if not rows:
+            raise Exception("Zip contained no readable images after cleaning")
+
         content = pd.DataFrame(rows)
         if metadata_df is not None and len(metadata_df) > 0:
             # match on filename stem; first column of metadata is assumed to be the id
@@ -470,6 +483,25 @@ class CreateProjectImagexp(BaseTask):
         n_train = int(self.params.n_train or (n_total - n_test - n_valid))
         n_train = max(0, min(n_train, n_total - n_test - n_valid))
 
+        # Eval images are duplicated into images/eval_{dataset}/ so the user
+        # can drop the test/valid set later (rmtree of the subdir) without
+        # touching the originals that the train pool still references.
+        def _copy_eval_images(sampled: pd.DataFrame, dataset_name: str) -> pd.DataFrame:
+            eval_dir = images_dir.joinpath(f"eval_{dataset_name}")
+            eval_dir.mkdir(parents=True, exist_ok=True)
+            new_paths: list[str] = []
+            for orig in sampled["path"].astype(str):
+                src = Path(orig)
+                dst = eval_dir.joinpath(src.name)
+                if dst.exists():
+                    dst = eval_dir.joinpath(f"{uuid.uuid4().hex[:6]}_{src.name}")
+                shutil.copy2(src, dst)
+                new_paths.append(str(dst))
+            out = sampled.copy()
+            out["path"] = new_paths
+            out["text"] = new_paths
+            return out
+
         testset = None
         validset = None
         rows_test: list = []
@@ -480,15 +512,17 @@ class CreateProjectImagexp(BaseTask):
             draw = content.sample(n_test + n_valid, random_state=self.random_seed)
             if n_test > 0:
                 testset = draw.sample(n_test, random_state=self.random_seed)
+                rows_test = list(testset.index)
+                testset = _copy_eval_images(testset, "test")
                 testset.to_parquet(self.params.dir.joinpath(self.test_file), index=True)
                 self.params.test = True
-                rows_test = list(testset.index)
             if n_valid > 0:
                 validset = draw.drop(index=rows_test) if rows_test else draw
                 validset = validset.sample(n_valid, random_state=self.random_seed)
+                rows_valid = list(validset.index)
+                validset = _copy_eval_images(validset, "valid")
                 validset.to_parquet(self.params.dir.joinpath(self.valid_file), index=True)
                 self.params.valid = True
-                rows_valid = list(validset.index)
 
         remaining = content.drop(rows_test + rows_valid, errors="ignore")
         trainset = (

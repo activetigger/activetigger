@@ -13,10 +13,10 @@ import datasets
 import pandas as pd
 import torch
 from pandas import DataFrame
-from PIL import Image, ImageOps, UnidentifiedImageError
+from PIL import Image, ImageOps
 from transformers import (
-    AutoImageProcessor,  # ty: ignore[possibly-missing-import]
-    AutoModelForImageClassification,  # ty: ignore[possibly-missing-import]
+    AutoImageProcessor,
+    AutoModelForImageClassification,
     Trainer,
     TrainerCallback,
     TrainerControl,
@@ -36,6 +36,7 @@ from activetigger.functions import (
     matrix_to_label,
     split_annotation,
 )
+from activetigger.functions_image import filter_readable_images
 from activetigger.monitoring import TaskTimer
 from activetigger.tasks.base_task import BaseTask
 from activetigger.tasks.predict_bert import annotations_to_matrix
@@ -240,28 +241,10 @@ class TrainImage(BaseTask):
 
         # Pre-flight: drop unreadable / corrupt images so the lazy transform
         # never raises mid-batch and breaks the collator.
-        def _readable(p: object) -> bool:
-            if not isinstance(p, str):
-                return False
-            try:
-                with Image.open(p) as img:
-                    img.verify()
-                return True
-            except (
-                FileNotFoundError,
-                UnidentifiedImageError,
-                OSError,
-                ValueError,
-                Image.DecompressionBombError,
-            ):
-                return False
-
-        readable_flags = []
-        for i, p in enumerate(df[col_text]):
-            # the scan opens every image sequentially; keep it cancellable
-            if i % 100 == 0:
-                self.__listen_stop_event()
-            readable_flags.append(_readable(p))
+        readable_flags = filter_readable_images(
+            df[col_text].tolist(),
+            stop_check=self.__listen_stop_event,
+        )
         readable = pd.Series(readable_flags, index=df.index)
         n_dropped = int((~readable).sum())
         if n_dropped > 0:

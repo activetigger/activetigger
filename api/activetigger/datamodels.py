@@ -150,6 +150,21 @@ class EvalSetDataModel(BaseModel):
     scheme: str | None = None
 
 
+class EvalSetImageModel(BaseModel):
+    """Eval-set payload for image projects.
+
+    The image zip and optional labels file are uploaded via /files/add/dataset
+    before this body is POSTed, so we only carry filenames here, not bytes.
+    """
+
+    filename: str
+    n_eval: int | None = None
+    labels_filename: str | None = None
+    col_id: str | None = None
+    col_label: str | None = None
+    scheme: str | None = None
+
+
 class ActionModel(str, Enum):
     """
     Type of actions available
