@@ -281,6 +281,82 @@ export function useCreateValidSet() {
 }
 
 /**
+ * Create test/valid set for an image project.
+ */
+export function useCreateValidSetImage() {
+  const { notify } = useNotifications();
+  const { authenticatedUser } = useAuth();
+  const [controller, setController] = useState<AbortController | undefined>(undefined);
+  const [progression, setProgression] = useState<{ loaded?: number; total?: number }>({});
+  const createValidSet = useCallback(
+    async (
+      projectSlug: string,
+      dataset: string,
+      params: {
+        zipFile: File;
+        labelsFile?: File;
+        scheme?: string | null;
+        col_id?: string | null;
+        col_label?: string | null;
+        n_eval?: number | null;
+      },
+    ) => {
+      const ctrl = new AbortController();
+      setController(ctrl);
+      const URL = config.api.url.replace(/\/$/, '');
+      const headers = getAuthHeaders(authenticatedUser)?.headers;
+      try {
+        await axios.postForm(
+          `${URL}/files/add/dataset`,
+          { file: params.zipFile },
+          {
+            signal: ctrl.signal,
+            params: { project_slug: projectSlug },
+            headers,
+            onUploadProgress: ({ loaded, total }) => setProgression({ loaded, total }),
+          },
+        );
+        if (params.labelsFile) {
+          await axios.postForm(
+            `${URL}/files/add/dataset`,
+            { file: params.labelsFile },
+            {
+              signal: ctrl.signal,
+              params: { project_slug: projectSlug },
+              headers,
+            },
+          );
+        }
+        await axios.post(
+          `${URL}/projects/evalset/add`,
+          {
+            filename: params.zipFile.name,
+            labels_filename: params.labelsFile ? params.labelsFile.name : null,
+            col_id: params.col_id ?? null,
+            col_label: params.col_label ?? null,
+            scheme: params.scheme ?? null,
+            n_eval: params.n_eval ?? null,
+          },
+          {
+            headers,
+            params: { project_slug: projectSlug, dataset },
+            signal: ctrl.signal,
+          },
+        );
+        return true;
+      } catch (error: unknown) {
+        notify({ type: 'error', message: formatApiError(error) });
+        return false;
+      } finally {
+        setProgression({});
+      }
+    },
+    [notify, authenticatedUser],
+  );
+  return { createValidSet, progression, cancel: controller };
+}
+
+/**
  * Drop valid set
  */
 export function useDropEvalSet(projectSlug: string | null) {

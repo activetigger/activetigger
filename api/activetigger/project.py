@@ -24,6 +24,7 @@ from activetigger.datamodels import (
     ElementInModel,
     ElementOutModel,
     EvalSetDataModel,
+    EvalSetImageModel,
     EventsModel,
     ExportGenerationsParams,
     FeatureComputing,
@@ -74,7 +75,7 @@ from activetigger.prompts import Prompts
 from activetigger.queue_manager import Queue
 from activetigger.quickmodels import QuickModels
 from activetigger.schemes import Schemes
-from activetigger.tasks.add_evalset import AddEvalSet
+from activetigger.tasks.add_evalset import AddEvalSet, AddEvalSetImage
 from activetigger.tasks.create_project import CreateProject, CreateProjectImagexp
 from activetigger.tasks.generate_call import GenerateCall
 from activetigger.tasks.update_datasets import UpdateDatasets
@@ -500,6 +501,10 @@ class Project:
         if not path.exists():
             raise Exception("No eval data available")
         os.remove(path)
+        if getattr(self.params, "kind", "text") == "image":
+            eval_images_dir = self.params.dir.joinpath("images", f"eval_{dataset}")
+            if eval_images_dir.exists():
+                shutil.rmtree(eval_images_dir, ignore_errors=True)
         self.db_manager.projects_service.delete_annotations_evalset(
             self.params.project_slug, dataset
         )
@@ -521,27 +526,42 @@ class Project:
         self.quickmodels.drop_models(which="all")
 
     def add_evalset(
-        self, dataset, evalset: EvalSetDataModel, username: str, project_slug: str
+        self,
+        dataset,
+        evalset: EvalSetDataModel | EvalSetImageModel,
+        username: str,
+        project_slug: str,
     ) -> str | None:
         """
         Add a eval dataset (test or valid)
         """
-        if evalset.cols_text is None or len(evalset.cols_text) == 0:
-            raise Exception("No text column selected for the evalset")
-        # check the valid directory
         if self.params.dir is None:
             raise Exception("Cannot add eval data without a valid dir")
-        # check the labels
-        if evalset.col_label == "":
-            evalset.col_label = None
         if dataset not in ["test", "valid"]:
             raise Exception("Dataset should be test or valid")
-
         if dataset == "test" and self.params.test:
             raise Exception("There is already a test dataset")
-
         if dataset == "valid" and self.params.valid:
             raise Exception("There is already a valid dataset")
+
+        kind = getattr(self.params, "kind", "text")
+        is_image = kind == "image"
+        if is_image and not isinstance(evalset, EvalSetImageModel):
+            raise Exception("Image projects require an EvalSetImageModel payload")
+        if not is_image and not isinstance(evalset, EvalSetDataModel):
+            raise Exception("Text projects require an EvalSetDataModel payload")
+
+        if isinstance(evalset, EvalSetDataModel):
+            if not evalset.cols_text:
+                raise Exception("No text column selected for the evalset")
+            if evalset.col_label == "":
+                evalset.col_label = None
+        else:
+            if evalset.col_label == "":
+                evalset.col_label = None
+            if evalset.col_id == "":
+                evalset.col_id = None
+
         # check existing task in the queue → if there is already an add_evalset task for this project and this dataset, we return the status of the task without adding a new one
         if self.queue.current:
             add_eval_task = next(
@@ -557,19 +577,32 @@ class Project:
             if add_eval_task:
                 raise Exception("this set is already being added")
 
-        # call task
-        unique_id = self.queue.add_task(
-            "add_evalset",
-            project_slug,
-            AddEvalSet(
+        scheme_labels = self.schemes.available()[evalset.scheme].labels if evalset.scheme else None
+        if isinstance(evalset, EvalSetImageModel):
+            task = AddEvalSetImage(
                 dataset=dataset,
                 evalset=evalset,
                 project=self.params,
                 username=username,
                 index=self.data.get_full_id().index,
                 project_slug=project_slug,
-                scheme=self.schemes.available()[evalset.scheme].labels if evalset.scheme else None,
-            ),
+                scheme=scheme_labels,
+            )
+        else:
+            task = AddEvalSet(
+                dataset=dataset,
+                evalset=evalset,
+                project=self.params,
+                username=username,
+                index=self.data.get_full_id().index,
+                project_slug=project_slug,
+                scheme=scheme_labels,
+            )
+
+        unique_id = self.queue.add_task(
+            "add_evalset",
+            project_slug,
+            task,
             queue="cpu",
         )
         self.computing.append(
