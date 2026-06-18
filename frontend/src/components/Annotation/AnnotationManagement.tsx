@@ -28,7 +28,8 @@ import { MultilabelInput } from './MultilabelInput';
 import { SelectActiveLearning } from './SelectActiveLearning';
 import { TextClassificationPanel } from './TextClassificationPanel';
 import { TextSpanPanel } from './TextSpanPanel';
-
+/* codebookreminder add */ 
+import { GuidelinesNotch } from '../layout/statusNotchcodebookreminderanotate';
 export const AnnotationManagement: FC = () => {
   const { notify } = useNotifications();
   const { projectName, elementId } = useParams();
@@ -223,7 +224,7 @@ export const AnnotationManagement: FC = () => {
         navigate(`/projects/${projectName}/tag/${res.element_id}`);
       } else {
         navigate(`/projects/${projectName}/tag/noelement`);
-      }
+      };
     });
   }, [getNextElementId, notify, setNSample, navigate, projectName, elementId]);
 
@@ -439,6 +440,14 @@ export const AnnotationManagement: FC = () => {
           <MDEditor.Markdown source={codebook || ''} style={{ backgroundColor: 'transparent' }} />
         </Modal.Body>
       </Modal>
+
+       {/* Guidelines notch */}
+  {/*<GuidelinesNotch />*/}
+ <GuidelinesNotch
+  projectSlug={projectName || null}
+  currentScheme={currentScheme || null}
+  canEdit={true}
+/>
     </>
   );
 };

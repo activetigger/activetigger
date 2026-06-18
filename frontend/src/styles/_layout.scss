@@ -109,6 +109,61 @@
   }
 }
 
+
+#codebookreminder {
+  position: fixed;
+  bottom: 30px;
+  right: 0;
+  height: 150px;
+  width: 300px;
+  z-index: 1000;
+
+  // style similaire à annotation-frame
+  color: black;
+  font-family: 'Arial', sans-serif;
+  background-color: #f9f9f9;
+  border: 1px solid $primary;
+  border-radius: $border-radius $border-radius 0 0; // coins ronds en haut seulement
+  padding: 16px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  box-shadow: 0px 0px 15px color(from $primary srgb r g b / 50%);
+  font-size: 0.75rem;
+  line-height: 1.6;
+  resize: vertical;
+transform: scaleX(-1) scaleY(-1);
+
+> * {
+  transform: scaleX(-1) scaleY(-1);
+}
+
+  // ← caché sur petit écran
+  display: none;
+  @media (min-width: 400px) {  // ← change 768px selon ta préférence
+  display: block;
+}
+  /*@include media-breakpoint-up(sm) {
+    display: block;  // ← visible uniquement sur grand écran
+  }*/
+
+ /* * {
+    font-size: inherit !important;
+  }*/
+}
+
+#codebookreminder-toggle {
+  position: fixed;
+  bottom: 30px;
+  right: 0;
+  z-index: 1001;
+  border: 1px solid $primary;
+  border-radius: $border-radius $border-radius 0 0;
+  background-color: #f9f9f9;
+  padding: 4px 12px;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
 #computing-span {
   div {
     padding: 0px 3px;
