@@ -685,6 +685,7 @@ class QuickModelInModel(BaseModel):
     balance_classes: bool = False
     exclude_labels: list[str] = []
     test_size: float = 0.2
+    optimize: bool = False
 
 
 class QuickModelComputing(ProcessComputing):

@@ -70,6 +70,7 @@ export const QuickModelForm: FC<QuickModelFormProps> = ({
       alpha: 1,
       n_estimators: 500,
       max_features: null,
+      optimize: false,
     },
     balance_classes: false,
     cv10: false,
@@ -168,6 +169,10 @@ export const QuickModelForm: FC<QuickModelFormProps> = ({
             <option key={e}>{e}</option>
           ))}{' '}
         </select>
+        <label htmlFor="optimize" className="d-block">
+          <input type="checkbox" id="optimize" {...register('params.optimize')} /> Optimize{' '}
+          hyperparameters
+        </label>
         {
           //generate_config(selectedQuickModel)
           (selectedModel == 'logistic-l2' && (

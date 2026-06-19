@@ -10,10 +10,6 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from pandas import DataFrame
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.naive_bayes import MultinomialNB
-from sklearn.neighbors import KNeighborsClassifier
 from sklearn.preprocessing import StandardScaler
 
 from activetigger.config import config
@@ -36,7 +32,12 @@ from activetigger.db.manager import DatabaseManager
 from activetigger.functions import get_model_metrics
 from activetigger.queue_manager import Queue
 from activetigger.tasks.predict_ml import PredictMLMultiClass
-from activetigger.tasks.train_ml import TrainMLMultiClass
+from activetigger.tasks.train_ml import (
+    TrainMLMultiClass,
+    build_model,
+    optimize_hyperparameters,
+    split_test,
+)
 
 
 class QuickModels:
@@ -109,76 +110,15 @@ class QuickModels:
         """
         X, Y, labels = self.transform_data(df, col_labels, col_features, standardize)
 
-        # default parameters
-        if model_params is None:
-            model_params = self.available_models[model_type].dict()
-
-        # Select model
-        if model_type == "knn":
-            params_knn = KnnParams(**model_params)
-            model = KNeighborsClassifier(n_neighbors=int(params_knn.n_neighbors), n_jobs=-1)
-            balance_classes = False  # Force the parameter to be set as False
-            model_params = params_knn.model_dump()
-
-        if model_type == "logistic-l1":
-            params_libL1 = LogisticL1Params(**model_params)
-            model = LogisticRegression(
-                penalty="l1",
-                solver="saga",
-                C=params_libL1.costLogL1,
-                class_weight="balanced" if balance_classes else None,
-                n_jobs=-1,
-                random_state=config.random_seed,
+        if model_params and model_params.get("optimize"):
+            X_train, _, Y_train, _ = split_test(X, Y, config.random_seed, test_size)
+            model_params = optimize_hyperparameters(
+                model_type, X_train, Y_train, balance_classes, model_params=model_params
             )
-            model_params = params_libL1.model_dump()
 
-        if model_type == "logistic-l2":
-            params_libL2 = LogisticL2Params(**model_params)
-            model = LogisticRegression(
-                penalty="l2",
-                solver="lbfgs",
-                C=params_libL2.costLogL2,
-                class_weight="balanced" if balance_classes else None,
-                n_jobs=-1,
-                random_state=config.random_seed,
-            )
-            model_params = params_libL2.model_dump()
-
-        if model_type == "randomforest":
-            # params  Num. trees mtry  Sample fraction
-            # Number of variables randomly sampled as candidates at each split:
-            # it is “mtry” in R and it is “max_features” Python
-            #  The sample.fraction parameter specifies the fraction of observations to be used in each tree
-            params_rf = RandomforestParams(**model_params)
-            model = RandomForestClassifier(
-                n_estimators=int(params_rf.n_estimators),
-                max_features=(
-                    int(params_rf.max_features) if params_rf.max_features is not None else None
-                ),
-                class_weight="balanced"
-                if balance_classes
-                else None,  # AM: Need to choose between balanced and balanced_subsample
-                n_jobs=-1,
-                random_state=config.random_seed,
-            )
-            model_params = params_rf.model_dump()
-
-        if model_type == "multi_naivebayes":
-            # small workaround for parameters
-            params_nb = Multi_naivebayesParams(**model_params)
-            if params_nb.class_prior is not None:
-                class_prior = params_nb.class_prior
-            else:
-                class_prior = None
-            # Only with dtf or tfidf for features
-            # TODO: calculate class prior for docfreq & termfreq
-            model = MultinomialNB(
-                alpha=params_nb.alpha,
-                fit_prior=params_nb.fit_prior,
-                class_prior=class_prior,
-            )
-            balance_classes = False  # Force the parameter to be set as False
-            model_params = params_nb.model_dump()
+        model, model_params, balance_classes = build_model(
+            model_type, model_params, balance_classes
+        )
 
         # launch the compuation (model + statistics) as a future process
         args = {
