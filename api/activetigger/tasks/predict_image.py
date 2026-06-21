@@ -13,6 +13,8 @@ import torch
 from pandas import DataFrame
 from PIL import Image, ImageOps, UnidentifiedImageError
 from scipy.stats import entropy
+from torch.utils.data import DataLoader, Dataset
+from tqdm import tqdm
 from transformers import (
     AutoImageProcessor,
     AutoModelForImageClassification,
@@ -60,6 +62,27 @@ def _open_image_rgb_safe(path: str, fallback_size: tuple[int, int]) -> Image.Ima
         Image.DecompressionBombError,
     ):
         return Image.new("RGB", fallback_size, color=(128, 128, 128))
+
+
+class _ImagePredictDataset(Dataset):
+    """
+    Loads + preprocesses one image per __getitem__ so a DataLoader with
+    num_workers>0 can overlap decode/resize with GPU inference. Returns the
+    (C, H, W) pixel_values tensor — default collate stacks to (B, C, H, W).
+    """
+
+    def __init__(self, paths: list[str], image_processor, fallback_size: tuple[int, int]):
+        self.paths = paths
+        self.image_processor = image_processor
+        self.fallback_size = fallback_size
+
+    def __len__(self) -> int:
+        return len(self.paths)
+
+    def __getitem__(self, idx: int) -> torch.Tensor:
+        img = _open_image_rgb_safe(self.paths[idx], self.fallback_size)
+        out = self.image_processor(images=img, return_tensors="pt")
+        return out["pixel_values"].squeeze(0)
 
 
 class PredictImage(BaseTask):
@@ -285,7 +308,7 @@ class PredictImage(BaseTask):
         return metrics
 
     def __call__(self) -> ReturnTaskPredictModel:
-        print(f"start predicting image ({self.training_kind})")
+        print(f"start predicting image ({self.training_kind})", flush=True)
         if self.df is None:
             raise ValueError("Dataframe is required for prediction")
 
@@ -297,7 +320,9 @@ class PredictImage(BaseTask):
             raise ValueError("Model missing id2label: " + str(e))
 
         device = get_device()
+        print(f"Using {device} for prediction", flush=True)
         model.to(device)
+        print(f"Model moved to {device}", flush=True)
         model.eval()
 
         # Image size for the placeholder fallback; preprocessing rescales
@@ -312,20 +337,45 @@ class PredictImage(BaseTask):
             fallback_size = (224, 224)
 
         try:
-            proba_predictions = np.zeros((0, num_labels))
             n = self.df.shape[0]
+            n_batches = (n + self.batch - 1) // self.batch
+            print(f"Predicting {n} images in {n_batches} batches", flush=True)
             paths = self.df[self.col_text].tolist()
-            for i in range(0, n, self.batch):
+
+            # Overlap image decode + processor work with GPU inference.
+            # Cap workers to avoid oversubscription when the task itself
+            # already runs in a worker process.
+            num_workers = min(4, max(0, (os.cpu_count() or 1) - 1))
+            use_cuda = device.type == "cuda"
+            loader = DataLoader(
+                _ImagePredictDataset(paths, image_processor, fallback_size),
+                batch_size=self.batch,
+                shuffle=False,
+                num_workers=num_workers,
+                pin_memory=use_cuda,
+            )
+
+            proba_chunks: list[np.ndarray] = []
+            processed = 0
+            for batch_tensor in tqdm(loader, total=n_batches, desc="Predicting", unit="batch"):
                 self.__listen_stop_event()
-                batch_paths = paths[i : i + self.batch]
-                images = [_open_image_rgb_safe(p, fallback_size) for p in batch_paths]
-                inputs = image_processor(images=images, return_tensors="pt").to(device)
+                batch_tensor = batch_tensor.to(device, non_blocking=use_cuda)
                 with torch.no_grad():
-                    outputs = model(**inputs)
-                logits = outputs.logits.detach().cpu().numpy()
-                proba = logits_to_probs(logits, kind=self.training_kind)
-                proba_predictions = np.append(proba_predictions, proba, axis=0)
-                self.__write_progress(100 * (i + self.batch) / n)
+                    if use_cuda:
+                        with torch.autocast(device_type="cuda", dtype=torch.float16):
+                            outputs = model(pixel_values=batch_tensor)
+                    else:
+                        outputs = model(pixel_values=batch_tensor)
+                logits = outputs.logits.float().detach().cpu().numpy()
+                proba_chunks.append(logits_to_probs(logits, kind=self.training_kind))
+                processed += batch_tensor.shape[0]
+                self.__write_progress(100 * processed / n)
+
+            proba_predictions = (
+                np.concatenate(proba_chunks, axis=0)
+                if proba_chunks
+                else np.zeros((0, num_labels))
+            )
 
             pred = self.__transform_to_dataframe(proba_predictions, id2label=id2label)
             pred.to_parquet(self.path.joinpath(self.file_name))
