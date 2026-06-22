@@ -361,14 +361,8 @@ class Users:
             parameters = ProjectModel(**parameters["parameters"])
             created_by = i[3]
             created_at = i[4].strftime("%Y-%m-%d %H:%M:%S")
-            try:
-                size = round(get_dir_size(config.data_path + "/projects/" + i[0]), 1)
-            except Exception as e:
-                print(e)
-                size = 0.0
             last_activity = self.db_manager.logs_service.get_last_activity_project(i[0])
 
-            # create the project summary model
             projects.append(
                 ProjectSummaryModel(
                     project_slug=project_slug,
@@ -376,7 +370,7 @@ class Users:
                     parameters=parameters,
                     created_by=created_by,
                     created_at=created_at,
-                    size=size,
+                    size=None,
                     last_activity=last_activity,
                 )
             )
@@ -396,11 +390,6 @@ class Users:
             parameters = ProjectModel(**project["parameters"])
             created_by = project["user_name"]
             created_at = project["time_created"].strftime("%Y-%m-%d %H:%M:%S")
-            try:
-                size = round(get_dir_size(config.data_path + "/projects/" + slug), 1)
-            except Exception as e:
-                print(e)
-                size = 0.0
             last_activity = self.db_manager.logs_service.get_last_activity_project(slug)
             auth = self.db_manager.projects_service.get_user_auth(username, slug)
             user_right = auth[0][1] if auth else "none"
@@ -411,7 +400,7 @@ class Users:
                     parameters=parameters,
                     created_by=created_by,
                     created_at=created_at,
-                    size=size,
+                    size=None,
                     last_activity=last_activity,
                 )
             )
