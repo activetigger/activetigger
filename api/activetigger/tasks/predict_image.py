@@ -347,12 +347,19 @@ class PredictImage(BaseTask):
             # already runs in a worker process.
             num_workers = min(4, max(0, (os.cpu_count() or 1) - 1))
             use_cuda = device.type == "cuda"
+            # Force stdlib spawn context: inside a loky worker the default
+            # multiprocessing context is loky's, and loky's Popen reads
+            # process_obj.env — vanilla multiprocessing.Process doesn't have
+            # that, so DataLoader sub-workers crash with
+            # "'Process' object has no attribute 'env'".
+            mp_ctx = multiprocessing.get_context("spawn") if num_workers > 0 else None
             loader = DataLoader(
                 _ImagePredictDataset(paths, image_processor, fallback_size),
                 batch_size=self.batch,
                 shuffle=False,
                 num_workers=num_workers,
                 pin_memory=use_cuda,
+                multiprocessing_context=mp_ctx,
             )
 
             proba_chunks: list[np.ndarray] = []
