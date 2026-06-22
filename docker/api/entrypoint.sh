@@ -1,6 +1,14 @@
 #!/bin/bash
 set -e
 
+# Fail fast if the compose overlay declared a required MODE and .env disagrees.
+# The prod overlay sets EXPECTED_MODE=prod; the base/dev stack leaves it unset.
+if [ -n "$EXPECTED_MODE" ] && [ "$EXPECTED_MODE" != "$MODE" ]; then
+  echo "ERROR: this compose overlay expects MODE=$EXPECTED_MODE but MODE=$MODE." >&2
+  echo "       Edit docker/.env and set MODE=$EXPECTED_MODE (see DEPLOY.md)." >&2
+  exit 1
+fi
+
 if [ "$MODE" = "dev" ]; then
   echo "/!\\ Mode is set to DEV /!\\"
 else
@@ -66,6 +74,14 @@ else
   echo " ~ Start api production"
   echo " ~"
   echo
-  echo "TODO"
-  uv run python3 -m activetigger -p "$API_PORT"
+  # Single worker is intentional: the orchestrator holds in-memory project state
+  # and runs a background asyncio update loop. Heavy compute is offloaded to
+  # multiprocessing workers via queue_manager. --proxy-headers is required
+  # because nginx forwards X-Forwarded-* in front of the API.
+  exec uv run uvicorn activetigger.app.main:app \
+    --host 0.0.0.0 \
+    --port "$API_PORT" \
+    --proxy-headers \
+    --forwarded-allow-ips='*' \
+    --log-level info
 fi
