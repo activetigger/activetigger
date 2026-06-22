@@ -336,6 +336,11 @@ class PredictImage(BaseTask):
         else:
             fallback_size = (224, 224)
 
+        # Defined before the try so the finally block can always reference them
+        # to restore the multiprocessing start method.
+        num_workers = 0
+        prev_start_method: str | None = None
+
         try:
             n = self.df.shape[0]
             n_batches = (n + self.batch - 1) // self.batch
@@ -347,11 +352,16 @@ class PredictImage(BaseTask):
             # already runs in a worker process.
             num_workers = min(4, max(0, (os.cpu_count() or 1) - 1))
             use_cuda = device.type == "cuda"
-            # Force stdlib spawn context: inside a loky worker the default
-            # multiprocessing context is loky's, and loky's Popen reads
-            # process_obj.env — vanilla multiprocessing.Process doesn't have
-            # that, so DataLoader sub-workers crash with
-            # "'Process' object has no attribute 'env'".
+            # Inside a loky worker the global multiprocessing default is 'loky'.
+            # That breaks DataLoader sub-workers two ways: loky's Popen reads
+            # process_obj.env (absent on vanilla Process), and even with a
+            # passed spawn context, multiprocessing.spawn.get_preparation_data
+            # bakes the *global* start method into the child — the child then
+            # raises "cannot find context for 'loky'" before loky is imported.
+            # Flip the global to stdlib spawn for this task; restore on exit.
+            prev_start_method = multiprocessing.get_start_method(allow_none=True)
+            if num_workers > 0 and prev_start_method != "spawn":
+                multiprocessing.set_start_method("spawn", force=True)
             mp_ctx = multiprocessing.get_context("spawn") if num_workers > 0 else None
             loader = DataLoader(
                 _ImagePredictDataset(paths, image_processor, fallback_size),
@@ -393,6 +403,15 @@ class PredictImage(BaseTask):
             print("Error in image-classification prediction", e)
             raise e
         finally:
+            if (
+                num_workers > 0
+                and prev_start_method is not None
+                and prev_start_method != "spawn"
+            ):
+                try:
+                    multiprocessing.set_start_method(prev_start_method, force=True)
+                except Exception:
+                    pass
             if self.progress_path.exists():
                 os.remove(self.progress_path)
             self.df = None
