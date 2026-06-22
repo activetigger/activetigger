@@ -20,6 +20,9 @@ from activetigger.db.manager import DatabaseManager
 from activetigger.functions import compare_to_hash, get_dir_size, get_hash
 from activetigger.messages import Messages
 
+UNLIMITED_USERS_FILE = "unlimited_users.yaml"
+UNLIMITED_STORAGE_GB = 1000.0
+
 
 class Users:
     """
@@ -291,11 +294,32 @@ class Users:
         # case of root
         if username == "root":
             return 500.0
+        # experimental: users listed in unlimited_users.yaml get a very large quota
+        if self._is_unlimited_user(username):
+            return UNLIMITED_STORAGE_GB
         # derogation for specific users
         if username in self.users:
             return float(self.users[username]["storage_limit"])
         # default value
         return config.user_hdd_max
+
+    def _is_unlimited_user(self, username: str) -> bool:
+        """
+        Experimental: usernames listed (as a YAML list) in `unlimited_users.yaml`
+        inside `config.data_path` are granted UNLIMITED_STORAGE_GB instead of the
+        default quota. Re-read on each call so edits take effect without restart.
+        """
+        path = Path(config.data_path) / UNLIMITED_USERS_FILE
+        if not path.exists():
+            return False
+        try:
+            with open(path) as f:
+                content = yaml.safe_load(f) or []
+        except Exception:
+            return False
+        if not isinstance(content, list):
+            return False
+        return username in content
 
     def state(self, project_slug: str) -> UsersStateModel:
         """
