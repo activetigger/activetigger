@@ -52,7 +52,7 @@ export const ProjectCard: FC<ProjectCardProps> = ({ project, resetContext }) => 
           <span id="value">{project.created_at}</span>
         </p>
 
-        <span className="badge info">memory {project.size} Mo</span>
+        {project.size != null && <span className="badge info">memory {project.size} Mo</span>}
       </div>
       <div onClick={handleShow} className="trash-wrapper">
         <FaRegTrashAlt size={20} />
