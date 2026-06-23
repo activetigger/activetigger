@@ -20,6 +20,9 @@ from activetigger.db.manager import DatabaseManager
 from activetigger.functions import compare_to_hash, get_dir_size, get_hash
 from activetigger.messages import Messages
 
+USERS_PARAMETERS_FILE = "users_parameters.yaml"
+DEFAULT_USERS_PARAMETERS = {"root": {"limit": 100}}
+
 
 class Users:
     """
@@ -27,7 +30,7 @@ class Users:
     """
 
     db_manager: DatabaseManager
-    users: dict
+    users_parameters: dict
     failed_attemps: dict[str, list[datetime]]
     messages: Messages
 
@@ -35,20 +38,33 @@ class Users:
         self,
         db_manager: DatabaseManager,
         messages: Messages,
-        file_users: str = "users.yaml",
     ):
         """
-        Init users references
+        Init users references.
+
+        Per-user parameters are loaded once from ``users_parameters.yaml``
+        located in ``config.data_path``. The file maps a username to a dict
+        of parameters; the ``limit`` key is the user's storage quota in GB.
+        If the file does not exist, it is created with a default ``root``
+        entry (100 GB).
         """
         self.db_manager = db_manager
         self.messages = messages
-
-        # add specific users parameters if they exist
-        self.users = {}
-        if Path(file_users).exists():
-            with open(file_users) as f:
-                self.users = yaml.safe_load(f)
+        self.users_parameters = self._load_users_parameters()
         self.failed_attemps: dict = {}
+
+    @staticmethod
+    def _load_users_parameters() -> dict:
+        path = Path(config.data_path) / USERS_PARAMETERS_FILE
+        if not path.exists():
+            with open(path, "w") as f:
+                yaml.safe_dump(DEFAULT_USERS_PARAMETERS, f)
+            return dict(DEFAULT_USERS_PARAMETERS)
+        with open(path) as f:
+            content = yaml.safe_load(f) or {}
+        if not isinstance(content, dict):
+            return {}
+        return content
 
     def log_failed_login_attempt(self, username: str) -> None:
         """
@@ -285,16 +301,12 @@ class Users:
 
     def get_storage_limit(self, username: str) -> float:
         """
-        Get storage limit for user
-        TODO : add a list of exceptions
+        Get storage limit (GB) for user from `users_parameters.yaml`,
+        falling back to `config.user_hdd_max` if the user has no entry.
         """
-        # case of root
-        if username == "root":
-            return 500.0
-        # derogation for specific users
-        if username in self.users:
-            return float(self.users[username]["storage_limit"])
-        # default value
+        params = self.users_parameters.get(username)
+        if params and "limit" in params:
+            return float(params["limit"])
         return config.user_hdd_max
 
     def state(self, project_slug: str) -> UsersStateModel:
@@ -337,14 +349,8 @@ class Users:
             parameters = ProjectModel(**parameters["parameters"])
             created_by = i[3]
             created_at = i[4].strftime("%Y-%m-%d %H:%M:%S")
-            try:
-                size = round(get_dir_size(config.data_path + "/projects/" + i[0]), 1)
-            except Exception as e:
-                print(e)
-                size = 0.0
             last_activity = self.db_manager.logs_service.get_last_activity_project(i[0])
 
-            # create the project summary model
             projects.append(
                 ProjectSummaryModel(
                     project_slug=project_slug,
@@ -352,7 +358,7 @@ class Users:
                     parameters=parameters,
                     created_by=created_by,
                     created_at=created_at,
-                    size=size,
+                    size=None,
                     last_activity=last_activity,
                 )
             )
@@ -372,11 +378,6 @@ class Users:
             parameters = ProjectModel(**project["parameters"])
             created_by = project["user_name"]
             created_at = project["time_created"].strftime("%Y-%m-%d %H:%M:%S")
-            try:
-                size = round(get_dir_size(config.data_path + "/projects/" + slug), 1)
-            except Exception as e:
-                print(e)
-                size = 0.0
             last_activity = self.db_manager.logs_service.get_last_activity_project(slug)
             auth = self.db_manager.projects_service.get_user_auth(username, slug)
             user_right = auth[0][1] if auth else "none"
@@ -387,7 +388,7 @@ class Users:
                     parameters=parameters,
                     created_by=created_by,
                     created_at=created_at,
-                    size=size,
+                    size=None,
                     last_activity=last_activity,
                 )
             )
