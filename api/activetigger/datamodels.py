@@ -109,7 +109,7 @@ class ProjectBaseModel(BaseModel):
     random_selection: bool = False
     cols_stratify: list[str] = []
     stratify_train: bool = False
-    stratify_test: bool = False
+    stratify_eval: bool = False
     force_label: bool = False
     force_computation: bool = False
     seed: int = 42

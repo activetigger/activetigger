@@ -93,7 +93,7 @@ export const ProjectCreationForm: FC = () => {
   const force_label = useWatch({ control, name: 'force_label' }); // watch the force label entry
   const random_selection = useWatch({ control, name: 'random_selection' }); // watch the random selection entry
   const stratify_train = useWatch({ control, name: 'stratify_train' });
-  const stratify_test = useWatch({ control, name: 'stratify_test' });
+  const stratify_eval = useWatch({ control, name: 'stratify_eval' });
 
   // When random_selection is unchecked, reset dependent fields
   useEffect(() => {
@@ -102,7 +102,7 @@ export const ProjectCreationForm: FC = () => {
       setValue('n_test', 0);
       setValue('force_label', false);
       setValue('stratify_train', false);
-      setValue('stratify_test', false);
+      setValue('stratify_eval', false);
     }
   }, [random_selection, setValue]);
 
@@ -715,24 +715,24 @@ export const ProjectCreationForm: FC = () => {
                   </div>
                   <div>
                     <input
-                      id="stratify_test"
+                      id="stratify_eval"
                       type="checkbox"
                       disabled={creatingProject || force_label || !random_selection}
-                      {...register('stratify_test')}
+                      {...register('stratify_eval')}
                     />
-                    <label htmlFor="stratify_test">
-                      Stratify test set{' '}
-                      <a className="stratify_train">
+                    <label htmlFor="stratify_eval">
+                      Stratify valid/test set{' '}
+                      <a className="stratify_eval_info">
                         <HiOutlineQuestionMarkCircle />
                       </a>
-                      <Tooltip anchorSelect=".stratify_train" place="top">
-                        If ticked, ensures balanced representation of each group in the train set.
-                        See documentation.
+                      <Tooltip anchorSelect=".stratify_eval_info" place="top">
+                        If ticked, ensures balanced representation of each group in the valid/test
+                        set. See documentation.
                       </Tooltip>
                     </label>
                   </div>
 
-                  {(stratify_train || stratify_test) && (
+                  {(stratify_train || stratify_eval) && (
                     <>
                       <label htmlFor="cols_stratify">Column(s) used for stratification</label>
                       <Controller
