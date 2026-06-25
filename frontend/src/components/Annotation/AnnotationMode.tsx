@@ -212,7 +212,7 @@ export const AnnotationModeForm: FC<AnnotationModeFormProps> = ({
             )}
             getOptionLabel={(o) =>
               o.mode === 'maxprob' && o.label_prob
-                ? `max pred ${o.label_prob}`
+                ? `max ${o.label_prob}`
                 : o.mode === 'active' && o.label_prob
                   ? `active ${o.label_prob}`
                   : o.mode === 'prompt'
@@ -228,7 +228,8 @@ export const AnnotationModeForm: FC<AnnotationModeFormProps> = ({
                     mode: option.mode,
                     label_prob: option.label_prob,
                     // Clear prompt_id when leaving prompt mode.
-                    prompt_id: option.mode === 'prompt' ? prev.selectionConfig.prompt_id : undefined,
+                    prompt_id:
+                      option.mode === 'prompt' ? prev.selectionConfig.prompt_id : undefined,
                   },
                 }));
               }
@@ -261,9 +262,7 @@ export const AnnotationModeForm: FC<AnnotationModeFormProps> = ({
                   )?.prompts;
                   const available = promptsState?.available ?? [];
                   if (available.length === 0) {
-                    return (
-                      <small className="text-muted">No prompts — click to add one</small>
-                    );
+                    return <small className="text-muted">No prompts — click to add one</small>;
                   }
                   return (
                     <select
@@ -330,29 +329,29 @@ export const AnnotationModeForm: FC<AnnotationModeFormProps> = ({
           // input validated on deselect
         }
         {project?.params?.kind !== 'image' && (
-        <div className="at-input-group">
-          <label htmlFor="select_regex" className=" small-gray">
-            Filter by content
-            <HiOutlineQuestionMarkCircle id="regex-tooltip" />
-          </label>
-          <input
-            className={classNames(
-              'searchhelp',
-              filterDebounced && !isValidRegex(filterDebounced) ? 'is-invalid' : '',
-            )}
-            type="text"
-            id="select_regex"
-            placeholder="Enter a regex"
-            defaultValue={selectionConfig.filter}
-            onChange={(e) => {
-              setFilter(e.target.value);
-            }}
-          />
-          <div className="invalid-feedback">Regex not valid</div>
-          <Tooltip anchorSelect="#regex-tooltip">
-            Use CONTEXT= or QUERY= for specific requests
-          </Tooltip>
-        </div>
+          <div className="at-input-group">
+            <label htmlFor="select_regex" className=" small-gray">
+              Filter by content
+              <HiOutlineQuestionMarkCircle id="regex-tooltip" />
+            </label>
+            <input
+              className={classNames(
+                'searchhelp',
+                filterDebounced && !isValidRegex(filterDebounced) ? 'is-invalid' : '',
+              )}
+              type="text"
+              id="select_regex"
+              placeholder="Enter a regex"
+              defaultValue={selectionConfig.filter}
+              onChange={(e) => {
+                setFilter(e.target.value);
+              }}
+            />
+            <div className="invalid-feedback">Regex not valid</div>
+            <Tooltip anchorSelect="#regex-tooltip">
+              Use CONTEXT= or QUERY= for specific requests
+            </Tooltip>
+          </div>
         )}
         {/*
          * Image projects (experimental): regex input is hidden above, and
