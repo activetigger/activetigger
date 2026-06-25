@@ -833,6 +833,14 @@ class Project:
                 f = f & f_user
         elif next.sample == "commented":
             f = df["comment"].fillna("").str.len() > 0
+        elif next.sample == "wrong":
+            if next.dataset != "train":
+                raise ValueError("Wrong-prediction filter is only available on the train dataset")
+            if proba is None or "prediction" not in proba.columns:
+                raise ValueError(
+                    "Wrong-prediction filter requires an active model with predictions"
+                )
+            f = df["labels"].notna() & (df["labels"] != proba["prediction"])
         else:
             f = pd.Series(True, index=df.index)
 
@@ -1324,7 +1332,7 @@ class Project:
             next=NextProjectStateModel(
                 methods_min=["fixed", "random"],
                 methods=methods,
-                sample=["untagged", "all", "tagged", "not_by_me", "commented"],
+                sample=["untagged", "all", "tagged", "not_by_me", "commented", "wrong"],
             ),
             schemes=self.schemes.state(),
             features=self.features.state(),

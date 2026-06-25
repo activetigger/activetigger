@@ -157,6 +157,17 @@ export const AnnotationModeForm: FC<AnnotationModeFormProps> = ({
     }
   }, [activeModel, selectionConfig.mode, project?.next.methods_min, setAppContext]);
 
+  // "wrong predictions" sample requires an active model on the train phase;
+  // reset it to "all" when those conditions no longer hold.
+  useEffect(() => {
+    if (selectionConfig.sample === 'wrong' && (!activeModel || phase !== 'train')) {
+      setAppContext((prev) => ({
+        ...prev,
+        selectionConfig: { ...prev.selectionConfig, sample: 'all' },
+      }));
+    }
+  }, [activeModel, phase, selectionConfig.sample, setAppContext]);
+
   return (
     <form className="annotation-mode">
       {/* left container: main selectors */}
