@@ -201,14 +201,14 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
   const onSubmit: SubmitHandler<EvalSetModel & { files: FileList }> = async (formData) => {
     if (data) {
       // check that the selected ID column contains unique values
-      if (formData.col_id && data) {
+      if (formData.col_id && formData.col_id !== 'row_number' && data) {
         const idValues = data.data.map((row) => row[formData.col_id]);
         const uniqueValues = new Set(idValues);
         if (uniqueValues.size !== idValues.length) {
           const nDuplicates = idValues.length - uniqueValues.size;
           notify({
             type: 'error',
-            message: `The selected ID column contains ${nDuplicates} duplicate values. Please choose a column with unique values`,
+            message: `The selected ID column contains ${nDuplicates} duplicate values. Please choose a column with unique values or use 'Row number'.`,
           });
           return;
         }
@@ -305,6 +305,9 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
                 <div>
                   <label htmlFor="col_id">ID column (IDs must be unique)</label>
                   <select id="col_id" disabled={data === null} {...register('col_id')}>
+                    <option key="row_number" value="row_number">
+                      Row number
+                    </option>
                     {columns}
                   </select>
 

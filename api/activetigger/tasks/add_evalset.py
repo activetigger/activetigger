@@ -60,11 +60,14 @@ class AddEvalSet(BaseTask):
         try:
             self.__stop_process_opportunity()
             csv_buffer = io.StringIO(self.evalset.csv)
+            dtype_map: dict[str, type] = {col: str for col in self.evalset.cols_text}
+            if self.evalset.col_id != "row_number":
+                dtype_map[self.evalset.col_id] = str
             df = pd.read_csv(
                 csv_buffer,
                 sep=None,
                 engine="python",
-                dtype={self.evalset.col_id: str, **{col: str for col in self.evalset.cols_text}},
+                dtype=dtype_map,
                 nrows=self.evalset.n_eval,
             )
             if len(df) > 10000:
@@ -77,7 +80,14 @@ class AddEvalSet(BaseTask):
             self.__stop_process_opportunity()
             # create text column
             df["text"] = concat_text_columns(df, self.evalset.cols_text)
-            if not self.evalset.col_label:
+            if self.evalset.col_id == "row_number":
+                df["id"] = [str(i) for i in range(len(df))]
+                if self.evalset.col_label:
+                    if "label" in df.columns and self.evalset.col_label != "label":
+                        df = df.rename(columns={"label": "_label_"})
+                    df = df.rename(columns={self.evalset.col_label: "label"})
+                    df["label"] = df["label"].apply(lambda x: None if pd.isna(x) else str(x))
+            elif not self.evalset.col_label:
                 df = df.rename(columns={self.evalset.col_id: "id"})
             else:
                 if "label" in df.columns and self.evalset.col_label != "label":
