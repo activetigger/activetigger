@@ -81,6 +81,7 @@ export type ActiveModel = components['schemas']['ActiveModel'];
 export type ElementHistoryPoint = Omit<components['schemas']['AnnotationModel'], 'user'> & {
   element_text: string;
   skip?: boolean;
+  durationMs?: number;
 };
 
 export interface FeatureDfmParameters {
@@ -184,6 +185,7 @@ export interface DisplayConfig {
   forceOneColumnLayout?: boolean;
   forceCompleteLabel?: boolean;
   displayFormat?: 'table' | 'cards';
+  displayMeanAnnotationTime?: boolean;
 }
 
 export interface newBertModel {

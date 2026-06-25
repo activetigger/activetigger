@@ -3,7 +3,7 @@ import shutil
 import uuid
 import zipfile
 from pathlib import Path
-from typing import Tuple
+from typing import Any, Tuple, cast
 
 import pandas as pd  # type: ignore[import]
 
@@ -67,7 +67,7 @@ class AddEvalSet(BaseTask):
                 csv_buffer,
                 sep=None,
                 engine="python",
-                dtype=dtype_map,
+                dtype=cast(Any, dtype_map),
                 nrows=self.evalset.n_eval,
             )
             if len(df) > 10000:

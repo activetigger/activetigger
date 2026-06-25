@@ -54,7 +54,7 @@ export const QuickModelForm: FC<QuickModelFormProps> = ({
     cv10: false,
     test_size: 0.2,
     dichotomize: kindScheme == 'multilabel' ? availableLabels[0] : undefined,
-    features: defaultFeatures.map((e) => e.value),
+    features: defaultFeatures,
   });
 
   // create form
@@ -83,9 +83,7 @@ export const QuickModelForm: FC<QuickModelFormProps> = ({
     setDisplayNewModel(false);
   };
 
-  const [formSelectedFeatures, setFormSelectedFeatures] = useState<string[]>(
-    defaultFeatures.map((e) => e.value),
-  );
+  const [formSelectedFeatures, setFormSelectedFeatures] = useState<string[]>(defaultFeatures);
 
   const selectedFeaturesContainsBERTFeatures = () => {
     return formSelectedFeatures

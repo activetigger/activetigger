@@ -22,6 +22,7 @@ export const DEFAULT_CONTEXT: AppContextValue = {
     forceOneColumnLayout: false,
     forceCompleteLabel: false,
     displayFormat: 'cards',
+    displayMeanAnnotationTime: false,
   },
   selectionConfig: {
     mode: 'random',

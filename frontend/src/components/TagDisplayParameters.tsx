@@ -110,6 +110,23 @@ export const TagDisplayParameters: FC = () => {
         Element history
       </label>
 
+      <label>
+        <input
+          type="checkbox"
+          checked={!!displayConfig.displayMeanAnnotationTime}
+          onChange={(_) => {
+            setAppContext((prev) => ({
+              ...prev,
+              displayConfig: {
+                ...displayConfig,
+                displayMeanAnnotationTime: !displayConfig.displayMeanAnnotationTime,
+              },
+            }));
+          }}
+        />
+        Mean annotation time
+      </label>
+
       <label>Tokens (approx. 4 c / token)</label>
       <input
         type="number"

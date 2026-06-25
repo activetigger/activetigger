@@ -26,8 +26,23 @@ export const StatusNotch: FC<{
 }) => {
   // function to clear history
   const {
-    appContext: { currentProject },
+    appContext: { currentProject, displayConfig, history },
   } = useAppContext();
+
+  // mean annotation time over the current session history
+  const durations = history
+    .map((h) => h.durationMs)
+    .filter((d): d is number => typeof d === 'number' && d >= 0);
+  const meanAnnotationTimeMs =
+    durations.length > 0 ? durations.reduce((a, b) => a + b, 0) / durations.length : null;
+  const formatDuration = (ms: number) => {
+    if (ms < 1000) return `${Math.round(ms)} ms`;
+    const seconds = ms / 1000;
+    if (seconds < 60) return `${seconds.toFixed(1)} s`;
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = Math.round(seconds - minutes * 60);
+    return `${minutes}m ${remainingSeconds}s`;
+  };
   const { authenticatedUser } = useAuth();
   const { stopProcesses } = useStopProcesses(
     projectState ? projectState.params.project_slug : null,
@@ -101,6 +116,13 @@ export const StatusNotch: FC<{
               ? ` ${(gpu['total_memory'] - gpu['available_memory']).toFixed(1)} / ${gpu['total_memory']} Go`
               : ' no GPU available'}
           </span>
+
+          {displayConfig.displayMeanAnnotationTime && (
+            <span className="d-none d-md-inline">
+              Mean annotation time:
+              {meanAnnotationTimeMs !== null ? ` ${formatDuration(meanAnnotationTimeMs)}` : ' n/a'}
+            </span>
+          )}
 
           {/* Display GPU memory 1 version (computer) */}
           {currentComputation && (
