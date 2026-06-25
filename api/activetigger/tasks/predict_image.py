@@ -1,9 +1,11 @@
+import contextlib
 import gc
 import json
 import multiprocessing
 import multiprocessing.synchronize
 import os
 import time
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Optional
 
@@ -62,6 +64,34 @@ def _open_image_rgb_safe(path: str, fallback_size: tuple[int, int]) -> Image.Ima
         Image.DecompressionBombError,
     ):
         return Image.new("RGB", fallback_size, color=(128, 128, 128))
+
+
+@contextlib.contextmanager
+def _force_spawn_start_method() -> Iterator[None]:
+    """
+    Temporarily switch multiprocessing's global default start method to
+    "spawn" for the duration of the with-block.
+
+    Why: this task runs inside a loky worker, and loky sets the global
+    start method to "loky". DataLoader sub-workers spawned with
+    multiprocessing_context="spawn" still inherit the global default in
+    their bootstrap data (see CPython's multiprocessing.spawn.get_preparation_data),
+    and the freshly-spawned child errors out with
+    "ValueError: cannot find context for 'loky'" because loky isn't
+    imported there. Forcing the global to "spawn" while the loader is alive
+    sidesteps this. We restore the previous method on exit so any code
+    after us that depends on loky's context still works.
+    """
+    prev = multiprocessing.get_start_method(allow_none=True)
+    try:
+        multiprocessing.set_start_method("spawn", force=True)
+        yield
+    finally:
+        if prev is not None and prev != "spawn":
+            try:
+                multiprocessing.set_start_method(prev, force=True)
+            except (ValueError, RuntimeError):
+                pass
 
 
 class _ImagePredictDataset(Dataset[torch.Tensor]):
@@ -350,12 +380,11 @@ class PredictImage(BaseTask):
 
             use_cuda = device.type == "cuda"
             # Decode/resize/normalize is CPU-bound and was the dominant cost
-            # with num_workers=0 — the GPU sat idle between batches. We pass
-            # an explicit "spawn" context so the worker pool here does not
-            # depend on / mutate the global start method that loky configures
-            # for the surrounding queue executor (see queue_manager.py).
-            # Only spin up workers when there are enough batches to amortize
-            # their start-up cost.
+            # with num_workers=0 — the GPU sat idle between batches. Only
+            # spin up workers when there are enough batches to amortize
+            # their start-up cost. The surrounding _force_spawn_start_method
+            # context manager is what makes num_workers>0 actually safe to
+            # use from inside a loky worker.
             num_workers = min(4, n_batches) if n_batches >= 4 else 0
             loader_kwargs: dict = {
                 "batch_size": self.batch,
@@ -367,26 +396,33 @@ class PredictImage(BaseTask):
                 loader_kwargs["multiprocessing_context"] = "spawn"
                 loader_kwargs["persistent_workers"] = True
                 loader_kwargs["prefetch_factor"] = 4
-            loader = DataLoader(
-                _ImagePredictDataset(paths, image_processor, fallback_size),
-                **loader_kwargs,
-            )
 
             proba_chunks: list[np.ndarray] = []
             processed = 0
-            for batch_tensor in tqdm(loader, total=n_batches, desc="Predicting", unit="batch"):
-                self.__listen_stop_event()
-                batch_tensor = batch_tensor.to(device, non_blocking=use_cuda)
-                with torch.no_grad():
-                    if use_cuda:
-                        with torch.autocast(device_type="cuda", dtype=torch.float16):
+            with _force_spawn_start_method() if num_workers > 0 else contextlib.nullcontext():
+                loader = DataLoader(
+                    _ImagePredictDataset(paths, image_processor, fallback_size),
+                    **loader_kwargs,
+                )
+                for batch_tensor in tqdm(
+                    loader, total=n_batches, desc="Predicting", unit="batch"
+                ):
+                    self.__listen_stop_event()
+                    batch_tensor = batch_tensor.to(device, non_blocking=use_cuda)
+                    with torch.no_grad():
+                        if use_cuda:
+                            with torch.autocast(device_type="cuda", dtype=torch.float16):
+                                outputs = model(pixel_values=batch_tensor)
+                        else:
                             outputs = model(pixel_values=batch_tensor)
-                    else:
-                        outputs = model(pixel_values=batch_tensor)
-                logits = outputs.logits.float().detach().cpu().numpy()
-                proba_chunks.append(logits_to_probs(logits, kind=self.training_kind))
-                processed += batch_tensor.shape[0]
-                self.__write_progress(100 * processed / n)
+                    logits = outputs.logits.float().detach().cpu().numpy()
+                    proba_chunks.append(logits_to_probs(logits, kind=self.training_kind))
+                    processed += batch_tensor.shape[0]
+                    self.__write_progress(100 * processed / n)
+                # ensure persistent worker processes are torn down (and the
+                # restored start method actually takes effect on next use)
+                # before we exit the context manager.
+                del loader
 
             proba_predictions = (
                 np.concatenate(proba_chunks, axis=0) if proba_chunks else np.zeros((0, num_labels))
