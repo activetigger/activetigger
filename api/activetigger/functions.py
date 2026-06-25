@@ -575,15 +575,23 @@ def get_metrics_multilabel(
 
 def get_dir_size(path: str = ".") -> float:
     """
-    Get size of a directory in MB
+    Get size of a directory in MB. Tolerates entries that disappear mid-scan
+    (e.g. a project being deleted concurrently).
     """
     total: float = 0
-    with os.scandir(path) as it:
+    try:
+        it = os.scandir(path)
+    except FileNotFoundError:
+        return 0
+    with it:
         for entry in it:
-            if entry.is_file():
-                total = total + entry.stat().st_size / (1024 * 1024)
-            elif entry.is_dir():
-                total += get_dir_size(entry.path)
+            try:
+                if entry.is_file():
+                    total += entry.stat().st_size / (1024 * 1024)
+                elif entry.is_dir():
+                    total += get_dir_size(entry.path)
+            except FileNotFoundError:
+                continue
     return total
 
 
