@@ -222,7 +222,13 @@ class PredictImage(BaseTask):
             f.write(str(progress))
 
     def __load_model(self):
-        image_processor = AutoImageProcessor.from_pretrained(self.path)
+        # backend="torchvision" picks the fast (tensor-native) image processor
+        # when available; transformers falls back to the numpy/PIL processor
+        # for model families that don't have one. Several × faster on the
+        # decode/resize/normalize path that runs per image in __getitem__.
+        image_processor = AutoImageProcessor.from_pretrained(
+            self.path, backend="torchvision"
+        )
         model = AutoModelForImageClassification.from_pretrained(self.path)
         return image_processor, model
 
@@ -343,17 +349,27 @@ class PredictImage(BaseTask):
             paths = self.df[self.col_text].tolist()
 
             use_cuda = device.type == "cuda"
-            # num_workers=0: this task runs inside a loky worker where the
-            # global multiprocessing default is 'loky'. Spawning DataLoader
-            # sub-workers from here requires mutating that global, which can
-            # leak across to other tasks reusing the worker. Run the loader
-            # single-process; GPU inference dominates anyway.
+            # Decode/resize/normalize is CPU-bound and was the dominant cost
+            # with num_workers=0 — the GPU sat idle between batches. We pass
+            # an explicit "spawn" context so the worker pool here does not
+            # depend on / mutate the global start method that loky configures
+            # for the surrounding queue executor (see queue_manager.py).
+            # Only spin up workers when there are enough batches to amortize
+            # their start-up cost.
+            num_workers = min(4, n_batches) if n_batches >= 4 else 0
+            loader_kwargs: dict = {
+                "batch_size": self.batch,
+                "shuffle": False,
+                "num_workers": num_workers,
+                "pin_memory": use_cuda,
+            }
+            if num_workers > 0:
+                loader_kwargs["multiprocessing_context"] = "spawn"
+                loader_kwargs["persistent_workers"] = True
+                loader_kwargs["prefetch_factor"] = 4
             loader = DataLoader(
                 _ImagePredictDataset(paths, image_processor, fallback_size),
-                batch_size=self.batch,
-                shuffle=False,
-                num_workers=0,
-                pin_memory=use_cuda,
+                **loader_kwargs,
             )
 
             proba_chunks: list[np.ndarray] = []
