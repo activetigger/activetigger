@@ -25,8 +25,8 @@ interface Row {
 }
 
 /**
- * DisplayScores component to show model statistics and false predictions.
- * It includes a table of statistics and a data grid for false predictions.
+ * DisplayScores component to show model statistics and wrong predictions.
+ * It includes a table of statistics and a data grid for wrong predictions.
  **/
 export const DisplayScores: FC<DisplayScoresProps> = ({
   title,
@@ -57,7 +57,7 @@ export const DisplayScores: FC<DisplayScoresProps> = ({
     link.download = modelName || 'model.json';
     link.click();
   };
-  const [showFalsePredictions, setShowFalsePredictions] = useState(false);
+  const [showWrongPredictions, setShowWrongPredictions] = useState(false);
   const columns: readonly Column<Row>[] = [
     {
       key: 'id',
@@ -80,16 +80,31 @@ export const DisplayScores: FC<DisplayScoresProps> = ({
       name: 'Label',
       key: 'GS-label',
       resizable: true,
+      width: 120,
     },
     {
       name: 'Prediction',
       key: 'prediction',
       resizable: true,
+      width: 120,
     },
     {
       name: 'Text',
       key: 'text',
       resizable: true,
+      renderCell: (props) => (
+        <div
+          style={{
+            maxHeight: '100%',
+            width: '100%',
+            whiteSpace: 'wrap',
+            overflowY: 'auto',
+            userSelect: 'none',
+          }}
+        >
+          {props.row.text}
+        </div>
+      ),
     },
   ];
   if (!scores) return;
@@ -131,8 +146,8 @@ export const DisplayScores: FC<DisplayScoresProps> = ({
         </button> */}
       </div>
       {scores['false_predictions'] && (
-        <button className="btn-secondary-action" onClick={() => setShowFalsePredictions(true)}>
-          Show false predictions
+        <button className="btn-secondary-action" onClick={() => setShowWrongPredictions(true)}>
+          Show wrong predictions
         </button>
       )}
       <button
@@ -147,21 +162,21 @@ export const DisplayScores: FC<DisplayScoresProps> = ({
       </button>
 
       <Modal
-        show={showFalsePredictions}
+        show={showWrongPredictions}
         id="quickmodel-modal"
-        onHide={() => setShowFalsePredictions(false)}
+        onHide={() => setShowWrongPredictions(false)}
         centered
         size="xl"
       >
         <Modal.Header closeButton>
-          <Modal.Title>False prediction of the model {modelName}</Modal.Title>
+          <Modal.Title>Wrong predictions of the model {modelName}</Modal.Title>
         </Modal.Header>
         <Modal.Body>
-          {' '}
           <DataGrid<Row>
             className="fill-grid rdg-light"
             columns={columns}
             rows={scores['false_predictions'] as Row[]}
+            rowHeight={80}
           />
         </Modal.Body>
       </Modal>

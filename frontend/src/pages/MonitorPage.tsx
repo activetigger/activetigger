@@ -290,7 +290,7 @@ export const MonitorPage: FC = () => {
                       <th>Type</th>
                       <th>Slug</th>
                       <th>Creator</th>
-                      <th>Created at</th>
+                      <th>Created</th>
                       <th>Size (MB)</th>
                       <th>Last activity</th>
                       <th>My rights</th>
