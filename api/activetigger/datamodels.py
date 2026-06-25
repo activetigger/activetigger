@@ -113,6 +113,7 @@ class ProjectBaseModel(BaseModel):
     force_label: bool = False
     force_computation: bool = False
     seed: int = 42
+    col_split: str | None = None
 
 
 class ProjectModel(ProjectBaseModel):
