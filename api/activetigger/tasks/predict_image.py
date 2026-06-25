@@ -256,9 +256,7 @@ class PredictImage(BaseTask):
         # when available; transformers falls back to the numpy/PIL processor
         # for model families that don't have one. Several × faster on the
         # decode/resize/normalize path that runs per image in __getitem__.
-        image_processor = AutoImageProcessor.from_pretrained(
-            self.path, backend="torchvision"
-        )
+        image_processor = AutoImageProcessor.from_pretrained(self.path, backend="torchvision")
         model = AutoModelForImageClassification.from_pretrained(self.path)
         return image_processor, model
 
@@ -404,9 +402,7 @@ class PredictImage(BaseTask):
                     _ImagePredictDataset(paths, image_processor, fallback_size),
                     **loader_kwargs,
                 )
-                for batch_tensor in tqdm(
-                    loader, total=n_batches, desc="Predicting", unit="batch"
-                ):
+                for batch_tensor in tqdm(loader, total=n_batches, desc="Predicting", unit="batch"):
                     self.__listen_stop_event()
                     batch_tensor = batch_tensor.to(device, non_blocking=use_cuda)
                     with torch.no_grad():

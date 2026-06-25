@@ -357,9 +357,7 @@ class AddEvalSetImage(BaseTask):
             if "label" in df.columns and self.evalset.scheme:
                 for label in df["label"].dropna().unique():
                     if self.scheme and label not in self.scheme:
-                        raise Exception(
-                            f"Label {label} not in the scheme {self.evalset.scheme}"
-                        )
+                        raise Exception(f"Label {label} not in the scheme {self.evalset.scheme}")
 
             self.__stop_process_opportunity(images_dir)
 

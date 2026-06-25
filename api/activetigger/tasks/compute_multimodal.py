@@ -85,9 +85,7 @@ class ComputeMultimodal(BaseTask):
         try:
             # trust_remote_code is required for BGE-VL / Qwen-VL models that
             # ship custom modeling code; the native CLIP models ignore it.
-            model = SentenceTransformer(
-                self.model_name, device=device, trust_remote_code=True
-            )
+            model = SentenceTransformer(self.model_name, device=device, trust_remote_code=True)
 
             ids = list(self.paths.index)
             paths = [str(p) for p in self.paths.values]

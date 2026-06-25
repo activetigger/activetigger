@@ -12,9 +12,9 @@ import { Link } from 'react-router-dom';
 import Select from 'react-select';
 import { Tooltip } from 'react-tooltip';
 import { useAddTableAnnotations, useTableElements } from '../core/api';
-import { ImageThumbnailImagexp } from './ImageThumbnailImagexp';
 import { AppContextValue } from '../core/context';
 import { AnnotationModel } from '../types';
+import { ImageThumbnailImagexp } from './ImageThumbnailImagexp';
 import { TableFilterState, TableTagFilterSelect } from './TableTagFilterSelect';
 
 interface Row {
@@ -171,32 +171,40 @@ export const DataTabular: FC<DataTabularModel> = ({
 
       renderCell: (props) =>
         isImageKind ? (
-          <div style={{ width: '100%', height: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+          <div
+            style={{
+              width: '100%',
+              height: '100%',
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+            }}
+          >
             <ImageThumbnailImagexp projectSlug={projectSlug} elementId={props.row.id_internal} />
           </div>
         ) : (
-        <div
-          style={{
-            maxHeight: '100%',
-            width: '100%',
-            whiteSpace: 'wrap',
-            overflowY: 'auto',
-            userSelect: 'none',
-          }}
-        >
-          <Highlighter
-            highlightClassName="Search"
-            searchWords={contains && isValidRegex(contains) ? [contains.replace('ALL:', '')] : []}
-            autoEscape={false}
-            textToHighlight={props.row.text}
-            highlightStyle={{
-              backgroundColor: 'yellow',
-              margin: '0px',
-              padding: '0px',
+          <div
+            style={{
+              maxHeight: '100%',
+              width: '100%',
+              whiteSpace: 'wrap',
+              overflowY: 'auto',
+              userSelect: 'none',
             }}
-            caseSensitive={true}
-          />
-        </div>
+          >
+            <Highlighter
+              highlightClassName="Search"
+              searchWords={contains && isValidRegex(contains) ? [contains.replace('ALL:', '')] : []}
+              autoEscape={false}
+              textToHighlight={props.row.text}
+              highlightStyle={{
+                backgroundColor: 'yellow',
+                margin: '0px',
+                padding: '0px',
+              }}
+              caseSensitive={true}
+            />
+          </div>
         ),
     },
     {
@@ -332,21 +340,23 @@ export const DataTabular: FC<DataTabularModel> = ({
           />
         </div>
         {!isImageKind && (
-        <div>
-          <label htmlFor="filter-input">
-            Filter by content
-            <HiOutlineQuestionMarkCircle className="search" />
-            {!isValidRegex(contains || '') && <span className="badge danger">Regex not valid</span>}
-          </label>
-          <input
-            placeholder="Regex filter on text"
-            id="filter-input"
-            onChange={(e) => {
-              setPage(1);
-              setContains(e.target.value);
-            }}
-          />
-        </div>
+          <div>
+            <label htmlFor="filter-input">
+              Filter by content
+              <HiOutlineQuestionMarkCircle className="search" />
+              {!isValidRegex(contains || '') && (
+                <span className="badge danger">Regex not valid</span>
+              )}
+            </label>
+            <input
+              placeholder="Regex filter on text"
+              id="filter-input"
+              onChange={(e) => {
+                setPage(1);
+                setContains(e.target.value);
+              }}
+            />
+          </div>
         )}
       </div>
       <div className="horizontal wrap" id="tabular-view-page-control">

@@ -626,8 +626,7 @@ class TrainBert(BaseTask):
 
             df_train_results["true_label-matrix"] = train_label_ids.tolist()
             df_train_results["true_label"] = [
-                "|".join(matrix_to_label(row, id2label))
-                for row in train_label_ids
+                "|".join(matrix_to_label(row, id2label)) for row in train_label_ids
             ]
 
             y_prob_pred = logits_to_probs(train_logits, self.training_kind)
@@ -679,8 +678,7 @@ class TrainBert(BaseTask):
 
                 df_test_results["true_label-matrix"] = test_label_ids.tolist()
                 df_test_results["true_label"] = [
-                    "|".join(matrix_to_label(row, id2label))
-                    for row in test_label_ids
+                    "|".join(matrix_to_label(row, id2label)) for row in test_label_ids
                 ]
 
                 y_prob_pred = logits_to_probs(test_logits, kind=self.training_kind)

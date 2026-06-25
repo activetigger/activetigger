@@ -137,9 +137,7 @@ class Orchestrator:
         if self._update_task is not None and not self._update_task.done():
             return
         try:
-            self._update_task = asyncio.create_task(
-                self._update(timeout=config.update_timeout)
-            )
+            self._update_task = asyncio.create_task(self._update(timeout=config.update_timeout))
         except RuntimeError:
             self._update_task = None
 
