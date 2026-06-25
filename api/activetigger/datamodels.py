@@ -1191,6 +1191,7 @@ class ModelInformationsModel(BaseModel):
     params: dict | None = None
     loss: dict | None = None
     scores: ModelScoresModel
+    predicted: bool = False
 
 
 class UserStatistics(BaseModel):

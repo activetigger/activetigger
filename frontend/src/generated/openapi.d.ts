@@ -3088,6 +3088,11 @@ export interface components {
         [key: string]: unknown;
       } | null;
       scores: components['schemas']['ModelScoresModel'];
+      /**
+       * Predicted
+       * @default false
+       */
+      predicted?: boolean;
     };
     /** ModelScoresModel */
     ModelScoresModel: {

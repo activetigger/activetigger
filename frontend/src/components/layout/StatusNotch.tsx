@@ -119,7 +119,7 @@ export const StatusNotch: FC<{
 
           {displayConfig.displayMeanAnnotationTime && (
             <span className="d-none d-md-inline">
-              Mean annotation time:
+              <span style={{ textDecoration: 'overline' }}>annotation time</span>
               {meanAnnotationTimeMs !== null ? ` ${formatDuration(meanAnnotationTimeMs)}` : ' n/a'}
             </span>
           )}

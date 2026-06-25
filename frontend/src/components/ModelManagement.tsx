@@ -357,6 +357,7 @@ export const ModelManagement: FC = () => {
             kind="bert"
             id="compute-prediction-training"
             buttonLabel="Compute predictions"
+            existingPrediction={currentBertModelInformations.predicted}
           />
           <div className="my-3"></div>
           <DisplayScores

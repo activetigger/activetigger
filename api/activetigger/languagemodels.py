@@ -635,6 +635,11 @@ class LanguageModels:
             if "training_kind" not in metrics[key]:
                 metrics[key]["training_kind"] = "multiclass"
 
+        db_params = (
+            self.language_models_service.get_model_db_parameters(self.project_slug, model_name)
+            or {}
+        )
+
         return ModelInformationsModel(
             params=self.get_parameters(model_name),
             loss=self.get_loss(model_name),
@@ -645,6 +650,7 @@ class LanguageModels:
                 test_scores=metrics.get("test", None),
                 outofsample_scores=metrics.get("outofsample", None),
             ),
+            predicted=bool(db_params.get("predicted", False)),
         )
 
     def get_base_model(self, model_name) -> dict:

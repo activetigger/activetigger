@@ -1,7 +1,6 @@
 name,priority,comment,language, size, parameters, windows,
 answerdotai/ModernBERT-base,10,,en, 600, 150,
 camembert/camembert-large,2,,fr, 1350, 337,
-flaubert/flaubert_small_cased,5,,fr, 220, 55,
 flaubert/flaubert_base_cased,6,,fr, 550, 140,
 flaubert/flaubert_large_cased,7,,fr, 1500, 370,
 almanach/moderncamembert-base,8,,fr, 550, 136,
