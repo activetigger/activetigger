@@ -14,6 +14,7 @@ interface validateButtonsProps {
   id?: string;
   buttonLabel?: string;
   style?: CSSProperties;
+  batchInput?: boolean;
 }
 
 export const ValidateButtons: FC<validateButtonsProps> = ({
@@ -23,6 +24,7 @@ export const ValidateButtons: FC<validateButtonsProps> = ({
   id,
   buttonLabel,
   style,
+  batchInput = true,
 }) => {
   const {
     appContext: { currentScheme, isComputing },
@@ -45,18 +47,20 @@ export const ValidateButtons: FC<validateButtonsProps> = ({
       >
         <GrValidate size={20} /> {buttonLabel ? buttonLabel : 'Compute predictions'}
       </button>
-      <label className="batch-size-label">
-        batch
-        <input
-          type="number"
-          min={1}
-          max={512}
-          value={batchSize}
-          onChange={(e) => setBatchSize(Math.max(1, parseInt(e.target.value) || 1))}
-          title="Batch size for prediction"
-          disabled={isComputing}
-        />
-      </label>
+      {batchInput && (
+        <label className="batch-size-label">
+          batch
+          <input
+            type="number"
+            min={1}
+            max={512}
+            value={batchSize}
+            onChange={(e) => setBatchSize(Math.max(1, parseInt(e.target.value) || 1))}
+            title="Batch size for prediction"
+            disabled={isComputing}
+          />
+        </label>
+      )}
     </div>
   );
 };

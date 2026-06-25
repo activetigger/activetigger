@@ -351,7 +351,7 @@ class TrainBert(BaseTask):
         original_max_length: int,
         base_model_max_length: int,
         adapt: bool,
-    ) -> Tuple[Any, int]:
+    ) -> Tuple[Any, int, int]:
         """Cap the tokenizer max length and create a tokenizing function"""
 
         # if auto_max_length set max_length to the maximum length of tokenized sentences
@@ -361,9 +361,11 @@ class TrainBert(BaseTask):
 
         if auto_max_length:
             max_length = int(texts.apply(get_n_tokens).dropna().max())
+        else:
+            max_length = original_max_length
 
-        # cap max_length
-        max_length = min(original_max_length, base_model_max_length)
+        # cap max_length to the model's supported maximum
+        max_length = min(max_length, base_model_max_length)
         # evaluate the proportion of elements truncated
         percentage_truncated = int(100 * (texts.apply(get_n_tokens).dropna() > max_length).mean())
 
@@ -388,7 +390,7 @@ class TrainBert(BaseTask):
                     max_length=max_length,
                 )
 
-        return tokenizing_function, percentage_truncated
+        return tokenizing_function, percentage_truncated, max_length
 
     def __load_trainer(
         self,
@@ -563,14 +565,17 @@ class TrainBert(BaseTask):
         )
 
         tokenizer = self.__load_tokenizer(self.base_model)
-        tokenizing_function, percentage_truncated = self.__cap_tokenizer_max_length(
-            texts=self.df[self.col_text],
-            tokenizer=tokenizer,
-            auto_max_length=self.auto_max_length,
-            original_max_length=self.max_length,
-            base_model_max_length=retrieve_model_max_length(self.base_model),
-            adapt=self.params.adapt,
+        tokenizing_function, percentage_truncated, effective_max_length = (
+            self.__cap_tokenizer_max_length(
+                texts=self.df[self.col_text],
+                tokenizer=tokenizer,
+                auto_max_length=self.auto_max_length,
+                original_max_length=self.max_length,
+                base_model_max_length=retrieve_model_max_length(self.base_model),
+                adapt=self.params.adapt,
+            )
         )
+        self.max_length = effective_max_length
         self.ds = self.ds.map(tokenizing_function, batched=True)
 
         # Build train/test dataset for dev eval
@@ -716,7 +721,6 @@ class TrainBert(BaseTask):
                 {
                     "training_kind": self.training_kind,
                     "test_size": self.test_size,
-                    "threshold": threshold if self.training_kind == "multilabel" else None,
                     "use_dichotomization": self.use_dichotomization,
                     "label_for_dichotomization": self.label_for_dichotomization,
                     "base_model": self.base_model,
@@ -725,11 +729,13 @@ class TrainBert(BaseTask):
                     "device": str(device),
                     "Proportion of elements truncated (%)": percentage_truncated,
                     "loss": self.loss,
-                    "auto context length": self.params.adapt,
+                    "auto context length": self.auto_max_length,
                     "balance classes": self.class_balance,
                     "class_min_freq": self.class_min_freq,
                 }
             )
+            if self.training_kind == "multilabel":
+                params_to_save["threshold"] = threshold
             self.__create_save_files(
                 current_path=current_path,
                 log_path=log_path,

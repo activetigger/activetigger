@@ -107,6 +107,7 @@ export const ModelEvaluation: FC = () => {
             kind="quick"
             id="compute-validate"
             style={{ margin: '8px 0px', color: 'white' }}
+            batchInput={false}
           />
 
           <DisplayScoresMenu
