@@ -70,15 +70,32 @@ class Queue:
             max_workers=self.nb_workers, timeout=600
         )  # 4 hours timeout for hung workers
 
-        # launch a regular update on the queue
-        self.task = asyncio.create_task(self._update_queue(timeout=0.5))
+        # launch a regular update on the queue; deferred when no loop is
+        # running yet (e.g. module-import-time instantiation outside uvicorn),
+        # ensure_update_task() picks it up later from the FastAPI lifespan.
+        self.task: asyncio.Task | None = None
+        self.ensure_update_task()
+
+    def ensure_update_task(self) -> None:
+        """
+        Schedule the background update loop if it isn't already running.
+        Safe to call repeatedly; required for callers that build a Queue
+        outside a running event loop (tests, module-import-time init).
+        """
+        if self.task is not None and not self.task.done():
+            return
+        try:
+            self.task = asyncio.create_task(self._update_queue(timeout=0.5))
+        except RuntimeError:
+            self.task = None
 
     def __del__(self) -> None:
         """
         Destructor to close the queue
         """
         if hasattr(self, "task"):
-            self.task.cancel()
+            if self.task is not None:
+                self.task.cancel()
         if hasattr(self, "manager"):
             self.manager.shutdown()
 
@@ -350,6 +367,4 @@ class Queue:
 
         # loky's reusable executor is a process-global singleton; after
         # shutdown the next get_reusable_executor call returns a fresh one.
-        self.executor = get_reusable_executor(
-            max_workers=self.nb_workers, timeout=600
-        )
+        self.executor = get_reusable_executor(max_workers=self.nb_workers, timeout=600)

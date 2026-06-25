@@ -8,16 +8,18 @@ import shutil
 from collections import Counter
 from logging import Logger
 from pathlib import Path
-from typing import Any, Optional, Tuple
+from typing import Any, Optional, Tuple, cast
 
 import datasets
+import numpy as np
 import pandas as pd
 import torch
 from pandas import DataFrame
 from torch import nn
+from torch.utils.data import Dataset as TorchDataset
 from transformers import (
     AutoModelForSequenceClassification,
-    AutoTokenizer,
+    AutoTokenizer,  # ty: ignore[possibly-missing-import]
     Trainer,
     TrainerCallback,
     TrainerControl,
@@ -115,7 +117,13 @@ class CustomTrainer(Trainer):
         self._loss_fct = None  # avoid device mismatch
         print("CustomTrainer initialized with class weights:", self.class_weights)
 
-    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
+    def compute_loss(
+        self,
+        model: nn.Module,
+        inputs: dict[str, torch.Tensor | Any],
+        return_outputs: bool = False,
+        num_items_in_batch: torch.Tensor | int | None = None,
+    ) -> torch.Tensor | tuple[torch.Tensor, Any]:
         labels = inputs.pop("labels")
         outputs = model(**inputs)
         logits = outputs.get("logits")
@@ -320,13 +328,15 @@ class TrainBert(BaseTask):
                 annotations_to_matrix(df[col_label], list(label2id.keys())).tolist(),
                 dtype=torch.float32,
             )
+        else:
+            raise ValueError(f"Training kind {training_kind} not recognized.")
 
         return datasets.Dataset.from_dict(
             {
                 "id": ids,
                 "text": texts,
                 "labels": labels,
-            }  # ty: ignore[possibly-unresolved-reference]
+            }
         ).with_format("torch")
 
     def __load_tokenizer(self, base_model: str):
@@ -598,27 +608,24 @@ class TrainBert(BaseTask):
 
             # predict on the data (separation validation set and training set)
             task_timer.start("evaluate")
-            predictions_train = trainer.predict(
-                self.ds["train"]
-            )  # ty: ignore[invalid-argument-type]
+            # Hoisted so it stays defined for the multiclass branch + final
+            # params save; only meaningful when training_kind == "multilabel".
+            threshold: float = 0.5
+            train_ds = cast(datasets.Dataset, self.ds["train"])
+            predictions_train = trainer.predict(cast(TorchDataset, train_ds))
+            train_label_ids = cast(np.ndarray, predictions_train.label_ids)
+            train_logits = cast(np.ndarray, predictions_train.predictions)
 
             # Compute the metrics
-            df_train_results = (
-                self.ds["train"].to_pandas().set_index("id")
-            )  # ty: ignore[unresolved-attribute]
+            df_train_results = cast(pd.DataFrame, train_ds.to_pandas()).set_index("id")
 
-            df_train_results["true_label-matrix"] = (
-                predictions_train.label_ids.tolist()
-            )  # ty: ignore[unresolved-attribute]
+            df_train_results["true_label-matrix"] = train_label_ids.tolist()
             df_train_results["true_label"] = [
-                "|".join(matrix_to_label(row, id2label))  # ty: ignore[invalid-argument-type]
-                for row in predictions_train.label_ids  # ty: ignore[not-iterable]
+                "|".join(matrix_to_label(row, id2label))
+                for row in train_label_ids
             ]
 
-            y_prob_pred = logits_to_probs(
-                predictions_train.predictions,  # ty: ignore[invalid-argument-type]
-                self.training_kind,
-            )
+            y_prob_pred = logits_to_probs(train_logits, self.training_kind)
 
             if self.training_kind == "multiclass":
                 labels_predicted = activate_probs(
@@ -629,7 +636,6 @@ class TrainBert(BaseTask):
                 #     y_true = predictions_train.label_ids,
                 #     y_prob_pred = y_prob_pred,
                 # )
-                threshold = 0.5  # Force threshold = 0.5
                 labels_predicted = activate_probs(
                     probs=y_prob_pred,
                     strategy="threshold",
@@ -652,40 +658,33 @@ class TrainBert(BaseTask):
                 )
             elif self.training_kind == "multilabel":
                 metrics_train = get_metrics_multilabel(
-                    Y_true=predictions_train.label_ids,  # ty: ignore[invalid-argument-type]
+                    Y_true=train_label_ids,
                     Y_pred=labels_predicted,  # ty: ignore[possibly-unresolved-reference]
                     texts=df_train_results["text"],
                     id2label=id2label,
                 )
 
             if "test" in self.ds:
-                predictions_test = trainer.predict(
-                    self.ds["test"]
-                )  # ty: ignore[invalid-argument-type]
-                df_test_results = (
-                    self.ds["test"].to_pandas().set_index("id")
-                )  # ty: ignore[unresolved-attribute]
+                test_ds = cast(datasets.Dataset, self.ds["test"])
+                predictions_test = trainer.predict(cast(TorchDataset, test_ds))
+                test_label_ids = cast(np.ndarray, predictions_test.label_ids)
+                test_logits = cast(np.ndarray, predictions_test.predictions)
 
-                df_test_results["true_label-matrix"] = (
-                    predictions_test.label_ids.tolist()
-                )  # ty: ignore[unresolved-attribute]
+                df_test_results = cast(pd.DataFrame, test_ds.to_pandas()).set_index("id")
+
+                df_test_results["true_label-matrix"] = test_label_ids.tolist()
                 df_test_results["true_label"] = [
-                    "|".join(matrix_to_label(row, id2label))  # ty: ignore[invalid-argument-type]
-                    for row in predictions_test.label_ids  # ty: ignore[not-iterable]
+                    "|".join(matrix_to_label(row, id2label))
+                    for row in test_label_ids
                 ]
 
-                y_prob_pred = logits_to_probs(
-                    predictions_test.predictions,  # ty: ignore[invalid-argument-type]
-                    kind=self.training_kind,
-                )
+                y_prob_pred = logits_to_probs(test_logits, kind=self.training_kind)
                 if self.training_kind == "multiclass":
                     y_label_pred = activate_probs(
                         y_prob_pred, strategy="max", force_max_1_per_row=True
                     )
                 else:
-                    y_label_pred = activate_probs(
-                        y_prob_pred, threshold, strategy="threshold"
-                    )  # ty: ignore[possibly-unresolved-reference]
+                    y_label_pred = activate_probs(y_prob_pred, threshold, strategy="threshold")
                 df_test_results["predicted_label-matrix"] = y_prob_pred.tolist()
                 df_test_results["predicted_label"] = [
                     "|".join(matrix_to_label(row, id2label)) for row in y_label_pred
@@ -700,7 +699,7 @@ class TrainBert(BaseTask):
                     )
                 elif self.training_kind == "multilabel":
                     metrics_test = get_metrics_multilabel(
-                        Y_true=predictions_test.label_ids,  # ty: ignore[invalid-argument-type]
+                        Y_true=test_label_ids,
                         Y_pred=y_label_pred,
                         texts=df_test_results["text"],
                         id2label=id2label,
@@ -717,9 +716,7 @@ class TrainBert(BaseTask):
                 {
                     "training_kind": self.training_kind,
                     "test_size": self.test_size,
-                    "threshold": threshold
-                    if self.training_kind == "multilabel"
-                    else None,  # ty: ignore[possibly-unresolved-reference]
+                    "threshold": threshold if self.training_kind == "multilabel" else None,
                     "use_dichotomization": self.use_dichotomization,
                     "label_for_dichotomization": self.label_for_dichotomization,
                     "base_model": self.base_model,

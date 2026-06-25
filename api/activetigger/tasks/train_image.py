@@ -7,16 +7,18 @@ import os
 import shutil
 from logging import Logger
 from pathlib import Path
-from typing import Any, Optional, Tuple
+from typing import Any, Optional, Tuple, cast
 
 import datasets
+import numpy as np
 import pandas as pd
 import torch
 from pandas import DataFrame
 from PIL import Image, ImageOps
+from torch.utils.data import Dataset as TorchDataset
 from transformers import (
     AutoImageProcessor,
-    AutoModelForImageClassification,
+    AutoModelForImageClassification,  # ty: ignore[possibly-missing-import]
     Trainer,
     TrainerCallback,
     TrainerControl,
@@ -474,6 +476,7 @@ class TrainImage(BaseTask):
         trainer = None
 
         try:
+            assert self.df is not None
             self.df = self.__check_data(self.df, self.col_label, self.col_text)
             labels, label2id, id2label = self.__retrieve_labels(self.scheme_labels)
 
@@ -534,23 +537,28 @@ class TrainImage(BaseTask):
             # ----- post-training evaluation -----
             task_timer.start("evaluate")
             self.__listen_stop_event()
-            predictions_train = trainer.predict(self.ds["train"])
+            train_ds = cast(datasets.Dataset, self.ds["train"])
+            predictions_train = trainer.predict(cast(TorchDataset, train_ds))
+            train_label_ids = cast(np.ndarray, predictions_train.label_ids)
+            train_logits = cast(np.ndarray, predictions_train.predictions)
 
             df_train_results = pd.DataFrame({"id": train_ids}).set_index("id")
             df_train_results["path"] = train_paths
-            df_train_results["true_label-matrix"] = predictions_train.label_ids.tolist()
+            df_train_results["true_label-matrix"] = train_label_ids.tolist()
             df_train_results["true_label"] = [
-                "|".join(matrix_to_label(row, id2label)) for row in predictions_train.label_ids
+                "|".join(matrix_to_label(row, id2label)) for row in train_label_ids
             ]
 
-            y_prob_pred = logits_to_probs(predictions_train.predictions, self.training_kind)
+            y_prob_pred = logits_to_probs(train_logits, self.training_kind)
 
+            # Hoisted so it stays defined for the test-set branch below;
+            # only meaningful when training_kind != "multiclass".
+            threshold: float = 0.5
             if self.training_kind == "multiclass":
                 labels_predicted = activate_probs(
                     probs=y_prob_pred, strategy="max", force_max_1_per_row=True
                 )
             else:
-                threshold = 0.5
                 labels_predicted = activate_probs(
                     probs=y_prob_pred,
                     strategy="threshold",
@@ -572,7 +580,7 @@ class TrainImage(BaseTask):
                 )
             else:
                 metrics_train = get_metrics_multilabel(
-                    Y_true=predictions_train.label_ids,
+                    Y_true=train_label_ids,
                     Y_pred=labels_predicted,
                     texts=df_train_results["path"],
                     id2label=id2label,
@@ -580,17 +588,18 @@ class TrainImage(BaseTask):
 
             if "test" in self.ds:
                 self.__listen_stop_event()
-                predictions_test = trainer.predict(self.ds["test"])
+                test_ds = cast(datasets.Dataset, self.ds["test"])
+                predictions_test = trainer.predict(cast(TorchDataset, test_ds))
+                test_label_ids = cast(np.ndarray, predictions_test.label_ids)
+                test_logits = cast(np.ndarray, predictions_test.predictions)
                 df_test_results = pd.DataFrame({"id": test_ids}).set_index("id")
                 df_test_results["path"] = test_paths
-                df_test_results["true_label-matrix"] = predictions_test.label_ids.tolist()
+                df_test_results["true_label-matrix"] = test_label_ids.tolist()
                 df_test_results["true_label"] = [
-                    "|".join(matrix_to_label(row, id2label)) for row in predictions_test.label_ids
+                    "|".join(matrix_to_label(row, id2label)) for row in test_label_ids
                 ]
 
-                y_prob_pred_test = logits_to_probs(
-                    predictions_test.predictions, kind=self.training_kind
-                )
+                y_prob_pred_test = logits_to_probs(test_logits, kind=self.training_kind)
                 if self.training_kind == "multiclass":
                     y_label_pred = activate_probs(
                         y_prob_pred_test, strategy="max", force_max_1_per_row=True
@@ -611,7 +620,7 @@ class TrainImage(BaseTask):
                     )
                 else:
                     metrics_test = get_metrics_multilabel(
-                        Y_true=predictions_test.label_ids,
+                        Y_true=test_label_ids,
                         Y_pred=y_label_pred,
                         texts=df_test_results["path"],
                         id2label=id2label,
