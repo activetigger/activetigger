@@ -295,6 +295,7 @@ export const BertopicPage: FC = () => {
                   overflow: 'hidden',
                   overflowY: 'scroll',
                   backgroundColor: '#f5f5f5',
+                  whiteSpace: 'pre-wrap',
                 }}
               >
                 {currentText}
