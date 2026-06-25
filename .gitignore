@@ -37,6 +37,10 @@ api/activetigger/.dmypy.json
 api/embeddings.yaml
 api/.coverage
 api/test-data
+embeddings.yaml
+QUALITY_REPORT.md
+SECURITY_REPORT.md
+api/users_parameters.yaml
 
 # DOCKER
 docker/api/projects/
