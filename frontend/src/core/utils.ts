@@ -533,6 +533,25 @@ export const displayTime = (time: string) => {
   return time.slice(0, time.indexOf(':') + 3);
 };
 
+// Match feature names that act as text representations suitable
+// as inputs for quick models / projections (sentence-embeddings, fasttext).
+export const isEmbeddingLikeFeature = (name: string): boolean =>
+  /sentence-embeddings|embeddings|fasttext/i.test(name);
+
+// Pick the priority default feature for a quick model:
+// prefer a BERT prediction, fall back to a sentence-embedding,
+// then to the last fasttext-like feature.
+export const pickDefaultQuickModelFeature = (features: string[]): string | undefined => {
+  const bert = features.find((f) => /predict/i.test(f));
+  if (bert) return bert;
+  const embedding = features.find((f) => /sentence-embeddings|embeddings/i.test(f));
+  if (embedding) return embedding;
+  for (let i = features.length - 1; i >= 0; i--) {
+    if (/fasttext/i.test(features[i])) return features[i];
+  }
+  return undefined;
+};
+
 export function truncateInMiddle(string: string, maxLength: number, separator: string = '...') {
   if (string.length <= maxLength) return string;
 

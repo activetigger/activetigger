@@ -7,7 +7,7 @@ import { Tooltip } from 'react-tooltip';
 import { useRetrainQuickModel, useTrainQuickModel } from '../../core/api';
 import { useNotifications } from '../../core/notifications';
 import { useAppContext } from '../../core/useAppContext';
-import { getRandomName, sortDatesAsStrings } from '../../core/utils';
+import { getRandomName, pickDefaultQuickModelFeature, sortDatesAsStrings } from '../../core/utils';
 import { ActiveModel, QuickModelInModel } from '../../types';
 import { ButtonNewFeature } from '../ButtonNewFeature';
 
@@ -134,6 +134,10 @@ export const SelectActiveLearning: FC<SelectActiveLearningProps> = ({
         message: 'No set of features available.',
       });
     }
+
+    const defaultFeature = pickDefaultQuickModelFeature(availableFeatures);
+    const defaultFeatures = defaultFeature ? [defaultFeature] : availableFeatures;
+
     const formData = {
       name: getRandomName('QuickModel') + '-default',
       model: 'logistic-l2',
@@ -147,7 +151,7 @@ export const SelectActiveLearning: FC<SelectActiveLearningProps> = ({
         max_features: null,
       },
       dichotomize: null,
-      features: availableFeatures,
+      features: defaultFeatures,
       cv10: false,
       standardize: false,
       balance_classes: false,
