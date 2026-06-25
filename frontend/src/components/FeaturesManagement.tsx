@@ -68,8 +68,9 @@ export const FeaturesManagement: FC = () => {
         <div className="card text-bg-light m-3 bg-warning w-75" key={key}>
           <div className="d-flex m-2 align-items-center justify-content-between">
             <span>
-              Currently computing {element ? element.name : ''}
-              {element?.progress ? ` (${element.progress}%)` : ''}
+              {element?.progress != null
+                ? `Currently computing ${element.name} (${element.progress}%)`
+                : `Waiting in queue: ${element ? element.name : ''}`}
             </span>
             <StopProcessButton projectSlug={projectName || null} kind="feature" />
           </div>
