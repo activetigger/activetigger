@@ -109,6 +109,8 @@ class CreateProject(BaseTask):
             self.params.cols_context = ["dataset_" + i for i in self.params.cols_context if i]
             self.params.cols_label = ["dataset_" + i for i in self.params.cols_label if i]
             self.params.cols_stratify = ["dataset_" + i for i in self.params.cols_stratify if i]
+            if self.params.col_split:
+                self.params.col_split = "dataset_" + self.params.col_split
 
             # remove completely empty lines
             content = content.dropna(how="all")
@@ -120,8 +122,17 @@ class CreateProject(BaseTask):
         all_columns = list(content.columns)
         n_total = len(content)
 
+        # if using a column to define the split, validate it exists; size checks
+        # below don't apply because counts come from the column values themselves
+        if self.params.col_split:
+            if self.params.col_split not in content.columns:
+                shutil.rmtree(self.params.dir)
+                raise Exception(
+                    f"Split column '{self.params.col_split.removeprefix('dataset_')}' "
+                    f"not found in the dataset."
+                )
         # test if the size of the sample requested is possible
-        if n_total < self.params.n_test + self.params.n_valid + self.params.n_train:
+        elif n_total < self.params.n_test + self.params.n_valid + self.params.n_train:
             shutil.rmtree(self.params.dir)
             raise Exception(
                 f"Not enough data for creating the train/valid/test dataset. Current : {len(content)} ; Selected : {self.params.n_test + self.params.n_valid + self.params.n_train}"
@@ -182,11 +193,43 @@ class CreateProject(BaseTask):
         rows_valid = []
         self.params.test = False
         self.params.valid = False
-        testset = None
-        validset = None
+        testset: pd.DataFrame | None = None
+        validset: pd.DataFrame | None = None
+        trainset: pd.DataFrame | None = None
+
+        # Column-based split: rows are assigned by the value of col_split
+        # (only "train", "valid", "test" are honored — everything else is dropped).
+        if self.params.col_split:
+            split_values = content[self.params.col_split].astype(str).str.strip().str.lower()
+            trainset = content[split_values == "train"]
+            validset_candidate = content[split_values == "valid"]
+            testset_candidate = content[split_values == "test"]
+
+            if len(testset_candidate) > 0:
+                testset = testset_candidate
+                testset.to_parquet(self.params.dir.joinpath(self.test_file), index=True)
+                self.params.test = True
+                rows_test = list(testset.index)
+                self.params.n_test = len(testset)
+            if len(validset_candidate) > 0:
+                validset = validset_candidate
+                validset.to_parquet(self.params.dir.joinpath(self.valid_file), index=True)
+                self.params.valid = True
+                rows_valid = list(validset.index)
+                self.params.n_valid = len(validset)
+            self.params.n_train = len(trainset)
+            if len(trainset) == 0:
+                shutil.rmtree(self.params.dir)
+                raise Exception(
+                    f"No rows with value 'train' in column "
+                    f"'{self.params.col_split.removeprefix('dataset_')}'."
+                )
+            trainset[["id_external", "text"] + self.params.cols_context].to_parquet(
+                self.params.dir.joinpath(self.train_file), index=True
+            )
 
         # case there is a test or valid set, common draw
-        if self.params.n_test + self.params.n_valid != 0:
+        elif self.params.n_test + self.params.n_valid != 0:
             n_to_draw = self.params.n_test + self.params.n_valid
             # manage stratification
             if len(self.params.cols_stratify) == 0 or not self.params.stratify_eval:
@@ -222,50 +265,51 @@ class CreateProject(BaseTask):
                 rows_test = list(testset.index)
 
         # Step 3 : train dataset / different strategies
+        # Skipped when col_split is set — train rows were already chosen by the column.
+        if not self.params.col_split:
+            # remove test rows
+            content = content.drop(rows_test)
+            content = content.drop(rows_valid)
 
-        # remove test rows
-        content = content.drop(rows_test)
-        content = content.drop(rows_valid)
-
-        # case where there is no valid/test set and the selection is deterministic
-        if (
-            not self.params.random_selection
-            and self.params.n_test == 0
-            and self.params.n_valid == 0
-        ):
-            trainset = content[0 : self.params.n_train]
-        # case to force the max of label from all label columns
-        elif self.params.force_label and len(self.params.cols_label) > 0:
-            f_notna = content[content[self.params.cols_label].notna().any(axis=1)]
-            f_na = content[content[self.params.cols_label].isna().all(axis=1)]
-            # different case regarding the number of labels
-            if len(f_notna) > self.params.n_train:
-                trainset = f_notna.sample(self.params.n_train, random_state=self.random_seed)
+            # case where there is no valid/test set and the selection is deterministic
+            if (
+                not self.params.random_selection
+                and self.params.n_test == 0
+                and self.params.n_valid == 0
+            ):
+                trainset = content[0 : self.params.n_train]
+            # case to force the max of label from all label columns
+            elif self.params.force_label and len(self.params.cols_label) > 0:
+                f_notna = content[content[self.params.cols_label].notna().any(axis=1)]
+                f_na = content[content[self.params.cols_label].isna().all(axis=1)]
+                # different case regarding the number of labels
+                if len(f_notna) > self.params.n_train:
+                    trainset = f_notna.sample(self.params.n_train, random_state=self.random_seed)
+                else:
+                    n_train_random = self.params.n_train - len(f_notna)
+                    trainset = pd.concat(
+                        [
+                            f_notna,
+                            f_na.sample(n_train_random, random_state=self.random_seed),
+                        ]
+                    )
+            # case there is stratification on the trainset
+            elif len(self.params.cols_stratify) > 0 and self.params.stratify_train:
+                df_grouped = content.groupby(self.params.cols_stratify, group_keys=False)
+                nb_cat = len(df_grouped)
+                nb_elements_cat = round(self.params.n_train / nb_cat)
+                sampled_idx = df_grouped.apply(
+                    lambda x: x.sample(min(len(x), nb_elements_cat), random_state=self.random_seed)
+                ).index.get_level_values(-1)
+                trainset = content.loc[sampled_idx]
+            # default with random selection in the remaining elements
             else:
-                n_train_random = self.params.n_train - len(f_notna)
-                trainset = pd.concat(
-                    [
-                        f_notna,
-                        f_na.sample(n_train_random, random_state=self.random_seed),
-                    ]
-                )
-        # case there is stratification on the trainset
-        elif len(self.params.cols_stratify) > 0 and self.params.stratify_train:
-            df_grouped = content.groupby(self.params.cols_stratify, group_keys=False)
-            nb_cat = len(df_grouped)
-            nb_elements_cat = round(self.params.n_train / nb_cat)
-            sampled_idx = df_grouped.apply(
-                lambda x: x.sample(min(len(x), nb_elements_cat), random_state=self.random_seed)
-            ).index.get_level_values(-1)
-            trainset = content.loc[sampled_idx]
-        # default with random selection in the remaining elements
-        else:
-            trainset = content.sample(self.params.n_train, random_state=self.random_seed)
+                trainset = content.sample(self.params.n_train, random_state=self.random_seed)
 
-        # write the trainset
-        trainset[["id_external", "text"] + self.params.cols_context].to_parquet(
-            self.params.dir.joinpath(self.train_file), index=True
-        )
+            # write the trainset
+            trainset[["id_external", "text"] + self.params.cols_context].to_parquet(
+                self.params.dir.joinpath(self.train_file), index=True
+            )
 
         # save parameters (without the data)
         project = self.params.model_dump()
@@ -279,7 +323,7 @@ class CreateProject(BaseTask):
         import_trainset = None
         import_testset = None
         import_validset = None
-        if len(self.params.cols_label) > 0:
+        if len(self.params.cols_label) > 0 and trainset is not None:
             import_trainset = trainset[self.params.cols_label].dropna(how="all")
             if testset is not None and not self.params.clear_test:
                 import_testset = testset[self.params.cols_label].dropna(how="all")

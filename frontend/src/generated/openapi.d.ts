@@ -3358,6 +3358,8 @@ export interface components {
        * @default 42
        */
       seed: number;
+      /** Col Split */
+      col_split?: string | null;
     };
     /**
      * ProjectDescriptionModel
@@ -3517,6 +3519,8 @@ export interface components {
        * @default 42
        */
       seed: number;
+      /** Col Split */
+      col_split?: string | null;
       /** Project Slug */
       project_slug: string;
       /** All Columns */

@@ -94,6 +94,7 @@ export const ProjectCreationForm: FC = () => {
   const random_selection = useWatch({ control, name: 'random_selection' }); // watch the random selection entry
   const stratify_train = useWatch({ control, name: 'stratify_train' });
   const stratify_eval = useWatch({ control, name: 'stratify_eval' });
+  const col_split = useWatch({ control, name: 'col_split' }); // column-based split
 
   // When random_selection is unchecked, reset dependent fields
   useEffect(() => {
@@ -105,6 +106,22 @@ export const ProjectCreationForm: FC = () => {
       setValue('stratify_eval', false);
     }
   }, [random_selection, setValue]);
+
+  // When a split column is selected, other sampling controls are ignored —
+  // sizes come from the column values, so reset/disable everything else.
+  useEffect(() => {
+    if (col_split) {
+      setValue('n_train', 0);
+      setValue('n_valid', 0);
+      setValue('n_test', 0);
+      setValue('random_selection', false);
+      setValue('force_label', false);
+      setValue('stratify_train', false);
+      setValue('stratify_eval', false);
+      setValue('clear_test', false);
+      setValue('clear_valid', false);
+    }
+  }, [col_split, setValue]);
 
   // available columns to select, depending of the source
   const [availableFields, setAvailableFields] = useState<Option[] | undefined>(undefined);
@@ -321,6 +338,7 @@ export const ProjectCreationForm: FC = () => {
       random_selection: true,
       force_label: false,
       seed: random(0, 10000),
+      col_split: null,
     });
     setData(null);
     // reset data when changing dataset
@@ -593,7 +611,7 @@ export const ProjectCreationForm: FC = () => {
                 <input
                   id="n_train"
                   type="number"
-                  disabled={creatingProject}
+                  disabled={creatingProject || !!col_split}
                   {...register('n_train')}
                   max={maxTrainSet}
                   min={1}
@@ -622,7 +640,7 @@ export const ProjectCreationForm: FC = () => {
                 <input
                   id="n_valid"
                   type="number"
-                  disabled={creatingProject || !random_selection}
+                  disabled={creatingProject || !random_selection || !!col_split}
                   {...register('n_valid')}
                   min={0}
                 />
@@ -639,7 +657,7 @@ export const ProjectCreationForm: FC = () => {
                 <input
                   id="n_test"
                   type="number"
-                  disabled={creatingProject || !random_selection}
+                  disabled={creatingProject || !random_selection || !!col_split}
                   {...register('n_test')}
                   min={0}
                 />
@@ -657,11 +675,36 @@ export const ProjectCreationForm: FC = () => {
                     </a>{' '}
                     for further explanations
                   </div>
+                  <label htmlFor="col_split">
+                    Split by existing column{' '}
+                    <a className="col_split_info">
+                      <HiOutlineQuestionMarkCircle />
+                    </a>
+                    <Tooltip anchorSelect=".col_split_info" place="top">
+                      Use a column whose values are "train", "valid", or "test" to assign rows.
+                      <br />
+                      Other values (including NA) are ignored. Disables the other split options.
+                    </Tooltip>
+                  </label>
+                  <Controller
+                    name="col_split"
+                    control={control}
+                    render={({ field: { onChange, value } }) => (
+                      <Select
+                        inputId="col_split"
+                        options={availableFields}
+                        isClearable
+                        isDisabled={creatingProject}
+                        value={availableFields?.find((opt) => opt.value === value) ?? null}
+                        onChange={(selected) => onChange(selected ? selected.value : null)}
+                      />
+                    )}
+                  />
                   <div>
                     <input
                       id="random_selection"
                       type="checkbox"
-                      disabled={creatingProject || force_label}
+                      disabled={creatingProject || force_label || !!col_split}
                       {...register('random_selection')}
                     />
                     <label htmlFor="random_selection">
@@ -680,7 +723,7 @@ export const ProjectCreationForm: FC = () => {
                     <input
                       id="force_label"
                       type="checkbox"
-                      disabled={creatingProject || !random_selection}
+                      disabled={creatingProject || !random_selection || !!col_split}
                       {...register('force_label')}
                     />
                     <label htmlFor="force_label">
@@ -699,7 +742,7 @@ export const ProjectCreationForm: FC = () => {
                     <input
                       id="stratify_train"
                       type="checkbox"
-                      disabled={creatingProject || force_label || !random_selection}
+                      disabled={creatingProject || force_label || !random_selection || !!col_split}
                       {...register('stratify_train')}
                     />
                     <label htmlFor="stratify_train">
@@ -717,7 +760,7 @@ export const ProjectCreationForm: FC = () => {
                     <input
                       id="stratify_eval"
                       type="checkbox"
-                      disabled={creatingProject || force_label || !random_selection}
+                      disabled={creatingProject || force_label || !random_selection || !!col_split}
                       {...register('stratify_eval')}
                     />
                     <label htmlFor="stratify_eval">
@@ -760,7 +803,7 @@ export const ProjectCreationForm: FC = () => {
                     <input
                       id="clear_test"
                       type="checkbox"
-                      disabled={creatingProject || !random_selection}
+                      disabled={creatingProject || !random_selection || !!col_split}
                       {...register('clear_test')}
                     />
                     <label htmlFor="clear_test">Drop annotations for the testset </label>
