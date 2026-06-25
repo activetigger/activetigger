@@ -60,28 +60,28 @@ export const ProjectExplorePage: FC = () => {
                 />
               </Tab>
               {project?.params.kind !== 'image' && (
-              <Tab eventKey="bertopic" title="Topic model">
-                <div className="explanations">
-                  Explore the topics in your train data with{' '}
-                  <a
-                    href="https://maartengr.github.io/BERTopic/index.html"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    Bertopic
-                  </a>
-                  . You can also find a complete tutorial on BERTopic{' '}
-                  <a
-                    href="https://www.css.cnrs.fr/the-general-inquirer-in-the-time-of-llms-a-bertopic-tutorial/"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    here
-                  </a>
-                  .
-                </div>
-                <BertopicPage />
-              </Tab>
+                <Tab eventKey="bertopic" title="Topic model">
+                  <div className="explanations">
+                    Explore the topics in your train data with{' '}
+                    <a
+                      href="https://maartengr.github.io/BERTopic/index.html"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      Bertopic
+                    </a>
+                    . You can also find a complete tutorial on BERTopic{' '}
+                    <a
+                      href="https://www.css.cnrs.fr/the-general-inquirer-in-the-time-of-llms-a-bertopic-tutorial/"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      here
+                    </a>
+                    .
+                  </div>
+                  <BertopicPage />
+                </Tab>
               )}
             </Tabs>
           </div>

@@ -114,10 +114,7 @@ const AnnotationHistoryTable: FC<{ items: ElementHistoryPoint[]; isImageKind?: b
             <td>
               <Link to={`/projects/${projectName}/tag/${hp.element_id}`}>
                 {isImageKind && projectName ? (
-                  <ImageThumbnailImagexp
-                    projectSlug={projectName}
-                    elementId={hp.element_id}
-                  />
+                  <ImageThumbnailImagexp projectSlug={projectName} elementId={hp.element_id} />
                 ) : (
                   truncate(hp.element_text, { length: 80 })
                 )}

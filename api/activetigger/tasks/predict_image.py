@@ -1,9 +1,11 @@
+import contextlib
 import gc
 import json
 import multiprocessing
 import multiprocessing.synchronize
 import os
 import time
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Optional
 
@@ -17,7 +19,7 @@ from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 from transformers import (
     AutoImageProcessor,
-    AutoModelForImageClassification,
+    AutoModelForImageClassification,  # ty: ignore[possibly-missing-import]
 )
 
 from activetigger.data import Data
@@ -64,7 +66,35 @@ def _open_image_rgb_safe(path: str, fallback_size: tuple[int, int]) -> Image.Ima
         return Image.new("RGB", fallback_size, color=(128, 128, 128))
 
 
-class _ImagePredictDataset(Dataset):
+@contextlib.contextmanager
+def _force_spawn_start_method() -> Iterator[None]:
+    """
+    Temporarily switch multiprocessing's global default start method to
+    "spawn" for the duration of the with-block.
+
+    Why: this task runs inside a loky worker, and loky sets the global
+    start method to "loky". DataLoader sub-workers spawned with
+    multiprocessing_context="spawn" still inherit the global default in
+    their bootstrap data (see CPython's multiprocessing.spawn.get_preparation_data),
+    and the freshly-spawned child errors out with
+    "ValueError: cannot find context for 'loky'" because loky isn't
+    imported there. Forcing the global to "spawn" while the loader is alive
+    sidesteps this. We restore the previous method on exit so any code
+    after us that depends on loky's context still works.
+    """
+    prev = multiprocessing.get_start_method(allow_none=True)
+    try:
+        multiprocessing.set_start_method("spawn", force=True)
+        yield
+    finally:
+        if prev is not None and prev != "spawn":
+            try:
+                multiprocessing.set_start_method(prev, force=True)
+            except (ValueError, RuntimeError):
+                pass
+
+
+class _ImagePredictDataset(Dataset[torch.Tensor]):
     """
     Loads + preprocesses one image per __getitem__ so a DataLoader with
     num_workers>0 can overlap decode/resize with GPU inference. Returns the
@@ -79,8 +109,8 @@ class _ImagePredictDataset(Dataset):
     def __len__(self) -> int:
         return len(self.paths)
 
-    def __getitem__(self, idx: int) -> torch.Tensor:
-        img = _open_image_rgb_safe(self.paths[idx], self.fallback_size)
+    def __getitem__(self, index) -> torch.Tensor:
+        img = _open_image_rgb_safe(self.paths[index], self.fallback_size)
         out = self.image_processor(images=img, return_tensors="pt")
         return out["pixel_values"].squeeze(0)
 
@@ -222,7 +252,11 @@ class PredictImage(BaseTask):
             f.write(str(progress))
 
     def __load_model(self):
-        image_processor = AutoImageProcessor.from_pretrained(self.path)
+        # backend="torchvision" picks the fast (tensor-native) image processor
+        # when available; transformers falls back to the numpy/PIL processor
+        # for model families that don't have one. Several × faster on the
+        # decode/resize/normalize path that runs per image in __getitem__.
+        image_processor = AutoImageProcessor.from_pretrained(self.path, backend="torchvision")
         model = AutoModelForImageClassification.from_pretrained(self.path)
         return image_processor, model
 
@@ -336,62 +370,58 @@ class PredictImage(BaseTask):
         else:
             fallback_size = (224, 224)
 
-        # Defined before the try so the finally block can always reference them
-        # to restore the multiprocessing start method.
-        num_workers = 0
-        prev_start_method: str | None = None
-
         try:
             n = self.df.shape[0]
             n_batches = (n + self.batch - 1) // self.batch
             print(f"Predicting {n} images in {n_batches} batches", flush=True)
             paths = self.df[self.col_text].tolist()
 
-            # Overlap image decode + processor work with GPU inference.
-            # Cap workers to avoid oversubscription when the task itself
-            # already runs in a worker process.
-            num_workers = min(4, max(0, (os.cpu_count() or 1) - 1))
             use_cuda = device.type == "cuda"
-            # Inside a loky worker the global multiprocessing default is 'loky'.
-            # That breaks DataLoader sub-workers two ways: loky's Popen reads
-            # process_obj.env (absent on vanilla Process), and even with a
-            # passed spawn context, multiprocessing.spawn.get_preparation_data
-            # bakes the *global* start method into the child — the child then
-            # raises "cannot find context for 'loky'" before loky is imported.
-            # Flip the global to stdlib spawn for this task; restore on exit.
-            prev_start_method = multiprocessing.get_start_method(allow_none=True)
-            if num_workers > 0 and prev_start_method != "spawn":
-                multiprocessing.set_start_method("spawn", force=True)
-            mp_ctx = multiprocessing.get_context("spawn") if num_workers > 0 else None
-            loader = DataLoader(
-                _ImagePredictDataset(paths, image_processor, fallback_size),
-                batch_size=self.batch,
-                shuffle=False,
-                num_workers=num_workers,
-                pin_memory=use_cuda,
-                multiprocessing_context=mp_ctx,
-            )
+            # Decode/resize/normalize is CPU-bound and was the dominant cost
+            # with num_workers=0 — the GPU sat idle between batches. Only
+            # spin up workers when there are enough batches to amortize
+            # their start-up cost. The surrounding _force_spawn_start_method
+            # context manager is what makes num_workers>0 actually safe to
+            # use from inside a loky worker.
+            num_workers = min(4, n_batches) if n_batches >= 4 else 0
+            loader_kwargs: dict = {
+                "batch_size": self.batch,
+                "shuffle": False,
+                "num_workers": num_workers,
+                "pin_memory": use_cuda,
+            }
+            if num_workers > 0:
+                loader_kwargs["multiprocessing_context"] = "spawn"
+                loader_kwargs["persistent_workers"] = True
+                loader_kwargs["prefetch_factor"] = 4
 
             proba_chunks: list[np.ndarray] = []
             processed = 0
-            for batch_tensor in tqdm(loader, total=n_batches, desc="Predicting", unit="batch"):
-                self.__listen_stop_event()
-                batch_tensor = batch_tensor.to(device, non_blocking=use_cuda)
-                with torch.no_grad():
-                    if use_cuda:
-                        with torch.autocast(device_type="cuda", dtype=torch.float16):
+            with _force_spawn_start_method() if num_workers > 0 else contextlib.nullcontext():
+                loader = DataLoader(
+                    _ImagePredictDataset(paths, image_processor, fallback_size),
+                    **loader_kwargs,
+                )
+                for batch_tensor in tqdm(loader, total=n_batches, desc="Predicting", unit="batch"):
+                    self.__listen_stop_event()
+                    batch_tensor = batch_tensor.to(device, non_blocking=use_cuda)
+                    with torch.no_grad():
+                        if use_cuda:
+                            with torch.autocast(device_type="cuda", dtype=torch.float16):
+                                outputs = model(pixel_values=batch_tensor)
+                        else:
                             outputs = model(pixel_values=batch_tensor)
-                    else:
-                        outputs = model(pixel_values=batch_tensor)
-                logits = outputs.logits.float().detach().cpu().numpy()
-                proba_chunks.append(logits_to_probs(logits, kind=self.training_kind))
-                processed += batch_tensor.shape[0]
-                self.__write_progress(100 * processed / n)
+                    logits = outputs.logits.float().detach().cpu().numpy()
+                    proba_chunks.append(logits_to_probs(logits, kind=self.training_kind))
+                    processed += batch_tensor.shape[0]
+                    self.__write_progress(100 * processed / n)
+                # ensure persistent worker processes are torn down (and the
+                # restored start method actually takes effect on next use)
+                # before we exit the context manager.
+                del loader
 
             proba_predictions = (
-                np.concatenate(proba_chunks, axis=0)
-                if proba_chunks
-                else np.zeros((0, num_labels))
+                np.concatenate(proba_chunks, axis=0) if proba_chunks else np.zeros((0, num_labels))
             )
 
             pred = self.__transform_to_dataframe(proba_predictions, id2label=id2label)
@@ -403,15 +433,6 @@ class PredictImage(BaseTask):
             print("Error in image-classification prediction", e)
             raise e
         finally:
-            if (
-                num_workers > 0
-                and prev_start_method is not None
-                and prev_start_method != "spawn"
-            ):
-                try:
-                    multiprocessing.set_start_method(prev_start_method, force=True)
-                except Exception:
-                    pass
             if self.progress_path.exists():
                 os.remove(self.progress_path)
             self.df = None

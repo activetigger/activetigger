@@ -189,7 +189,7 @@ class CreateProject(BaseTask):
         if self.params.n_test + self.params.n_valid != 0:
             n_to_draw = self.params.n_test + self.params.n_valid
             # manage stratification
-            if len(self.params.cols_stratify) == 0:
+            if len(self.params.cols_stratify) == 0 or not self.params.stratify_eval:
                 draw = content.sample(n_to_draw, random_state=self.random_seed)
             else:
                 df_grouped = content.groupby(self.params.cols_stratify, group_keys=False)

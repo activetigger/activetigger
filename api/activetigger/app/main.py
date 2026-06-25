@@ -54,6 +54,9 @@ async def lifespan(app: FastAPI):
     Frame the execution of the api
     """
     orchestrator = get_orchestrator()
+    # If the orchestrator was built at module-import time (no event loop),
+    # its background loops weren't scheduled — start them now.
+    orchestrator.ensure_update_task()
     app.state.orchestrator = orchestrator
     print("Active Tigger starting")
     yield

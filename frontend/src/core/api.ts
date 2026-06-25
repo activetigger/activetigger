@@ -2,7 +2,9 @@ import axios from 'axios';
 import { saveAs } from 'file-saver';
 import { toPairs, values } from 'lodash';
 import createClient, { Middleware } from 'openapi-fetch';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+
+const PROJECTS_REFRESH_EVENT = 'at:refresh-projects';
 
 import streamSaver from 'streamsaver';
 import type { paths } from '../generated/openapi';
@@ -173,6 +175,14 @@ export async function me(token: string) {
 export function useUserProjects() {
   const { notify } = useNotifications();
   const [fetchTrigger, setFetchTrigger] = useState<boolean>(false);
+
+  // Refetch when other parts of the app (e.g. model deletion) signal that
+  // the projects list / storage usage may have changed.
+  useEffect(() => {
+    const handler = () => setFetchTrigger((f) => !f);
+    window.addEventListener(PROJECTS_REFRESH_EVENT, handler);
+    return () => window.removeEventListener(PROJECTS_REFRESH_EVENT, handler);
+  }, []);
 
   // This method is a GET it retrieves data by querying the API
   // but a hook can not be async it has to be a pure function
@@ -1419,7 +1429,10 @@ export function useDeleteBertModel(projectSlug: string | null) {
             },
           },
         });
-        if (!res.error) notify({ type: 'success', message: 'Model deleted.' });
+        if (!res.error) {
+          notify({ type: 'success', message: 'Model deleted.' });
+          window.dispatchEvent(new Event(PROJECTS_REFRESH_EVENT));
+        }
         return true;
       }
       return null;
@@ -1807,7 +1820,7 @@ export function useGetModelFile(projectSlug: string | null | undefined) {
 
   const getModelFile = useCallback(
     async (model: string | null) => {
-      const fileStream = streamSaver.createWriteStream(model + 'tar.gz');
+      const fileStream = streamSaver.createWriteStream(model + '.tar.gz');
       if (model && projectSlug) {
         const res = await api.GET('/export/bert', {
           params: {

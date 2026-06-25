@@ -146,19 +146,44 @@ class LanguageModels:
 
     def delete(self, name: str) -> None:
         """
-        Delete bert model
+        Delete bert model.
+
+        Cleans up filesystem first (model directory and optional tar.gz export),
+        then removes the DB row. Each step is independent so a partial state
+        (e.g. orphan files with no DB row, or a missing tar.gz) can still be
+        recovered by a retry.
         """
-        # remove from database
-        if not self.language_models_service.delete_model(self.project_slug, name):
+        if not name:
+            raise ValueError("Model name is empty")
+
+        model_dir = self.path.joinpath(name)
+        tar_path = f"{config.data_path}/projects/static/{self.project_slug}/{name}.tar.gz"
+        had_files = model_dir.exists() or os.path.exists(tar_path)
+
+        errors = []
+
+        if model_dir.exists():
+            try:
+                shutil.rmtree(model_dir)
+            except Exception as e:
+                errors.append(f"model directory: {e}")
+
+        try:
+            os.remove(tar_path)
+        except FileNotFoundError:
+            pass
+        except Exception as e:
+            errors.append(f"tar archive: {e}")
+
+        # remove from database last; treat a missing row as a no-op rather than
+        # an error so orphan files can still be cleaned up by a retry.
+        db_removed = self.language_models_service.delete_model(self.project_slug, name)
+
+        if not db_removed and not had_files:
             raise FileNotFoundError("Model does not exist")
 
-        # remove files associated
-        try:
-            if name and name != "":
-                shutil.rmtree(self.path.joinpath(name))
-                os.remove(f"{config.data_path}/projects/static/{self.project_slug}/{name}.tar.gz")
-        except Exception as e:
-            raise Exception(f"Problem to delete model files : {e}")
+        if errors:
+            raise Exception(f"Problem to delete model files : {'; '.join(errors)}")
 
     def current_user_processes(self, user: str) -> list[LMComputing]:
         """
@@ -610,6 +635,11 @@ class LanguageModels:
             if "training_kind" not in metrics[key]:
                 metrics[key]["training_kind"] = "multiclass"
 
+        db_params = (
+            self.language_models_service.get_model_db_parameters(self.project_slug, model_name)
+            or {}
+        )
+
         return ModelInformationsModel(
             params=self.get_parameters(model_name),
             loss=self.get_loss(model_name),
@@ -620,6 +650,7 @@ class LanguageModels:
                 test_scores=metrics.get("test", None),
                 outofsample_scores=metrics.get("outofsample", None),
             ),
+            predicted=bool(db_params.get("predicted", False)),
         )
 
     def get_base_model(self, model_name) -> dict:

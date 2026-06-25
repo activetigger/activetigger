@@ -7,6 +7,7 @@ import { FaGear } from 'react-icons/fa6';
 import { IoIosRefresh } from 'react-icons/io';
 import { MdDriveFileRenameOutline } from 'react-icons/md';
 import { useParams } from 'react-router-dom';
+import { Tooltip } from 'react-tooltip';
 import {
   useDeleteBertModel,
   useDeleteQuickModel,
@@ -29,7 +30,6 @@ import { ValidateButtons } from './ValidateButton';
 import { ModelCreationForm } from './forms/ModelCreationForm';
 import { QuickModelForm } from './forms/QuickModelForm';
 import { LossChart } from './vizualisation/lossChart';
-import { Tooltip } from 'react-tooltip';
 
 interface renameModel {
   new_name: string;
@@ -247,35 +247,35 @@ export const ModelManagement: FC = () => {
       </ModelsPillDisplay>
 
       {currentProject?.params?.kind !== 'image' && (
-      <>
-      <span className="fw-semibold text-muted small">Bert Models</span>
-      <ModelsPillDisplay
-        modelNames={Object.values(availableBertModels)
-          .sort((bertModelA, bertModelB) =>
-            sortDatesAsStrings(bertModelA?.time, bertModelB?.time, true),
-          )
-          .map((model) => (model ? model.name : ''))}
-        currentModelName={currentBertModel}
-        setCurrentModelName={setCurrentBertModel}
-        deleteModelFunction={deleteBertModel}
-      >
-        <button
-          onClick={() => {
-            setDisplayNewBertModel(true);
-            setCurrentBertModel(null);
-          }}
-          className={cx('model-pill ', isComputing ? 'disabled' : '')}
-          disabled={kindScheme === 'span'}
-          id="create-new"
-          style={kindScheme === 'span' ? { cursor: 'not-allowed' } : {}}
-        >
-          <FaPlusCircle size={20} /> Create new BERT model
-        </button>
-        <Tooltip anchorSelect="#create-new">
-          {kindScheme === 'span' ? 'Span classification is not yet available' : 'Train a model'}
-        </Tooltip>
-      </ModelsPillDisplay>
-      </>
+        <>
+          <span className="fw-semibold text-muted small">Bert Models</span>
+          <ModelsPillDisplay
+            modelNames={Object.values(availableBertModels)
+              .sort((bertModelA, bertModelB) =>
+                sortDatesAsStrings(bertModelA?.time, bertModelB?.time, true),
+              )
+              .map((model) => (model ? model.name : ''))}
+            currentModelName={currentBertModel}
+            setCurrentModelName={setCurrentBertModel}
+            deleteModelFunction={deleteBertModel}
+          >
+            <button
+              onClick={() => {
+                setDisplayNewBertModel(true);
+                setCurrentBertModel(null);
+              }}
+              className={cx('model-pill ', isComputing ? 'disabled' : '')}
+              disabled={kindScheme === 'span'}
+              id="create-new"
+              style={kindScheme === 'span' ? { cursor: 'not-allowed' } : {}}
+            >
+              <FaPlusCircle size={20} /> Create new BERT model
+            </button>
+            <Tooltip anchorSelect="#create-new">
+              {kindScheme === 'span' ? 'Span classification is not yet available' : 'Train a model'}
+            </Tooltip>
+          </ModelsPillDisplay>
+        </>
       )}
 
       {isComputing && authenticatedUser?.username && (
@@ -357,6 +357,7 @@ export const ModelManagement: FC = () => {
             kind="bert"
             id="compute-prediction-training"
             buttonLabel="Compute predictions"
+            existingPrediction={currentBertModelInformations.predicted}
           />
           <div className="my-3"></div>
           <DisplayScores

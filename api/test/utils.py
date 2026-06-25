@@ -75,7 +75,7 @@ def create_project(
         force_label=False,
         seed=1290,
         stratify_train=False,
-        stratify_test=False,
+        stratify_eval=False,
         from_project=None,
         from_toy_dataset=False,
     )

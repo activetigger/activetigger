@@ -128,6 +128,22 @@ class ModelsService:
         session.close()
         return model
 
+    def get_model_db_parameters(self, project_slug: str, name: str) -> dict[str, Any] | None:
+        """
+        Get the parameters dict stored in the database for a model.
+
+        Distinct from the on-disk parameters.json (training hyperparameters):
+        this dict tracks runtime flags such as predicted / predicted_all /
+        predicted_external / tested / compressed / exclude_labels.
+        """
+        with self.SessionMaker() as session:
+            row = session.execute(
+                select(Models.parameters).filter_by(project_slug=project_slug, name=name)
+            ).first()
+        if row is None:
+            return None
+        return dict(row.parameters or {})
+
     def rename_model(self, project_slug: str, old_name: str, new_name: str):
         session = self.SessionMaker()
 

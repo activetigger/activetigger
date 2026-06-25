@@ -157,7 +157,7 @@ export const ProjectionExplorer: FC<ProjectionExplorerProps> = ({
               >
                 Text {selectedElement.element_id}
               </a>
-              <div>
+              <div style={{ whiteSpace: 'pre-wrap' }}>
                 {currentProject?.params?.kind === 'image' && projectName ? (
                   <ImageClassificationPanelImagexp
                     element={selectedElement}

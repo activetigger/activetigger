@@ -63,6 +63,10 @@ export const AnnotationManagement: FC = () => {
   const [element, setElement] = useState<ElementOutModel | null>(null); //state for the current element
   const [nSample, setNSample] = useState<number | null>(null); // specific info
 
+  // timestamp at which the current element was displayed, used to compute
+  // mean annotation duration in the status notch.
+  const elementDisplayedAtRef = useRef<{ id: string; at: number } | null>(null);
+
   // Metadata returned by /elements/next (selection mode, prompt similarity/rank)
   // is keyed by element_id so it survives the navigation + getElementById round-
   // trip and gets merged onto the displayed element. Stored in a ref because
@@ -210,14 +214,33 @@ export const AnnotationManagement: FC = () => {
     element,
   ]);
 
+  // mark the moment the current element became visible to the user
+  useEffect(() => {
+    if (element?.element_id && element.element_id !== 'noelement') {
+      elementDisplayedAtRef.current = { id: element.element_id, at: Date.now() };
+    }
+  }, [element?.element_id]);
+
   const postAnnotation = useCallback(
     async (label: string | null, elementId: string, comment?: string) => {
       if (elementId === 'noelement') return; // forbid annotation on noelement
       if (elementId) {
+        const displayedInfo = elementDisplayedAtRef.current;
+        const durationMs =
+          displayedInfo && displayedInfo.id === elementId
+            ? Date.now() - displayedInfo.at
+            : undefined;
         await addAnnotation(elementId, label, comment || null, selectionHistory[elementId]);
         const newElement = await getElementById(elementId, effectivePhase);
         if (newElement) {
-          addElementInAnnotationSessionHistory(elementId, newElement.text, label, comment);
+          addElementInAnnotationSessionHistory(
+            elementId,
+            newElement.text,
+            label,
+            comment,
+            undefined,
+            durationMs,
+          );
           setElement(newElement);
           // wait for 500ms before fetch new element to see new button state
           setTimeout(() => {

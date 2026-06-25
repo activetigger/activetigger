@@ -1,11 +1,7 @@
 import { FC, useState } from 'react';
 import { LuRefreshCw, LuTrash2 } from 'react-icons/lu';
 
-import {
-  useAddImagePrompt,
-  useDeleteImagePrompt,
-  useListImagePrompts,
-} from '../../core/api';
+import { useAddImagePrompt, useDeleteImagePrompt, useListImagePrompts } from '../../core/api';
 import { PromptsProjectStateModel } from '../../types';
 
 interface PromptsPanelProps {
@@ -80,11 +76,7 @@ export const PromptsPanel: FC<PromptsPanelProps> = ({ projectSlug, state }) => {
                 ))}
               </select>
             )}
-            <button
-              className="btn btn-primary btn-sm"
-              onClick={onSubmit}
-              disabled={!text.trim()}
-            >
+            <button className="btn btn-primary btn-sm" onClick={onSubmit} disabled={!text.trim()}>
               Save prompt
             </button>
           </div>

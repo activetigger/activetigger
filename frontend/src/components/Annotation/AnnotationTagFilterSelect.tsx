@@ -5,7 +5,13 @@ import { omit, sortBy, uniq } from 'lodash';
 import { useAppContext } from '../../core/useAppContext';
 import { truncateInMiddle } from '../../core/utils';
 import { SelectionConfig } from '../../types';
-import { AnnotationIcon, CommentIcon, NoAnnotationIcon, UserIcon } from '../Icons';
+import {
+  AnnotationIcon,
+  CommentIcon,
+  NoAnnotationIcon,
+  UserIcon,
+  WrongPredictionIcon,
+} from '../Icons';
 
 export interface TagFilterOption {
   sample: string;
@@ -39,6 +45,7 @@ const OptionIcon: FC<{ option: TagFilterOption }> = ({ option }) => (
     {option.sample === 'tagged' && option.user === undefined && <AnnotationIcon className="me-1" />}
     {option.sample === 'tagged' && option.user !== undefined && <UserIcon className="me-1" />}
     {option.sample === 'commented' && <CommentIcon className="me-1" />}
+    {option.sample === 'wrong' && <WrongPredictionIcon className="me-1" />}
   </>
 );
 
@@ -67,7 +74,7 @@ export const AnnotationTagFilterSelect: FC<AnnotationTagFilterSelectProps> = ({
 }) => {
   // context data
   const {
-    appContext: { selectionConfig, currentProject: project },
+    appContext: { selectionConfig, currentProject: project, activeModel, phase },
     setAppContext,
   } = useAppContext();
 
@@ -97,9 +104,13 @@ export const AnnotationTagFilterSelect: FC<AnnotationTagFilterSelectProps> = ({
   // handle option coherence by disabling options depending on current selection Config
   const isTagFilterOptionDisabled = useCallback(
     (option: TagFilterOption) => {
+      // "wrong predictions" requires an active model and only makes sense on train
+      if (option.sample === 'wrong' && (!activeModel || phase !== 'train')) {
+        return true;
+      }
       return selectionConfig.sample !== 'all' && selectionConfig.sample !== option.sample;
     },
-    [selectionConfig.sample],
+    [selectionConfig.sample, activeModel, phase],
   );
 
   const tagFilterSelectValue = useMemo(() => {
@@ -150,7 +161,9 @@ export const AnnotationTagFilterSelect: FC<AnnotationTagFilterSelectProps> = ({
                 ? 'not tagged by me'
                 : o.sample === 'commented'
                   ? 'with comments'
-                  : o.sample || '',
+                  : o.sample === 'wrong'
+                    ? 'wrong predictions'
+                    : o.sample || '',
           20,
         )
       }

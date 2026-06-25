@@ -106,7 +106,7 @@ class Features:
         # Optional hook called as `on_delete(name, kind)` after a successful
         # feature delete. Project wires this up for image projects so that
         # deleting a multimodal-embeddings feature cascades to prompts.
-        self.on_delete: Optional[Callable[[str, str], None]] = None
+        self.on_delete: Optional[Callable[[str, str | None], None]] = None
         # Optional hook called after a full reset_features_file() — all
         # features are gone, so any prompt/cache bound to them is stale.
         self.on_reset: Optional[Callable[[], None]] = None
@@ -296,7 +296,9 @@ class Features:
             new_content = pd.DataFrame(new_content)
 
         # change column name with a prefix
-        new_content.columns = [f"{name}__{i}" for i in new_content.columns]  # ty: ignore[invalid-assignment]
+        new_content.columns = [  # ty: ignore[invalid-assignment]
+            f"{name}__{i}" for i in new_content.columns
+        ]
 
         # read data, add the feature to the dataset and save
         content = pd.read_parquet(self.path_features)
@@ -332,6 +334,7 @@ class Features:
 
         # remember kind before the DB row is gone, so the on_delete hook
         # (e.g. prompts cascade) can dispatch on it.
+        kind: str | None = None
         try:
             kind = self.projects_service.get_feature(self.project_slug, name).kind
         except Exception:

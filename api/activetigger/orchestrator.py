@@ -111,9 +111,12 @@ class Orchestrator:
         self._heavy_stats_last_update = 0.0
         self._heavy_stats_cache: dict = self._collect_heavy_stats()
 
-        # update the projects asynchronously
+        # update the projects asynchronously; if no loop is running yet
+        # (module-import-time init from main.py), defer to ensure_update_task()
+        # which the FastAPI lifespan will call once the loop is up.
         self._running = True
-        self._update_task = asyncio.create_task(self._update(timeout=config.update_timeout))
+        self._update_task: asyncio.Task | None = None
+        self.ensure_update_task()
 
         # create the demo project if not existing at startup
         try:
@@ -122,6 +125,21 @@ class Orchestrator:
         except Exception as e:
             print(f"Error while creating demo project: {e}")
         self.server_state = self.get_server_state()
+
+    def ensure_update_task(self) -> None:
+        """
+        Schedule the background _update loop if it isn't already running.
+        Safe to call repeatedly. Used by the FastAPI lifespan to (re)start
+        the loop when the orchestrator was instantiated outside one
+        (module-import-time init, tests).
+        """
+        self.queue.ensure_update_task()
+        if self._update_task is not None and not self._update_task.done():
+            return
+        try:
+            self._update_task = asyncio.create_task(self._update(timeout=config.update_timeout))
+        except RuntimeError:
+            self._update_task = None
 
     def __del__(self):
         """

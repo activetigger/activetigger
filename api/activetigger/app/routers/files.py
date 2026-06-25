@@ -107,6 +107,7 @@ def upload_file_project(
         raise HTTPException(status_code=500, detail="Only csv and parquet files are allowed")
 
     # try to upload the file
+    project_path: Path | None = None
     try:
         # create a folder for the project to be created
         project_slug = orchestrator.check_project_name(project_name)
@@ -125,12 +126,12 @@ def upload_file_project(
         print("File uploaded successfully")
 
     except HTTPException:
-        if project_path.exists():
+        if project_path is not None and project_path.exists():
             shutil.rmtree(project_path)
         raise
     except Exception as e:
         # if failed, remove the project folder
-        if project_path.exists():
+        if project_path is not None and project_path.exists():
             shutil.rmtree(project_path)
         raise HTTPException(status_code=500, detail=str(e))
 

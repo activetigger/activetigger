@@ -48,7 +48,7 @@ export const ProjectCard: FC<ProjectCardProps> = ({ project, resetContext }) => 
           <span id="value">{project.created_by}</span>
         </p>
         <p className="projectdetails">
-          <span id="key">Created at: </span>
+          <span id="key">Created: </span>
           <span id="value">{project.created_at}</span>
         </p>
 

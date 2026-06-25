@@ -68,9 +68,7 @@ class ComputeMultimodalPrompt(BaseTask):
 
             # trust_remote_code enables BGE-VL / Qwen-VL custom modeling code;
             # native CLIP ignores it.
-            model = SentenceTransformer(
-                self.model_name, device=device, trust_remote_code=True
-            )
+            model = SentenceTransformer(self.model_name, device=device, trust_remote_code=True)
 
             if self.event is not None and self.event.is_set():
                 raise Exception("Process interrupted by user")
