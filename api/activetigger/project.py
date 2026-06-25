@@ -1386,6 +1386,10 @@ class Project:
         - for a scheme & dataset
         - for all schemes & every annotation
         """
+        # Row-level columns are shared across schemes (one value per row).
+        # Annotation-level columns are produced per scheme and prefixed.
+        SHARED_COLS = ["dataset", "text", "id_external"]
+        SCHEME_COLS = ["labels", "user", "timestamp", "comment"]
 
         path = self.params.dir  # path of the data
         if path is None:
@@ -1401,37 +1405,34 @@ class Project:
 
         # for a specific scheme and dataset
         if scheme != "all" and dataset in ["train", "test", "valid"]:
-            data = self.schemes.get_scheme(
+            df = self.schemes.get_scheme(
                 scheme=scheme, complete=True, datasets=[dataset], id_external=True
             )
+            data = df[SHARED_COLS + SCHEME_COLS].copy()
             file_name = f"export_tags_{self.name}_{scheme}.{format}"
         # for all the annotated data in the project, need to concate
         elif scheme == "all":
             schemes = self.schemes.available()
-            data = pd.concat(
-                [
-                    self.schemes.get_scheme(
-                        scheme_name,
-                        complete=True,
-                        datasets=["train", "valid", "test"],
-                        id_external=True,
-                    ).rename(columns=lambda col: f"{scheme_name}_{col}")
-                    for scheme_name in schemes
-                ],
-                axis=1,
-            )
+            if not schemes:
+                raise Exception("No scheme available to export")
+
+            shared = None
+            per_scheme = []
+            for scheme_name in schemes:
+                df = self.schemes.get_scheme(
+                    scheme_name,
+                    complete=True,
+                    datasets=["train", "valid", "test"],
+                    id_external=True,
+                )
+                if shared is None:
+                    shared = df[SHARED_COLS].copy()
+                per_scheme.append(
+                    df[SCHEME_COLS].rename(columns=lambda c, s=scheme_name: f"{s}_{c}")
+                )
+            data = pd.concat([shared] + per_scheme, axis=1)
             file_name = f"export_tags_{self.name}_all.{format}"
             dropna = False
-
-            # Combine all columns id_internal into one
-            columns_id_external = [col for col in data.columns if col.endswith("id_external")]
-            id_external_serie = data[columns_id_external[0]].copy()
-            for column_external in columns_id_external:
-                id_external_serie = id_external_serie.combine(
-                    data[column_external], lambda a, b: a
-                )  # if 2 elements exist take the first one
-            data = data.drop(columns=columns_id_external)
-            data.loc[:, "id_external"] = id_external_serie
         else:
             raise Exception("Scheme or dataset not recognized")
 
@@ -1439,28 +1440,24 @@ class Project:
         if dropna:
             data = data.dropna(subset=["labels"])
 
-        # select columns + order
-        # drop dataset_annotation (redundant with dataset)
-        cols_to_drop = [col for col in data.columns if col.endswith("dataset_annotation")]
-        data = data.drop(columns=cols_to_drop, errors="ignore")
-
-        cols = [col for col in data.columns if not (col.endswith("id_internal"))]
-        data = data[cols]
+        # rename the project's id column and put it first
         if self.params.col_id is not None:
-            data.rename(
-                columns={"id_external": self.params.col_id.removeprefix("dataset_")},
-                inplace=True,
-            )
+            id_col = self.params.col_id.removeprefix("dataset_")
+            data = data.rename(columns={"id_external": id_col})
+        else:
+            id_col = "id_external"
+        ordered = [id_col] + [c for c in data.columns if c != id_col]
+        data = data[ordered]
 
         # write file in the folder
         if format == "csv":
-            data.to_csv(path.joinpath(file_name))
+            data.to_csv(path.joinpath(file_name), index=False)
         if format == "parquet":
-            data.to_parquet(path.joinpath(file_name))
+            data.to_parquet(path.joinpath(file_name), index=False)
         if format == "xlsx":
             if "timestamp" in data.columns:
                 data["timestamp"] = data["timestamp"].dt.tz_localize(None)
-            data.to_excel(path.joinpath(file_name))
+            data.to_excel(path.joinpath(file_name), index=False)
 
         return FileResponse(path.joinpath(file_name), filename=file_name)
 
