@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import distinct, func
 from sqlalchemy.orm import Session as SessionType
 from sqlalchemy.orm import sessionmaker
 
@@ -129,27 +130,59 @@ class MonitoringService:
         session.close()
         return processes
 
-    def get_recent_activity(
+    def get_hourly_activity_counts(
         self, days: int = 7
-    ) -> tuple[list[tuple[datetime, str]], list[tuple[datetime, str]]]:
+    ) -> tuple[dict[datetime, int], dict[datetime, int]]:
         """
-        Get raw (time, user_name) pairs from annotations and logs over the last `days` days.
-        Aggregation by hour is done by the caller to stay portable across SQLite/Postgres.
+        Aggregated hourly counts over the last `days` days, computed in SQL so the
+        result set is bounded by ~(days * 24) rows instead of every annotation/log row.
+
+        Returns (annotations_by_hour, distinct_users_by_hour). Hours are UTC,
+        aligned on the hour start.
         """
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         session = self.Session()
-        annotations = (
-            session.query(Annotations.time, Annotations.user_name)
-            .filter(Annotations.time >= cutoff)
-            .all()
-        )
-        logs = (
-            session.query(Logs.time, Logs.user_name)
-            .filter(Logs.time >= cutoff)
-            .all()
-        )
-        session.close()
-        return (
-            [(t, u) for t, u in annotations],
-            [(t, u) for t, u in logs],
-        )
+        try:
+            dialect = session.bind.dialect.name if session.bind is not None else ""
+
+            # Build a portable hour-bucket expression.
+            # Postgres: date_trunc returns a timestamp; SQLite has no date_trunc,
+            # so we use strftime which returns a 'YYYY-MM-DD HH' text token.
+            if dialect == "postgresql":
+                hour_ann = func.date_trunc("hour", Annotations.time)
+                hour_log = func.date_trunc("hour", Logs.time)
+            else:
+                hour_ann = func.strftime("%Y-%m-%d %H", Annotations.time)
+                hour_log = func.strftime("%Y-%m-%d %H", Logs.time)
+
+            annotations_rows = (
+                session.query(hour_ann.label("h"), func.count().label("c"))
+                .filter(Annotations.time >= cutoff)
+                .group_by(hour_ann)
+                .all()
+            )
+            logs_rows = (
+                session.query(
+                    hour_log.label("h"),
+                    func.count(distinct(Logs.user_name)).label("c"),
+                )
+                .filter(Logs.time >= cutoff)
+                .group_by(hour_log)
+                .all()
+            )
+        finally:
+            session.close()
+
+        def to_utc_hour(h) -> datetime:
+            if isinstance(h, str):
+                # SQLite path: 'YYYY-MM-DD HH'
+                dt = datetime.strptime(h, "%Y-%m-%d %H")
+            else:
+                dt = h
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)
+
+        annotations_by_hour = {to_utc_hour(h): int(c) for h, c in annotations_rows}
+        users_by_hour = {to_utc_hour(h): int(c) for h, c in logs_rows}
+        return annotations_by_hour, users_by_hour

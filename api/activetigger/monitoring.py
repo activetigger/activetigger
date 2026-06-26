@@ -1,4 +1,4 @@
-from collections import defaultdict
+import threading
 from datetime import datetime, timedelta, timezone
 
 import pandas as pd
@@ -86,10 +86,13 @@ class Monitoring:
 
     db_manager: DatabaseManager
     project_slug: str | None
+    ACTIVITY_CACHE_TTL_SECONDS: int = 300
 
     def __init__(self, db_manager: DatabaseManager, project_slug: str | None = None) -> None:
         self.db_manager = db_manager
         self.project_slug = project_slug
+        self._activity_cache: dict[int, tuple[datetime, "MonitoringActivityModel"]] = {}
+        self._activity_lock = threading.Lock()
 
     def register_process(
         self, process_name: str, kind: str, parameters: dict, user_name: str
@@ -213,29 +216,46 @@ class Monitoring:
         )
         return MonitoringMetricsModel(quickmodels=m_quickmodels, languagemodels=m_languagemodels)
 
-    def get_weekly_activity(self, days: int = 7) -> MonitoringActivityModel:
+    def get_weekly_activity(
+        self, days: int = 7, force_refresh: bool = False
+    ) -> MonitoringActivityModel:
         """
         Hourly timeline of annotations count and distinct active users
-        over the last `days` days. Buckets are aligned on the start of each
-        hour (UTC) and the series always covers a fixed number of slots so
-        gaps render as zero on the frontend.
+        over the last `days` days, cached for ACTIVITY_CACHE_TTL_SECONDS.
+
+        Cached per `days` value on this Monitoring singleton; concurrent
+        admin requests share the same in-flight computation via a lock.
         """
-        annotations, logs = self.db_manager.monitoring_service.get_recent_activity(days=days)
+        now = datetime.now(timezone.utc)
+        if not force_refresh:
+            cached = self._activity_cache.get(days)
+            if (
+                cached is not None
+                and (now - cached[0]).total_seconds() < self.ACTIVITY_CACHE_TTL_SECONDS
+            ):
+                return cached[1]
 
-        annotations_by_hour: dict[datetime, int] = defaultdict(int)
-        users_by_hour: dict[datetime, set[str]] = defaultdict(set)
+        with self._activity_lock:
+            if not force_refresh:
+                cached = self._activity_cache.get(days)
+                if (
+                    cached is not None
+                    and (datetime.now(timezone.utc) - cached[0]).total_seconds()
+                    < self.ACTIVITY_CACHE_TTL_SECONDS
+                ):
+                    return cached[1]
+            value = self._compute_weekly_activity(days)
+            self._activity_cache[days] = (datetime.now(timezone.utc), value)
+            return value
 
-        def to_hour(t: datetime) -> datetime:
-            # PostgreSQL returns tz-aware datetimes, SQLite returns naive ones
-            if t.tzinfo is None:
-                t = t.replace(tzinfo=timezone.utc)
-            return t.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)
-
-        for t, _ in annotations:
-            annotations_by_hour[to_hour(t)] += 1
-
-        for t, user_name in logs:
-            users_by_hour[to_hour(t)].add(user_name)
+    def _compute_weekly_activity(self, days: int) -> MonitoringActivityModel:
+        """
+        Build the fixed-length hourly series from SQL-aggregated buckets so that
+        empty hours render as zero on the frontend.
+        """
+        annotations_by_hour, users_by_hour = (
+            self.db_manager.monitoring_service.get_hourly_activity_counts(days=days)
+        )
 
         total_hours = days * 24
         now_hour = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
@@ -245,7 +265,7 @@ class Monitoring:
             MonitoringActivityPointModel(
                 hour=(start_hour + timedelta(hours=i)).isoformat(),
                 annotations=annotations_by_hour.get(start_hour + timedelta(hours=i), 0),
-                active_users=len(users_by_hour.get(start_hour + timedelta(hours=i), set())),
+                active_users=users_by_hour.get(start_hour + timedelta(hours=i), 0),
             )
             for i in range(total_hours)
         ]
