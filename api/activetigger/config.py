@@ -127,6 +127,14 @@ class Config(metaclass=_Singleton):
     mail_server: str | None = os.environ.get("MAIL_SERVER", None)
     mail_account: str | None = os.environ.get("MAIL_ACCOUNT", None)
     mail_password: str | None = os.environ.get("MAIL_PASSWORD", None)
+    # Carbon footprint tracking via codecarbon. carbon_country is a 3-letter ISO
+    # code (e.g. "FRA"); when None, codecarbon attempts geolocation on first use.
+    carbon_enabled: bool = os.environ.get("CARBON_ENABLED", "true").lower() in (
+        "true",
+        "1",
+        "yes",
+    )
+    carbon_country: str | None = os.environ.get("CARBON_COUNTRY", None)
 
     def __init__(self):
         # for variables which needs cast or other treatment we do that work in the constructor

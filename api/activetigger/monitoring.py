@@ -7,6 +7,8 @@ from activetigger.datamodels import (
     EventsModel,
     MonitoringActivityModel,
     MonitoringActivityPointModel,
+    MonitoringEmissionsModel,
+    MonitoringGpuModel,
     MonitoringLanguageModelsModel,
     MonitoringMetricsModel,
     MonitoringQuickModelsModel,
@@ -14,19 +16,198 @@ from activetigger.datamodels import (
 from activetigger.db.manager import DatabaseManager
 
 
+class GpuMonitor:
+    """Background poller that tracks peak GPU memory used (in GB) during a task.
+
+    Used memory is `total_memory - available_memory` measured via
+    `activetigger.functions.get_gpu_memory_info`. If no GPU is available on the
+    first sample, the polling thread is not started.
+    """
+
+    def __init__(self, poll_interval: float = 5.0) -> None:
+        self._poll_interval = poll_interval
+        self._max_used_gb = 0.0
+        self._total_memory_gb = 0.0
+        self._gpu_available = False
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        if self._thread is not None:
+            return
+        self._stop_event.clear()
+        self._max_used_gb = 0.0
+        self._total_memory_gb = 0.0
+        self._gpu_available = False
+        # Synchronous first sample: skip the polling thread when no GPU is present.
+        self._sample()
+        if not self._gpu_available:
+            return
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> float:
+        if self._thread is not None:
+            self._stop_event.set()
+            self._thread.join(timeout=self._poll_interval * 2)
+            self._thread = None
+        # Final sample to catch a peak that occurred near task end.
+        self._sample()
+        return self._max_used_gb
+
+    def _sample(self) -> None:
+        # Local import to avoid importing torch at module load time.
+        from activetigger.functions import get_gpu_memory_info
+
+        try:
+            info = get_gpu_memory_info()
+        except Exception:
+            return
+        self._gpu_available = bool(info.gpu_available)
+        if not info.gpu_available:
+            return
+        self._total_memory_gb = float(info.total_memory)
+        used = float(info.total_memory) - float(info.available_memory)
+        if used > self._max_used_gb:
+            self._max_used_gb = used
+
+    def _run(self) -> None:
+        while not self._stop_event.is_set():
+            self._sample()
+            self._stop_event.wait(self._poll_interval)
+
+    @property
+    def max_used_gb(self) -> float:
+        return round(self._max_used_gb, 3)
+
+    @property
+    def total_memory_gb(self) -> float:
+        return round(self._total_memory_gb, 3)
+
+    @property
+    def gpu_available(self) -> bool:
+        return self._gpu_available
+
+
+class EmissionsMonitor:
+    """Wraps a codecarbon OfflineEmissionsTracker for the lifetime of a task.
+
+    Provides safe start/stop and exposes the final emissions in kg CO2eq plus
+    energy consumed in kWh. All failure modes are swallowed so that emission
+    tracking can never crash the host task.
+    """
+
+    def __init__(
+        self,
+        enabled: bool = True,
+        country_iso_code: str | None = None,
+        measure_power_secs: int = 15,
+    ) -> None:
+        self._enabled = enabled
+        self._country = country_iso_code
+        self._measure_power_secs = measure_power_secs
+        self._tracker = None
+        self._available = False
+        self._emissions_kg = 0.0
+        self._energy_kwh = 0.0
+        self._country_iso_code: str | None = None
+
+    def start(self) -> None:
+        if not self._enabled or self._tracker is not None:
+            return
+        try:
+            from codecarbon import OfflineEmissionsTracker  # local import: optional dep
+        except Exception:
+            return
+        try:
+            kwargs: dict = {
+                "save_to_file": False,
+                "log_level": "error",
+                "tracking_mode": "process",
+                "allow_multiple_runs": True,
+                "measure_power_secs": self._measure_power_secs,
+            }
+            if self._country:
+                kwargs["country_iso_code"] = self._country
+            else:
+                # OfflineEmissionsTracker requires *some* location; default to
+                # France when no admin override is set. Online geolocation would
+                # require network at task start, which we want to avoid.
+                kwargs["country_iso_code"] = "FRA"
+            self._tracker = OfflineEmissionsTracker(**kwargs)
+            self._tracker.start()
+            self._available = True
+        except Exception:
+            self._tracker = None
+            self._available = False
+
+    def stop(self) -> float:
+        if self._tracker is None:
+            return self._emissions_kg
+        try:
+            emissions = self._tracker.stop()
+            if emissions is not None:
+                self._emissions_kg = float(emissions)
+            data = getattr(self._tracker, "final_emissions_data", None)
+            if data is not None:
+                self._energy_kwh = float(getattr(data, "energy_consumed", 0.0) or 0.0)
+                self._country_iso_code = getattr(data, "country_iso_code", None)
+        except Exception:
+            pass
+        finally:
+            self._tracker = None
+        return self._emissions_kg
+
+    @property
+    def available(self) -> bool:
+        return self._available
+
+    @property
+    def emissions_kg(self) -> float:
+        # 6 decimals: typical small-run emissions are ~1e-6 kg.
+        return round(self._emissions_kg, 6)
+
+    @property
+    def energy_kwh(self) -> float:
+        return round(self._energy_kwh, 6)
+
+    @property
+    def country_iso_code(self) -> str | None:
+        return self._country_iso_code
+
+
 class TaskTimer:
     """This object centralises the timing component in order to save them as part
-    of the "additional_event" in the Monitoring.close_process function"""
+    of the "additional_event" in the Monitoring.close_process function.
+
+    Also wraps a `GpuMonitor` so every TaskTimer-using task automatically records
+    the peak GPU memory used during its execution under the "gpu" event key, and
+    an `EmissionsMonitor` recording carbon footprint under the "emissions" key.
+    """
 
     body = {"start": "FAILED", "end": "FAILED", "duration": "FAILED", "order": None}
 
     def __init__(
-        self, compulsory_steps: list[str], optional_steps: list[str] | None = None
+        self,
+        compulsory_steps: list[str],
+        optional_steps: list[str] | None = None,
+        gpu_poll_interval: float = 5.0,
     ) -> None:
         self.__additional_events = {step: self.body for step in compulsory_steps}
         self.__starts: dict[str, datetime] = {}
         self.__stops: list[str] = []
         self.__optional_steps: list[str] = optional_steps if optional_steps is not None else []
+        self.__gpu_monitor = GpuMonitor(poll_interval=gpu_poll_interval)
+        self.__gpu_monitor.start()
+        # Local import to keep the config module out of monitoring's import path
+        # for unit tests that build TaskTimer directly.
+        from activetigger.config import config
+
+        self.__emissions_monitor = EmissionsMonitor(
+            enabled=bool(getattr(config, "carbon_enabled", True)),
+            country_iso_code=getattr(config, "carbon_country", None),
+        )
+        self.__emissions_monitor.start()
 
     def start(self, step: str) -> None:
         """
@@ -74,6 +255,22 @@ class TaskTimer:
         }
 
     def get_events(self) -> dict[str, dict[str, str | None]]:
+        # Finalize GPU monitoring once, on the first call.
+        if "gpu" not in self.__additional_events:
+            self.__gpu_monitor.stop()
+            self.__additional_events["gpu"] = {
+                "available": "true" if self.__gpu_monitor.gpu_available else "false",
+                "max_used_gb": str(self.__gpu_monitor.max_used_gb),
+                "total_memory_gb": str(self.__gpu_monitor.total_memory_gb),
+            }
+        if "emissions" not in self.__additional_events:
+            self.__emissions_monitor.stop()
+            self.__additional_events["emissions"] = {
+                "available": "true" if self.__emissions_monitor.available else "false",
+                "emissions_kg": str(self.__emissions_monitor.emissions_kg),
+                "energy_kwh": str(self.__emissions_monitor.energy_kwh),
+                "country_iso_code": self.__emissions_monitor.country_iso_code or "",
+            }
         return self.__additional_events
 
 
@@ -214,7 +411,77 @@ class Monitoring:
             mean=0 if len(df_languagemodels) == 0 else df_languagemodels["duration"].mean(),
             std=0 if len(df_languagemodels) < 2 else df_languagemodels["duration"].std(),
         )
-        return MonitoringMetricsModel(quickmodels=m_quickmodels, languagemodels=m_languagemodels)
+        m_gpu = self._compute_gpu_gbs_metrics(limit=100)
+        m_emissions = self._compute_emissions_metrics(limit=100)
+        return MonitoringMetricsModel(
+            quickmodels=m_quickmodels,
+            languagemodels=m_languagemodels,
+            gpu=m_gpu,
+            emissions=m_emissions,
+        )
+
+    def _compute_gpu_gbs_metrics(self, limit: int = 100) -> MonitoringGpuModel:
+        """
+        GPU usage per process in GB·s = peak GB (from events["gpu"]) * duration s.
+        Only processes that actually used the GPU (peak > 0) are counted.
+        """
+        df_all = self.get_completed_processes(kind="all", username=None, limit=limit)
+        if len(df_all) == 0:
+            return MonitoringGpuModel(n=0, mean=0.0, std=0.0)
+
+        def gbs(row) -> float:
+            events = row.get("events") or {}
+            gpu = events.get("gpu") if isinstance(events, dict) else None
+            try:
+                peak_gb = float((gpu or {}).get("max_used_gb", 0.0))
+            except (TypeError, ValueError):
+                peak_gb = 0.0
+            try:
+                duration = float(row.get("duration") or 0.0)
+            except (TypeError, ValueError):
+                duration = 0.0
+            return peak_gb * duration
+
+        gpu_series = df_all.apply(gbs, axis=1)
+        gpu_series = gpu_series[gpu_series > 0]
+        n = int(len(gpu_series))
+        if n == 0:
+            return MonitoringGpuModel(n=0, mean=0.0, std=0.0)
+        return MonitoringGpuModel(
+            n=n,
+            mean=float(gpu_series.mean()),
+            std=0.0 if n < 2 else float(gpu_series.std()),
+        )
+
+    def _compute_emissions_metrics(self, limit: int = 100) -> MonitoringEmissionsModel:
+        """
+        Carbon emissions per process in kg CO2eq (from events["emissions"]).
+        Only processes that produced a positive measurement are counted.
+        Returns mean, std, and the cumulative total across the window.
+        """
+        df_all = self.get_completed_processes(kind="all", username=None, limit=limit)
+        if len(df_all) == 0:
+            return MonitoringEmissionsModel(n=0, mean=0.0, std=0.0, total=0.0)
+
+        def emissions_kg(row) -> float:
+            events = row.get("events") or {}
+            entry = events.get("emissions") if isinstance(events, dict) else None
+            try:
+                return float((entry or {}).get("emissions_kg", 0.0))
+            except (TypeError, ValueError):
+                return 0.0
+
+        series = df_all.apply(emissions_kg, axis=1)
+        positive = series[series > 0]
+        n = int(len(positive))
+        if n == 0:
+            return MonitoringEmissionsModel(n=0, mean=0.0, std=0.0, total=0.0)
+        return MonitoringEmissionsModel(
+            n=n,
+            mean=float(positive.mean()),
+            std=0.0 if n < 2 else float(positive.std()),
+            total=float(positive.sum()),
+        )
 
     def get_weekly_activity(
         self, days: int = 7, force_refresh: bool = False
