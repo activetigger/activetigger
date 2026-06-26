@@ -1,9 +1,9 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session as SessionType
 from sqlalchemy.orm import sessionmaker
 
-from activetigger.db.models import Monitoring
+from activetigger.db.models import Annotations, Logs, Monitoring
 
 
 class MonitoringService:
@@ -128,3 +128,28 @@ class MonitoringService:
             )
         session.close()
         return processes
+
+    def get_recent_activity(
+        self, days: int = 7
+    ) -> tuple[list[tuple[datetime, str]], list[tuple[datetime, str]]]:
+        """
+        Get raw (time, user_name) pairs from annotations and logs over the last `days` days.
+        Aggregation by hour is done by the caller to stay portable across SQLite/Postgres.
+        """
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        session = self.Session()
+        annotations = (
+            session.query(Annotations.time, Annotations.user_name)
+            .filter(Annotations.time >= cutoff)
+            .all()
+        )
+        logs = (
+            session.query(Logs.time, Logs.user_name)
+            .filter(Logs.time >= cutoff)
+            .all()
+        )
+        session.close()
+        return (
+            [(t, u) for t, u in annotations],
+            [(t, u) for t, u in logs],
+        )

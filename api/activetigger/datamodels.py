@@ -1311,6 +1311,24 @@ class MonitoringMetricsModel(BaseModel):
     languagemodels: MonitoringLanguageModelsModel
 
 
+class MonitoringActivityPointModel(BaseModel):
+    """
+    Hourly activity bucket for the instance
+    """
+
+    hour: str
+    annotations: int
+    active_users: int
+
+
+class MonitoringActivityModel(BaseModel):
+    """
+    Hourly activity over the last 7 days
+    """
+
+    activity: list[MonitoringActivityPointModel]
+
+
 class BertopicProjectionNode(BaseModel):
     """
     Node metadata
