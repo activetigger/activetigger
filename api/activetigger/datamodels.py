@@ -1312,6 +1312,18 @@ class MonitoringGpuModel(BaseModel):
     std: float
 
 
+class MonitoringEmissionsModel(BaseModel):
+    """
+    Monitoring carbon emissions per process, in kg CO2eq.
+    Includes a `total` field summing across the window for sustainability dashboards.
+    """
+
+    n: int
+    mean: float
+    std: float
+    total: float
+
+
 class MonitoringMetricsModel(BaseModel):
     """
     Monitoring metrics
@@ -1320,6 +1332,7 @@ class MonitoringMetricsModel(BaseModel):
     quickmodels: MonitoringQuickModelsModel
     languagemodels: MonitoringLanguageModelsModel
     gpu: MonitoringGpuModel
+    emissions: MonitoringEmissionsModel
 
 
 class MonitoringActivityPointModel(BaseModel):

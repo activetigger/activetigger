@@ -73,18 +73,26 @@ type ApiResponse = Record<
     n: number;
     mean: number;
     std: number;
+    total?: number;
   }
 >;
 
 const STATS_LABELS: Record<string, string> = {
   gpu: 'GPU use (Gb·s)',
+  emissions: 'Emissions (g CO₂eq)',
 };
 
 function normalizeStats(data: ApiResponse): ModelStats[] {
-  return Object.entries(data).map(([name, stats]) => ({
-    name: STATS_LABELS[name] ?? name,
-    ...stats,
-  }));
+  return Object.entries(data).map(([name, stats]) => {
+    // Backend reports emissions in kg; display in grams for readability.
+    const scale = name === 'emissions' ? 1000 : 1;
+    return {
+      name: STATS_LABELS[name] ?? name,
+      n: stats.n,
+      mean: stats.mean * scale,
+      std: stats.std * scale,
+    };
+  });
 }
 
 type ProcessEvent = {
@@ -439,6 +447,12 @@ export const MonitorPage: FC = () => {
                 </table>
               </Tab>
               <Tab eventKey="statistics" title="Statistics">
+                {metrics?.emissions && metrics.emissions.n > 0 && (
+                  <div className="alert alert-info my-2 py-2">
+                    Cumulative emissions on the last {metrics.emissions.n} GPU/compute processes:{' '}
+                    <strong>{(metrics.emissions.total * 1000).toFixed(2)} g CO₂eq</strong>
+                  </div>
+                )}
                 {<ModelStatsTable rows={normalizeStats(metrics || {})} />}
                 {<ProcessTable rows={data as unknown as ProcessRow[]} />}
               </Tab>

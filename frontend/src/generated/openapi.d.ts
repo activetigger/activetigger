@@ -3162,6 +3162,21 @@ export interface components {
             active_users: number;
         };
         /**
+         * MonitoringEmissionsModel
+         * @description Monitoring carbon emissions per process, in kg CO2eq.
+         *     Includes a `total` field summing across the window for sustainability dashboards.
+         */
+        MonitoringEmissionsModel: {
+            /** N */
+            n: number;
+            /** Mean */
+            mean: number;
+            /** Std */
+            std: number;
+            /** Total */
+            total: number;
+        };
+        /**
          * MonitoringGpuModel
          * @description Monitoring GPU use per process, in GB-seconds (peak GB * duration s).
          */
@@ -3193,6 +3208,7 @@ export interface components {
             quickmodels: components["schemas"]["MonitoringQuickModelsModel"];
             languagemodels: components["schemas"]["MonitoringLanguageModelsModel"];
             gpu: components["schemas"]["MonitoringGpuModel"];
+            emissions: components["schemas"]["MonitoringEmissionsModel"];
         };
         /**
          * MonitoringQuickModelsModel

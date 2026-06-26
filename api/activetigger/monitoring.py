@@ -7,6 +7,7 @@ from activetigger.datamodels import (
     EventsModel,
     MonitoringActivityModel,
     MonitoringActivityPointModel,
+    MonitoringEmissionsModel,
     MonitoringGpuModel,
     MonitoringLanguageModelsModel,
     MonitoringMetricsModel,
@@ -88,12 +89,100 @@ class GpuMonitor:
         return self._gpu_available
 
 
+class EmissionsMonitor:
+    """Wraps a codecarbon OfflineEmissionsTracker for the lifetime of a task.
+
+    Provides safe start/stop and exposes the final emissions in kg CO2eq plus
+    energy consumed in kWh. All failure modes are swallowed so that emission
+    tracking can never crash the host task.
+    """
+
+    def __init__(
+        self,
+        enabled: bool = True,
+        country_iso_code: str | None = None,
+        measure_power_secs: int = 15,
+    ) -> None:
+        self._enabled = enabled
+        self._country = country_iso_code
+        self._measure_power_secs = measure_power_secs
+        self._tracker = None
+        self._available = False
+        self._emissions_kg = 0.0
+        self._energy_kwh = 0.0
+        self._country_iso_code: str | None = None
+
+    def start(self) -> None:
+        if not self._enabled or self._tracker is not None:
+            return
+        try:
+            from codecarbon import OfflineEmissionsTracker  # local import: optional dep
+        except Exception:
+            return
+        try:
+            kwargs: dict = {
+                "save_to_file": False,
+                "log_level": "error",
+                "tracking_mode": "process",
+                "allow_multiple_runs": True,
+                "measure_power_secs": self._measure_power_secs,
+            }
+            if self._country:
+                kwargs["country_iso_code"] = self._country
+            else:
+                # OfflineEmissionsTracker requires *some* location; default to
+                # France when no admin override is set. Online geolocation would
+                # require network at task start, which we want to avoid.
+                kwargs["country_iso_code"] = "FRA"
+            self._tracker = OfflineEmissionsTracker(**kwargs)
+            self._tracker.start()
+            self._available = True
+        except Exception:
+            self._tracker = None
+            self._available = False
+
+    def stop(self) -> float:
+        if self._tracker is None:
+            return self._emissions_kg
+        try:
+            emissions = self._tracker.stop()
+            if emissions is not None:
+                self._emissions_kg = float(emissions)
+            data = getattr(self._tracker, "final_emissions_data", None)
+            if data is not None:
+                self._energy_kwh = float(getattr(data, "energy_consumed", 0.0) or 0.0)
+                self._country_iso_code = getattr(data, "country_iso_code", None)
+        except Exception:
+            pass
+        finally:
+            self._tracker = None
+        return self._emissions_kg
+
+    @property
+    def available(self) -> bool:
+        return self._available
+
+    @property
+    def emissions_kg(self) -> float:
+        # 6 decimals: typical small-run emissions are ~1e-6 kg.
+        return round(self._emissions_kg, 6)
+
+    @property
+    def energy_kwh(self) -> float:
+        return round(self._energy_kwh, 6)
+
+    @property
+    def country_iso_code(self) -> str | None:
+        return self._country_iso_code
+
+
 class TaskTimer:
     """This object centralises the timing component in order to save them as part
     of the "additional_event" in the Monitoring.close_process function.
 
     Also wraps a `GpuMonitor` so every TaskTimer-using task automatically records
-    the peak GPU memory used during its execution under the "gpu" event key.
+    the peak GPU memory used during its execution under the "gpu" event key, and
+    an `EmissionsMonitor` recording carbon footprint under the "emissions" key.
     """
 
     body = {"start": "FAILED", "end": "FAILED", "duration": "FAILED", "order": None}
@@ -110,6 +199,15 @@ class TaskTimer:
         self.__optional_steps: list[str] = optional_steps if optional_steps is not None else []
         self.__gpu_monitor = GpuMonitor(poll_interval=gpu_poll_interval)
         self.__gpu_monitor.start()
+        # Local import to keep the config module out of monitoring's import path
+        # for unit tests that build TaskTimer directly.
+        from activetigger.config import config
+
+        self.__emissions_monitor = EmissionsMonitor(
+            enabled=bool(getattr(config, "carbon_enabled", True)),
+            country_iso_code=getattr(config, "carbon_country", None),
+        )
+        self.__emissions_monitor.start()
 
     def start(self, step: str) -> None:
         """
@@ -164,6 +262,14 @@ class TaskTimer:
                 "available": "true" if self.__gpu_monitor.gpu_available else "false",
                 "max_used_gb": str(self.__gpu_monitor.max_used_gb),
                 "total_memory_gb": str(self.__gpu_monitor.total_memory_gb),
+            }
+        if "emissions" not in self.__additional_events:
+            self.__emissions_monitor.stop()
+            self.__additional_events["emissions"] = {
+                "available": "true" if self.__emissions_monitor.available else "false",
+                "emissions_kg": str(self.__emissions_monitor.emissions_kg),
+                "energy_kwh": str(self.__emissions_monitor.energy_kwh),
+                "country_iso_code": self.__emissions_monitor.country_iso_code or "",
             }
         return self.__additional_events
 
@@ -306,10 +412,12 @@ class Monitoring:
             std=0 if len(df_languagemodels) < 2 else df_languagemodels["duration"].std(),
         )
         m_gpu = self._compute_gpu_gbs_metrics(limit=100)
+        m_emissions = self._compute_emissions_metrics(limit=100)
         return MonitoringMetricsModel(
             quickmodels=m_quickmodels,
             languagemodels=m_languagemodels,
             gpu=m_gpu,
+            emissions=m_emissions,
         )
 
     def _compute_gpu_gbs_metrics(self, limit: int = 100) -> MonitoringGpuModel:
@@ -343,6 +451,36 @@ class Monitoring:
             n=n,
             mean=float(gpu_series.mean()),
             std=0.0 if n < 2 else float(gpu_series.std()),
+        )
+
+    def _compute_emissions_metrics(self, limit: int = 100) -> MonitoringEmissionsModel:
+        """
+        Carbon emissions per process in kg CO2eq (from events["emissions"]).
+        Only processes that produced a positive measurement are counted.
+        Returns mean, std, and the cumulative total across the window.
+        """
+        df_all = self.get_completed_processes(kind="all", username=None, limit=limit)
+        if len(df_all) == 0:
+            return MonitoringEmissionsModel(n=0, mean=0.0, std=0.0, total=0.0)
+
+        def emissions_kg(row) -> float:
+            events = row.get("events") or {}
+            entry = events.get("emissions") if isinstance(events, dict) else None
+            try:
+                return float((entry or {}).get("emissions_kg", 0.0))
+            except (TypeError, ValueError):
+                return 0.0
+
+        series = df_all.apply(emissions_kg, axis=1)
+        positive = series[series > 0]
+        n = int(len(positive))
+        if n == 0:
+            return MonitoringEmissionsModel(n=0, mean=0.0, std=0.0, total=0.0)
+        return MonitoringEmissionsModel(
+            n=n,
+            mean=float(positive.mean()),
+            std=0.0 if n < 2 else float(positive.std()),
+            total=float(positive.sum()),
         )
 
     def get_weekly_activity(
