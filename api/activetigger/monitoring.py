@@ -1,9 +1,12 @@
-from datetime import datetime, timezone
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 
 from activetigger.datamodels import (
     EventsModel,
+    MonitoringActivityModel,
+    MonitoringActivityPointModel,
     MonitoringLanguageModelsModel,
     MonitoringMetricsModel,
     MonitoringQuickModelsModel,
@@ -209,3 +212,41 @@ class Monitoring:
             std=0 if len(df_languagemodels) < 2 else df_languagemodels["duration"].std(),
         )
         return MonitoringMetricsModel(quickmodels=m_quickmodels, languagemodels=m_languagemodels)
+
+    def get_weekly_activity(self, days: int = 7) -> MonitoringActivityModel:
+        """
+        Hourly timeline of annotations count and distinct active users
+        over the last `days` days. Buckets are aligned on the start of each
+        hour (UTC) and the series always covers a fixed number of slots so
+        gaps render as zero on the frontend.
+        """
+        annotations, logs = self.db_manager.monitoring_service.get_recent_activity(days=days)
+
+        annotations_by_hour: dict[datetime, int] = defaultdict(int)
+        users_by_hour: dict[datetime, set[str]] = defaultdict(set)
+
+        def to_hour(t: datetime) -> datetime:
+            # PostgreSQL returns tz-aware datetimes, SQLite returns naive ones
+            if t.tzinfo is None:
+                t = t.replace(tzinfo=timezone.utc)
+            return t.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)
+
+        for t, _ in annotations:
+            annotations_by_hour[to_hour(t)] += 1
+
+        for t, user_name in logs:
+            users_by_hour[to_hour(t)].add(user_name)
+
+        total_hours = days * 24
+        now_hour = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+        start_hour = now_hour - timedelta(hours=total_hours - 1)
+
+        activity = [
+            MonitoringActivityPointModel(
+                hour=(start_hour + timedelta(hours=i)).isoformat(),
+                annotations=annotations_by_hour.get(start_hour + timedelta(hours=i), 0),
+                active_users=len(users_by_hour.get(start_hour + timedelta(hours=i), set())),
+            )
+            for i in range(total_hours)
+        ]
+        return MonitoringActivityModel(activity=activity)

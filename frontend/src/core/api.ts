@@ -3327,6 +3327,22 @@ export function useGetAllProjects() {
   return { allProjects: getAsyncMemoData(getAllProjects) || null, reFetchAllProjects: reFetch };
 }
 
+export function useGetMonitoringActivity(days: number = 7) {
+  const [fetchTrigger, setFetchTrigger] = useState<boolean>(false);
+
+  const getMonitoringActivity = useAsyncMemo(async () => {
+    const res = await api.GET('/monitoring/activity', { params: { query: { days } } });
+    if (res.data && !res.error) return res.data;
+    return null;
+  }, [fetchTrigger, days]);
+  const reFetch = useCallback(() => setFetchTrigger((f) => !f), []);
+
+  return {
+    activity: getAsyncMemoData(getMonitoringActivity) || null,
+    reFetchActivity: reFetch,
+  };
+}
+
 export function useAddSelfAsManager(reFetchAllProjects: () => void) {
   const { notify } = useNotifications();
   const { authenticatedUser } = useAuth();

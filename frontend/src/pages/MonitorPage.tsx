@@ -3,6 +3,7 @@ import Tab from 'react-bootstrap/Tab';
 import Tabs from 'react-bootstrap/Tabs';
 import DataGrid, { Column } from 'react-data-grid';
 import Select from 'react-select';
+import { VictoryAxis, VictoryBar, VictoryChart, VictoryTheme, VictoryTooltip } from 'victory';
 import { SendMessage } from '../components/forms/SendMessage';
 import { PageLayout } from '../components/layout/PageLayout';
 import { ManageMessages } from '../components/ManageMessages';
@@ -10,6 +11,7 @@ import {
   useAddSelfAsManager,
   useGetAllProjects,
   useGetLogs,
+  useGetMonitoringActivity,
   useGetMonitoringData,
   useGetMonitoringMetrics,
   useGetServer,
@@ -159,6 +161,108 @@ export function ProcessTable({ rows }: Props) {
   );
 }
 
+type ActivityPoint = {
+  hour: string;
+  annotations: number;
+  active_users: number;
+};
+
+function ActivityTimeline({ points }: { points: ActivityPoint[] }) {
+  if (!points || points.length === 0) {
+    return <div className="alert alert-info m-3">No activity in the selected period.</div>;
+  }
+
+  const data = points.map((p, i) => ({
+    i,
+    date: new Date(p.hour),
+    annotations: p.annotations,
+    active_users: p.active_users,
+  }));
+
+  // One tick per day (every 24 hours), labelled with the day boundary
+  const dayTickValues = data.filter((d) => d.date.getUTCHours() === 0).map((d) => d.i);
+  const dayTickFormat = (i: number) => {
+    const d = data[i]?.date;
+    return d ? `${d.getUTCMonth() + 1}/${d.getUTCDate()}` : '';
+  };
+
+  const annotationsTotal = data.reduce((s, d) => s + d.annotations, 0);
+  const activeUsersPeak = data.reduce((m, d) => Math.max(m, d.active_users), 0);
+
+  return (
+    <div>
+      <div className="mb-2">
+        <span className="badge bg-primary me-2">Annotations (7d): {annotationsTotal}</span>
+        <span className="badge bg-success">Peak distinct users / hour: {activeUsersPeak}</span>
+      </div>
+
+      <div>
+        <h3 className="subtitle mt-1 mb-0">Annotations per hour</h3>
+        <VictoryChart
+          theme={VictoryTheme.material}
+          domainPadding={{ x: 5 }}
+          width={1000}
+          height={170}
+          padding={{ top: 10, bottom: 35, left: 55, right: 15 }}
+        >
+          <VictoryAxis
+            tickValues={dayTickValues}
+            tickFormat={dayTickFormat}
+            style={{ tickLabels: { fontSize: 10 } }}
+          />
+          <VictoryAxis
+            dependentAxis
+            label="Annotations"
+            style={{ axisLabel: { padding: 40, fontSize: 12 }, tickLabels: { fontSize: 10 } }}
+          />
+          <VictoryBar
+            data={data}
+            x="i"
+            y="annotations"
+            style={{ data: { fill: '#0072B2' } }}
+            labels={({ datum }) =>
+              `${datum.date.toISOString().slice(0, 13)}:00\nAnnotations: ${datum.annotations}`
+            }
+            labelComponent={<VictoryTooltip />}
+          />
+        </VictoryChart>
+      </div>
+
+      <div>
+        <h3 className="subtitle mt-1 mb-0">Active users per hour</h3>
+        <VictoryChart
+          theme={VictoryTheme.material}
+          domainPadding={{ x: 5 }}
+          width={1000}
+          height={170}
+          padding={{ top: 10, bottom: 35, left: 55, right: 15 }}
+        >
+          <VictoryAxis
+            tickValues={dayTickValues}
+            tickFormat={dayTickFormat}
+            style={{ tickLabels: { fontSize: 10 } }}
+          />
+          <VictoryAxis
+            dependentAxis
+            label="Active users"
+            style={{ axisLabel: { padding: 40, fontSize: 12 }, tickLabels: { fontSize: 10 } }}
+          />
+          <VictoryBar
+            data={data}
+            x="i"
+            y="active_users"
+            style={{ data: { fill: '#D55E00' } }}
+            labels={({ datum }) =>
+              `${datum.date.toISOString().slice(0, 13)}:00\nUsers: ${datum.active_users}`
+            }
+            labelComponent={<VictoryTooltip />}
+          />
+        </VictoryChart>
+      </div>
+    </div>
+  );
+}
+
 /**
  * MonitorPage component displays server monitoring information including logs, resources, active projects, and user statistics.
  */
@@ -174,6 +278,7 @@ export const MonitorPage: FC = () => {
   const { metrics } = useGetMonitoringMetrics();
   const { data } = useGetMonitoringData('all');
   const { allProjects, reFetchAllProjects } = useGetAllProjects();
+  const { activity } = useGetMonitoringActivity(7);
   const { addSelfAsManager } = useAddSelfAsManager(reFetchAllProjects);
   useEffect(() => {
     reFetchStatistics();
@@ -227,7 +332,11 @@ export const MonitorPage: FC = () => {
       <div className="container-fluid">
         <div className="row">
           <div className="col-12">
-            <Tabs id="panel2" className="mt-3" defaultActiveKey="active">
+            <Tabs id="panel2" className="mt-3" defaultActiveKey="activity">
+              <Tab eventKey="activity" title="Activity">
+                <h2 className="subtitle">Instance activity — last 7 days (hourly)</h2>
+                <ActivityTimeline points={(activity?.activity as ActivityPoint[]) || []} />
+              </Tab>
               <Tab eventKey="active" title="Active Projects">
                 <h2 className="subtitle">Monitor active projects</h2>
 
