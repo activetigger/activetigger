@@ -3,11 +3,13 @@ import { Tab, Tabs } from 'react-bootstrap';
 import { HiOutlineQuestionMarkCircle } from 'react-icons/hi';
 import { useParams } from 'react-router-dom';
 import { Tooltip } from 'react-tooltip';
+import { ImageModelEvaluation } from '../components/ImageModelEvaluation';
+import { ImageModelManagement } from '../components/ImageModelManagement';
 import { ProjectPageLayout } from '../components/layout/ProjectPageLayout';
 import { ModelEvaluation } from '../components/ModelEvaluation';
 import { ModelManagement } from '../components/ModelManagement';
-import { ImageModelEvaluation } from '../components/ImageModelEvaluation';
-import { ImageModelManagement } from '../components/ImageModelManagement';
+import { ModelPredict } from '../components/ModelPredict';
+import { ModelsPillDisplay } from '../components/ModelsPillDisplay';
 import { useAppContext } from '../core/useAppContext';
 
 /**
@@ -19,11 +21,17 @@ import { useAppContext } from '../core/useAppContext';
 export const ProjectModelPage: FC = () => {
   const { projectName: projectSlug } = useParams();
   const {
-    appContext: { currentProject },
+    appContext: { currentProject, currentScheme },
   } = useAppContext();
 
   const [activeKey, setActiveKey] = useState<string>('models');
+  const [predictionModel, setPredictionModel] = useState<string | null>(null);
   const isImage = currentProject?.params?.kind === 'image';
+
+  const availableBertModels =
+    currentScheme && currentProject?.languagemodels.available[currentScheme]
+      ? Object.keys(currentProject.languagemodels.available[currentScheme])
+      : [];
 
   return (
     <ProjectPageLayout projectName={projectSlug} currentAction="model">
@@ -57,6 +65,36 @@ export const ProjectModelPage: FC = () => {
                 </Tooltip>
                 {isImage ? <ImageModelEvaluation /> : <ModelEvaluation />}
               </Tab>
+              {!isImage && (
+                <Tab eventKey="prediction" title="Prediction">
+                  <div className="explanations ms-3">
+                    Run a trained BERT model on the full dataset or on an external dataset. Once a
+                    prediction is computed, you can download it from the Export page.
+                  </div>
+                  <div className="ms-3 mt-3">
+                    {availableBertModels.length === 0 ? (
+                      <div className="text-muted small">
+                        No BERT model available for the current scheme. Train one in the Training
+                        tab first.
+                      </div>
+                    ) : (
+                      <>
+                        <div className="text-muted small mb-2">Select a model</div>
+                        <ModelsPillDisplay
+                          modelNames={availableBertModels}
+                          currentModelName={predictionModel}
+                          setCurrentModelName={setPredictionModel}
+                        />
+                        {predictionModel && (
+                          <div className="mt-3">
+                            <ModelPredict currentModel={predictionModel} />
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </Tab>
+              )}
             </Tabs>
           </div>
         </div>

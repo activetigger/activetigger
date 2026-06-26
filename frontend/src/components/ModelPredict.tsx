@@ -53,11 +53,11 @@ export const ModelPredict: FC<{ currentModel: string | null }> = ({ currentModel
         {model && (
           <button
             className="btn-primary-action mt-4"
+            disabled={isComputing}
             onClick={() => {
               setDisplayExternalForm(false);
               computeModelPrediction(currentModel, 'all', currentScheme || '', 'bert');
             }}
-            disabled={isComputing}
           >
             Prediction on the entire dataset
           </button>

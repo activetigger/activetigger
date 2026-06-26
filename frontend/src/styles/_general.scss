@@ -36,12 +36,17 @@ button {
   cursor: pointer;
 }
 
-button:hover {
+button:hover:not(:disabled) {
   filter: brightness(1.8);
 }
 
-button:active {
+button:active:not(:disabled) {
   filter: brightness(5);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 input::placeholder {
