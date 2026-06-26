@@ -76,9 +76,13 @@ type ApiResponse = Record<
   }
 >;
 
+const STATS_LABELS: Record<string, string> = {
+  gpu: 'GPU use (Gb·s)',
+};
+
 function normalizeStats(data: ApiResponse): ModelStats[] {
   return Object.entries(data).map(([name, stats]) => ({
-    name,
+    name: STATS_LABELS[name] ?? name,
     ...stats,
   }));
 }

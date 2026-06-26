@@ -1302,6 +1302,16 @@ class MonitoringLanguageModelsModel(BaseModel):
     std: float
 
 
+class MonitoringGpuModel(BaseModel):
+    """
+    Monitoring GPU use per process, in GB-seconds (peak GB * duration s).
+    """
+
+    n: int
+    mean: float
+    std: float
+
+
 class MonitoringMetricsModel(BaseModel):
     """
     Monitoring metrics
@@ -1309,6 +1319,7 @@ class MonitoringMetricsModel(BaseModel):
 
     quickmodels: MonitoringQuickModelsModel
     languagemodels: MonitoringLanguageModelsModel
+    gpu: MonitoringGpuModel
 
 
 class MonitoringActivityPointModel(BaseModel):

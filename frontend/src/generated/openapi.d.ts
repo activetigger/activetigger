@@ -3162,6 +3162,18 @@ export interface components {
             active_users: number;
         };
         /**
+         * MonitoringGpuModel
+         * @description Monitoring GPU use per process, in GB-seconds (peak GB * duration s).
+         */
+        MonitoringGpuModel: {
+            /** N */
+            n: number;
+            /** Mean */
+            mean: number;
+            /** Std */
+            std: number;
+        };
+        /**
          * MonitoringLanguageModelsModel
          * @description Monitoring language models
          */
@@ -3180,6 +3192,7 @@ export interface components {
         MonitoringMetricsModel: {
             quickmodels: components["schemas"]["MonitoringQuickModelsModel"];
             languagemodels: components["schemas"]["MonitoringLanguageModelsModel"];
+            gpu: components["schemas"]["MonitoringGpuModel"];
         };
         /**
          * MonitoringQuickModelsModel
