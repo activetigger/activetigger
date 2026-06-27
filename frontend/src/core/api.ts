@@ -449,6 +449,36 @@ export function useDeleteProject() {
 }
 
 /**
+ * useDuplicateProject
+ * POST to duplicate an existing project (files + DB rows) under `<slug>-copy`.
+ * Uses raw axios because the openapi types may not yet include the new route.
+ * @returns a function returning the new project slug
+ */
+export function useDuplicateProject() {
+  const { notify } = useNotifications();
+  const { authenticatedUser } = useAuth();
+  const duplicateProject = useCallback(
+    async (projectSlug: string) => {
+      const URL = config.api.url.replace(/\/$/, '');
+      const headers = getAuthHeaders(authenticatedUser)?.headers;
+      try {
+        const res = await axios.post(`${URL}/projects/duplicate`, null, {
+          params: { project_slug: projectSlug },
+          headers,
+        });
+        notify({ type: 'success', message: 'Project duplicated.' });
+        return res.data as string;
+      } catch (error) {
+        notify({ type: 'error', message: formatApiError(error) });
+        throw error;
+      }
+    },
+    [authenticatedUser, notify],
+  );
+  return duplicateProject;
+}
+
+/**
  * useStatistics
  * GET the current stats of the project
  * @param projectSlug

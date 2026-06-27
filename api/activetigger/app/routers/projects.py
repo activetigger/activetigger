@@ -137,6 +137,31 @@ def update_project(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/projects/duplicate", dependencies=[Depends(verified_user)])
+def duplicate_project(
+    current_user: Annotated[UserInDBModel, Depends(verified_user)],
+    project_slug: str,
+) -> str:
+    """
+    Kick off the duplication of an existing project (files + DB rows) under
+    `<project_slug>-copy`. Returns the target slug immediately. Callers should poll
+    /projects/status to know when the copy has finished.
+    """
+    test_rights(ServerAction.CREATE_PROJECT, current_user.username)
+    test_rights(ProjectAction.GET, current_user.username, project_slug)
+    orchestrator = get_orchestrator()
+    try:
+        new_slug = orchestrator.duplicate_project(project_slug, current_user.username)
+        orchestrator.log_action(
+            current_user.username,
+            f"START DUPLICATING PROJECT: {project_slug} -> {new_slug}",
+            new_slug,
+        )
+        return new_slug
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post(
     "/projects/delete",
     dependencies=[Depends(verified_user), Depends(check_auth_exists)],
@@ -167,11 +192,16 @@ def get_project_status(
     Get the status of a project
     - not existing
     - creating
+    - duplicating
     - existing
     """
     try:
         orchestrator = get_orchestrator()
         slug = slugify(project_name)
+        # if project is being duplicated (filesystem copy still running, or
+        # done but DB clone not yet finalized by the update loop)
+        if slug in orchestrator.project_duplication_ongoing:
+            return "duplicating"
         # if project is in creation
         if slug in orchestrator.project_creation_ongoing:
             # Try to read creation progress for image projects
