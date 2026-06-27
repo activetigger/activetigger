@@ -1863,7 +1863,7 @@ class Project:
                 f"Prediction does not support this type of scheme (kind: {training_kind})"
             )
         scheme_labels = scheme_.labels
-        self.languagemodels.start_predicting_process(
+        process_id = self.languagemodels.start_predicting_process(
             project_slug=self.name,
             name=model_name,
             user=username,
@@ -1879,6 +1879,12 @@ class Project:
             path_train=path_train,
             path_valid=path_valid,
             path_test=path_test,
+        )
+        self.monitoring.register_process(
+            process_name=process_id,
+            kind="predict_languagemodel",
+            parameters={},
+            user_name=username,
         )
 
     def start_quick_model_prediction(
@@ -2103,6 +2109,8 @@ class Project:
                         ):
                             add_predictions["predict_" + prediction.model_name] = results.path
                         self.languagemodels.add(prediction)
+                        if results is not None and results.events is not None:
+                            self.monitoring.close_process(prediction.unique_id, results.events)
                     case "train_image":
                         if self.imagemodels is None:
                             continue

@@ -335,7 +335,7 @@ class LanguageModels:
         path_train: Path | None = None,
         path_valid: Path | None = None,
         path_test: Path | None = None,
-    ) -> None:
+    ) -> str:
         """
         Start predicting process
         """
@@ -393,6 +393,7 @@ class LanguageModels:
                 get_progress=self.get_progress(name, status=status),
             )
         )
+        return unique_id
 
     def rename(self, former_name: str, new_name: str) -> None:
         """

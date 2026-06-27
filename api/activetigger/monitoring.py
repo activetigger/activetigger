@@ -142,10 +142,7 @@ class EmissionsMonitor:
             self._tracker.start()
             self._available = True
         except Exception as e:
-            print(
-                f"[EmissionsMonitor] failed to start tracker "
-                f"(country={kwargs.get('country_iso_code')}): {type(e).__name__}: {e}"
-            )
+            print(f"[EmissionsMonitor] failed to start tracker ")
             self._tracker = None
             self._available = False
 

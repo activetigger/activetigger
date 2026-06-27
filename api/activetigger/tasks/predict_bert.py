@@ -19,7 +19,12 @@ from transformers import (
 )
 
 from activetigger.data import Data
-from activetigger.datamodels import MLStatisticsModel, ReturnTaskPredictModel, TextDatasetModel
+from activetigger.datamodels import (
+    EventsModel,
+    MLStatisticsModel,
+    ReturnTaskPredictModel,
+    TextDatasetModel,
+)
 from activetigger.functions import (
     activate_probs,
     annotations_to_matrix,
@@ -30,6 +35,7 @@ from activetigger.functions import (
     get_metrics_multilabel,
     logits_to_probs,
 )
+from activetigger.monitoring import TaskTimer
 from activetigger.tasks.base_task import BaseTask
 
 
@@ -356,6 +362,8 @@ class PredictBertMultiClass(BaseTask):
         Main process to predict
         """
         print(f"start predicting ({self.training_kind})", flush=True)
+        task_timer = TaskTimer(compulsory_steps=["setup", "predict", "save_files"])
+        task_timer.start("setup")
 
         if self.df is None:
             if self.path_data is None:
@@ -386,8 +394,10 @@ class PredictBertMultiClass(BaseTask):
                 f"from the labels used during training. Will use {list(models_id2label.values())} "
                 f"instead."
             )
+        task_timer.stop("setup")
 
         try:
+            task_timer.start("predict")
             # prediction by batches
             n_rows = self.df.shape[0]
             n_batches = (n_rows + self.batch - 1) // self.batch
@@ -414,7 +424,9 @@ class PredictBertMultiClass(BaseTask):
                 proba = logits_to_probs(logits, kind=self.training_kind)
                 proba_predictions = np.append(proba_predictions, proba, axis=0)
                 self.__write_progress(100 * (i + self.batch) / n_rows)
+            task_timer.stop("predict")
 
+            task_timer.start("save_files")
             # transform predictions to clean dataframe
             pred = self.__transform_to_dataframe(proba_predictions, id2label=models_id2label)
             # save the prediction to file
@@ -429,6 +441,7 @@ class PredictBertMultiClass(BaseTask):
                 metrics = self.__compute_statistics(pred, id2label)
             else:
                 metrics = None
+            task_timer.stop("save_files")
 
         except Exception as e:
             print("Error in prediction", e)
@@ -450,4 +463,8 @@ class PredictBertMultiClass(BaseTask):
                 torch.cuda.empty_cache()
                 torch.cuda.ipc_collect()
 
-        return ReturnTaskPredictModel(path=str(self.path.joinpath(self.file_name)), metrics=metrics)
+        return ReturnTaskPredictModel(
+            path=str(self.path.joinpath(self.file_name)),
+            metrics=metrics,
+            events=EventsModel(events=task_timer.get_events()),
+        )

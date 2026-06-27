@@ -1125,6 +1125,8 @@ class MessagesOutModel(BaseModel):
     created_by: str
     time: str
     content: str
+    for_project: str | None = None
+    for_user: str | None = None
 
 
 class ServerStateModel(BaseModel):
@@ -1171,13 +1173,14 @@ class TrainMLResults(BaseModel):
     statistics_cv10: MLStatisticsModel | None = None
 
 
+class EventsModel(BaseModel):
+    events: dict[str, dict[str, str | None]]
+
+
 class ReturnTaskPredictModel(BaseModel):
     path: str
     metrics: dict[str, MLStatisticsModel] | None = None
-
-
-class EventsModel(BaseModel):
-    events: dict[str, dict[str, str | None]]
+    events: EventsModel | None = None
 
 
 class ModelScoresModel(BaseModel):
