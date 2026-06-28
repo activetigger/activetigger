@@ -1,10 +1,11 @@
-import { FC, useState } from 'react';
+import { FC, MouseEvent, useState } from 'react';
 import { Button } from 'react-bootstrap';
 import Modal from 'react-bootstrap/Modal';
-import { FaRegTrashAlt } from 'react-icons/fa';
+import { FaRegFileAlt, FaRegTrashAlt } from 'react-icons/fa';
 import { HiOutlineDocumentText, HiOutlinePhotograph } from 'react-icons/hi';
 import { useNavigate } from 'react-router-dom';
-import { useDeleteProject } from '../core/api';
+import { useDeleteProject, useGetProjectSummary } from '../core/api';
+import { downloadSummaryMd, ProjectSummary } from '../core/projectSummary';
 import { AvailableProjectsModel } from '../types';
 
 interface ProjectCardProps {
@@ -14,6 +15,7 @@ interface ProjectCardProps {
 
 export const ProjectCard: FC<ProjectCardProps> = ({ project, resetContext }) => {
   const [showDelete, setShowDelete] = useState(false);
+  const [summaryLoading, setSummaryLoading] = useState(false);
   const handleClose = () => setShowDelete(false);
   const handleShow = () => setShowDelete(true);
   const navigate = useNavigate();
@@ -30,6 +32,20 @@ export const ProjectCard: FC<ProjectCardProps> = ({ project, resetContext }) => 
   const navigateToProject = () => {
     if (resetContext) resetContext();
     navigate(`/projects/${project.parameters.project_slug}?fromProjectPage=true`);
+  };
+
+  // download a Markdown lab-notebook summary of the project
+  const getProjectSummary = useGetProjectSummary();
+  const handleDownloadSummary = async (e: MouseEvent) => {
+    e.stopPropagation();
+    if (summaryLoading) return;
+    setSummaryLoading(true);
+    try {
+      const data = (await getProjectSummary(project.parameters.project_slug)) as ProjectSummary;
+      downloadSummaryMd(data, project.parameters.project_slug);
+    } finally {
+      setSummaryLoading(false);
+    }
   };
 
   return (
@@ -54,8 +70,24 @@ export const ProjectCard: FC<ProjectCardProps> = ({ project, resetContext }) => 
 
         {project.size != null && <span className="badge info">memory {project.size} Mo</span>}
       </div>
-      <div onClick={handleShow} className="trash-wrapper">
-        <FaRegTrashAlt size={20} />
+      <div className="card-actions">
+        <div
+          onClick={handleDownloadSummary}
+          className="summary-wrapper"
+          title="Download project summary (Markdown)"
+        >
+          <FaRegFileAlt size={20} style={{ opacity: summaryLoading ? 0.4 : 1 }} />
+        </div>
+        <div
+          onClick={(e) => {
+            e.stopPropagation();
+            handleShow();
+          }}
+          className="trash-wrapper"
+          title="Delete project"
+        >
+          <FaRegTrashAlt size={20} />
+        </div>
       </div>
       <Modal show={showDelete} onHide={handleClose}>
         <Modal.Header>

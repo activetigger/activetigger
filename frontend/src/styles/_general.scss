@@ -191,6 +191,13 @@ table {
     }
   }
 
+  .card-actions {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+  }
+
   .trash-wrapper {
     color: black;
     cursor: pointer;
@@ -198,6 +205,15 @@ table {
 
   .trash-wrapper:hover {
     color: red;
+  }
+
+  .summary-wrapper {
+    color: black;
+    cursor: pointer;
+  }
+
+  .summary-wrapper:hover {
+    color: $primary;
   }
 }
 

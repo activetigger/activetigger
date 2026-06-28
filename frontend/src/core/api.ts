@@ -479,6 +479,34 @@ export function useDuplicateProject() {
 }
 
 /**
+ * useGetProjectSummary
+ * GET /export/summary — returns the lab-notebook style snapshot as a plain dict.
+ * Uses raw axios because the openapi types may not yet include the new route.
+ */
+export function useGetProjectSummary() {
+  const { notify } = useNotifications();
+  const { authenticatedUser } = useAuth();
+  const getProjectSummary = useCallback(
+    async (projectSlug: string) => {
+      const URL = config.api.url.replace(/\/$/, '');
+      const headers = getAuthHeaders(authenticatedUser)?.headers;
+      try {
+        const res = await axios.get(`${URL}/export/summary`, {
+          params: { project_slug: projectSlug },
+          headers,
+        });
+        return res.data as Record<string, unknown>;
+      } catch (error) {
+        notify({ type: 'error', message: formatApiError(error) });
+        throw error;
+      }
+    },
+    [authenticatedUser, notify],
+  );
+  return getProjectSummary;
+}
+
+/**
  * useStatistics
  * GET the current stats of the project
  * @param projectSlug

@@ -11,8 +11,10 @@ import {
   useGetModelFile,
   useGetPredictionsFile,
   useGetProjectionFile,
+  useGetProjectSummary,
   useGetRawDataFile,
 } from '../core/api';
+import { downloadSummaryJson, downloadSummaryMd, ProjectSummary } from '../core/projectSummary';
 import { useAppContext } from '../core/useAppContext';
 import { useAuth } from '../core/useAuth';
 
@@ -78,6 +80,20 @@ export const ProjectExportPage: FC = () => {
   const { getModelFile } = useGetModelFile(projectName || null);
   const { getRawDataFile } = useGetRawDataFile(projectName || null);
   const { getProjectionFile } = useGetProjectionFile(projectName || null);
+  const getProjectSummary = useGetProjectSummary();
+  const [summaryLoading, setSummaryLoading] = useState<'json' | 'md' | null>(null);
+
+  const downloadSummary = async (kind: 'json' | 'md') => {
+    if (!projectName) return;
+    setSummaryLoading(kind);
+    try {
+      const data = (await getProjectSummary(projectName)) as ProjectSummary;
+      if (kind === 'json') downloadSummaryJson(data, projectName);
+      else downloadSummaryMd(data, projectName);
+    } finally {
+      setSummaryLoading(null);
+    }
+  };
 
   return (
     <ProjectPageLayout projectName={projectName} currentAction="export">
@@ -267,6 +283,38 @@ export const ProjectExportPage: FC = () => {
               <button className="btn-secondary-action" onClick={() => getRawDataFile()}>
                 Export raw dataset in parquet
               </button>
+            </section>
+
+            <section className="mt-4">
+              <h5 className="fw-semibold">Project summary</h5>
+              <hr className="mt-1" />
+              <div className="text-muted small mb-2">
+                Lab-notebook style snapshot of the project: parameters, schemes, annotation counts,
+                features, models, users. JSON is suitable for the CLI client; Markdown is meant to
+                be read.
+              </div>
+              <div className="d-flex flex-wrap gap-2">
+                <button
+                  className="btn-secondary-action"
+                  disabled={summaryLoading !== null}
+                  onClick={() => downloadSummary('md')}
+                >
+                  Download Markdown notebook
+                  {summaryLoading === 'md' && (
+                    <PulseLoader color="white" size={6} className="ms-2" />
+                  )}
+                </button>
+                <button
+                  className="btn-secondary-action"
+                  disabled={summaryLoading !== null}
+                  onClick={() => downloadSummary('json')}
+                >
+                  Download JSON
+                  {summaryLoading === 'json' && (
+                    <PulseLoader color="white" size={6} className="ms-2" />
+                  )}
+                </button>
+              </div>
             </section>
           </div>
         </div>

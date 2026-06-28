@@ -357,6 +357,28 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/projects/duplicate': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Duplicate Project
+     * @description Kick off the duplication of an existing project (files + DB rows) under
+     *     `<project_slug>-copy`. Returns the target slug immediately. Callers should poll
+     *     /projects/status to know when the copy has finished.
+     */
+    post: operations['duplicate_project_projects_duplicate_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/projects/delete': {
     parameters: {
       query?: never;
@@ -389,6 +411,7 @@ export interface paths {
      * @description Get the status of a project
      *     - not existing
      *     - creating
+     *     - duplicating
      *     - existing
      */
     get: operations['get_project_status_projects_status_get'];
@@ -1027,6 +1050,28 @@ export interface paths {
      * @description Export labelled data
      */
     get: operations['export_data_export_data_get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/export/summary': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Export Summary
+     * @description Lab-notebook style snapshot of the project (JSON).
+     *
+     *     Frontend renders a Markdown view from this same payload.
+     */
+    get: operations['export_summary_export_summary_get'];
     put?: never;
     post?: never;
     delete?: never;
@@ -1918,7 +1963,12 @@ export interface paths {
     put?: never;
     /**
      * Post Message
-     * @description Post a new message
+     * @description Post a new message. Branches by `message.kind`:
+     *     - "system": admin-only, single row (existing behavior).
+     *     - "user":   any verified user can DM another user they share a project with.
+     *                 One row inserted with for_user=recipient.
+     *     - "project": any member of the target project can post. One row inserted
+     *                 per project member (fanout); each recipient owns their copy.
      */
     post: operations['post_message_messages_post'];
     delete?: never;
@@ -1957,6 +2007,7 @@ export interface paths {
     /**
      * Get Codebook Messages
      * @description Project-distribution copies still owned by the caller for a given project.
+     *     Used by the Codebook page to surface project messages.
      */
     get: operations['get_codebook_messages_messages_codebook_get'];
     put?: never;
@@ -1978,7 +2029,9 @@ export interface paths {
     put?: never;
     /**
      * Delete Message
-     * @description Delete a message
+     * @description Delete a message.
+     *     - root: can delete any message (admin path for system messages).
+     *     - other users: can delete only rows addressed to them (for_user == self).
      */
     post: operations['delete_message_messages_delete_post'];
     delete?: never;
@@ -4733,6 +4786,37 @@ export interface operations {
       };
     };
   };
+  duplicate_project_projects_duplicate_post: {
+    parameters: {
+      query: {
+        project_slug: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': string;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
   delete_project_projects_delete_post: {
     parameters: {
       query: {
@@ -5888,6 +5972,39 @@ export interface operations {
         };
         content: {
           'application/json': unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
+  export_summary_export_summary_get: {
+    parameters: {
+      query: {
+        project_slug: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            [key: string]: unknown;
+          };
         };
       };
       /** @description Validation Error */
@@ -7348,6 +7465,39 @@ export interface operations {
       };
     };
   };
+  post_message_messages_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['MessagesInModel'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
   get_inbox_messages_inbox_get: {
     parameters: {
       query?: never;
@@ -7386,39 +7536,6 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['MessagesOutModel'][];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['HTTPValidationError'];
-        };
-      };
-    };
-  };
-  post_message_messages_post: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['MessagesInModel'];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': unknown;
         };
       };
       /** @description Validation Error */
