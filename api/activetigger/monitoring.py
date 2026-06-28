@@ -141,8 +141,8 @@ class EmissionsMonitor:
             self._tracker = OfflineEmissionsTracker(**kwargs)
             self._tracker.start()
             self._available = True
-        except Exception as e:
-            print(f"[EmissionsMonitor] failed to start tracker ")
+        except Exception:
+            print("[EmissionsMonitor] failed to start tracker ")
             self._tracker = None
             self._available = False
 
