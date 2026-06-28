@@ -51,6 +51,7 @@ export const AnnotationModeForm: FC<AnnotationModeFormProps> = ({
       activeModel,
       phase,
       currentProjection,
+      developmentMode,
     },
     setAppContext,
   } = useAppContext();
@@ -113,8 +114,10 @@ export const AnnotationModeForm: FC<AnnotationModeFormProps> = ({
           : project?.next.methods_min) || []
       ).map((mode) => ({ mode, label_prob: undefined }));
       // Prompt selection doesn't need an active model — surface it whenever
-      // the backend exposes it (image projects with embeddings + prompts).
+      // the backend exposes it (embedding feature + saved prompt), but only
+      // in experimental (development) mode.
       if (
+        developmentMode &&
         (project?.next.methods || []).includes('prompt') &&
         !modes.some((m) => m.mode === 'prompt')
       ) {
@@ -136,7 +139,14 @@ export const AnnotationModeForm: FC<AnnotationModeFormProps> = ({
               ])
           : [];
       return [...modes, ...probLabels].map((o) => ({ ...o, value: optionValue(o) }));
-    }, [phase, activeModel, project?.next.methods, project?.next.methods_min, availableLabels]);
+    }, [
+      phase,
+      activeModel,
+      project?.next.methods,
+      project?.next.methods_min,
+      availableLabels,
+      developmentMode,
+    ]);
 
   // reset selection mode to "fixed" when the active model is deactivated
   // and the current mode requires a model (e.g. maxprob, active).
@@ -156,6 +166,24 @@ export const AnnotationModeForm: FC<AnnotationModeFormProps> = ({
       }
     }
   }, [activeModel, selectionConfig.mode, project?.next.methods_min, setAppContext]);
+
+  // If the user turns experimental mode off while "prompt" is the active
+  // selection mode, fall back to "fixed" — otherwise the dropdown shows an
+  // orphaned value that is no longer in its options list.
+  useEffect(() => {
+    if (!developmentMode && selectionConfig.mode === 'prompt') {
+      setAppContext((prev) => ({
+        ...prev,
+        selectionConfig: {
+          ...prev.selectionConfig,
+          mode: 'fixed',
+          prompt_id: undefined,
+          similarity_range: undefined,
+          label_prob: undefined,
+        },
+      }));
+    }
+  }, [developmentMode, selectionConfig.mode, setAppContext]);
 
   // "wrong predictions" sample requires an active model on the train phase;
   // reset it to "all" when those conditions no longer hold.
@@ -248,7 +276,7 @@ export const AnnotationModeForm: FC<AnnotationModeFormProps> = ({
           />
         </div>
 
-        {setShowPromptsModal && (
+        {setShowPromptsModal && developmentMode && (
           <div className="at-input-group">
             <label className="small-gray">Prompts</label>
             <div className="d-flex align-items-center gap-2">
@@ -256,7 +284,7 @@ export const AnnotationModeForm: FC<AnnotationModeFormProps> = ({
                 type="button"
                 className="button"
                 onClick={() => setShowPromptsModal(true)}
-                title="Manage prompts for embedding-based selection"
+                title="Manage prompts for embedding-based selection (experimental)"
               >
                 <LuMessageSquare
                   size={28}
