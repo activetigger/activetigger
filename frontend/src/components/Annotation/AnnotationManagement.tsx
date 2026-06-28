@@ -521,13 +521,14 @@ export const AnnotationManagement: FC = () => {
         id="prompts-modal"
       >
         <Modal.Header closeButton>
-          <Modal.Title>Prompts for image selection</Modal.Title>
+          <Modal.Title>Prompts for embedding-based selection</Modal.Title>
         </Modal.Header>
         <Modal.Body>
-          {project?.params?.kind === 'image' && project?.params?.project_slug && (
+          {project?.params?.project_slug && (
             <PromptsPanel
               projectSlug={project.params.project_slug}
               state={(project as unknown as { prompts?: PromptsProjectStateModel | null }).prompts}
+              currentText={project.params.kind !== 'image' ? element?.text ?? undefined : undefined}
             />
           )}
         </Modal.Body>

@@ -1,4 +1,4 @@
-import { FC, useState } from 'react';
+import { FC, useEffect, useRef, useState } from 'react';
 import { LuRefreshCw, LuTrash2 } from 'react-icons/lu';
 
 import { useAddImagePrompt, useDeleteImagePrompt, useListImagePrompts } from '../../core/api';
@@ -7,15 +7,21 @@ import { PromptsProjectStateModel } from '../../types';
 interface PromptsPanelProps {
   projectSlug: string;
   state?: PromptsProjectStateModel | null;
+  // Full text of the element currently being annotated; when set, a
+  // "Use current text" button fills the prompt textarea with it. Pass
+  // undefined for image projects where the element has no useful text.
+  currentText?: string;
 }
 
 /**
- * Multimodal prompt management — contents of the prompts modal.
- * Create / list / delete prompts used with the "prompt" selection mode
- * to rank images by cosine similarity against the prompt embedding.
- * See docs/multimodal-prompt-selection.md.
+ * Prompt management — contents of the prompts modal.
+ * Create / list / delete prompts used with the "prompt" selection mode to
+ * rank elements (images or texts) by cosine similarity against the prompt
+ * embedding. A prompt must be bound to an embedding feature
+ * (multimodal-embeddings for image projects, sentence-embeddings for text
+ * projects). See docs/multimodal-prompt-selection.md.
  */
-export const PromptsPanel: FC<PromptsPanelProps> = ({ projectSlug, state }) => {
+export const PromptsPanel: FC<PromptsPanelProps> = ({ projectSlug, state, currentText }) => {
   const addPrompt = useAddImagePrompt(projectSlug);
   const deletePrompt = useDeleteImagePrompt(projectSlug);
   const { prompts, reFetchImagePrompts } = useListImagePrompts(projectSlug);
@@ -31,14 +37,24 @@ export const PromptsPanel: FC<PromptsPanelProps> = ({ projectSlug, state }) => {
     setFeatureName(bindable[0]);
   }
 
+  // The GPU worker may take 10–30s to load a sentence-transformer model;
+  // the single setTimeout we used to do after Save was unreliable. Watch
+  // the polled `state.training` count: when it shrinks, an encoding task
+  // just finished and a new prompt likely just got persisted — refetch.
+  const trainingCount = training.length;
+  const prevTrainingCount = useRef(trainingCount);
+  useEffect(() => {
+    if (prevTrainingCount.current > trainingCount) {
+      reFetchImagePrompts();
+    }
+    prevTrainingCount.current = trainingCount;
+  }, [trainingCount, reFetchImagePrompts]);
+
   const onSubmit = async () => {
     if (!text.trim() || !featureName) return;
     const res = await addPrompt(text.trim(), featureName);
     if (res) {
       setText('');
-      // the embedding happens on the GPU worker — refetch will pick it up
-      // once update_processes persists the row.
-      setTimeout(() => reFetchImagePrompts(), 1500);
     }
   };
 
@@ -46,7 +62,8 @@ export const PromptsPanel: FC<PromptsPanelProps> = ({ projectSlug, state }) => {
     <div>
       {bindable.length === 0 ? (
         <div className="alert alert-warning mb-0" role="alert">
-          No multimodal-embeddings feature yet. Compute one from the Features page first.
+          No embedding feature yet. Compute a sentence-embeddings (text projects) or
+          multimodal-embeddings (image projects) feature from the Features page first.
         </div>
       ) : (
         <div className="mb-3">
@@ -57,11 +74,11 @@ export const PromptsPanel: FC<PromptsPanelProps> = ({ projectSlug, state }) => {
             id="prompt_text"
             className="form-control mb-2"
             rows={2}
-            placeholder='e.g. "a red car parked in front of a house"'
+            placeholder='e.g. "a paragraph about climate change policy"'
             value={text}
             onChange={(e) => setText(e.target.value)}
           />
-          <div className="d-flex gap-2 align-items-center">
+          <div className="d-flex gap-2 align-items-center flex-wrap">
             {bindable.length > 1 && (
               <select
                 className="form-select form-select-sm"
@@ -76,8 +93,18 @@ export const PromptsPanel: FC<PromptsPanelProps> = ({ projectSlug, state }) => {
                 ))}
               </select>
             )}
+            {currentText && currentText.trim() && (
+              <button
+                type="button"
+                className="btn btn-outline-secondary btn-sm"
+                title="Fill the prompt box with the text of the element currently being annotated"
+                onClick={() => setText(currentText.trim())}
+              >
+                Use current text
+              </button>
+            )}
             <button className="btn btn-primary btn-sm" onClick={onSubmit} disabled={!text.trim()}>
-              Save prompt
+              Create prompt
             </button>
           </div>
         </div>

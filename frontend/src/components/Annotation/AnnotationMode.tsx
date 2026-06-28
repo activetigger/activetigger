@@ -227,7 +227,7 @@ export const AnnotationModeForm: FC<AnnotationModeFormProps> = ({
                 : o.mode === 'active' && o.label_prob
                   ? `active ${o.label_prob}`
                   : o.mode === 'prompt'
-                    ? 'prompt (multimodal)'
+                    ? 'prompt (embedding)'
                     : o.mode
             }
             onChange={(option) => {
@@ -248,7 +248,7 @@ export const AnnotationModeForm: FC<AnnotationModeFormProps> = ({
           />
         </div>
 
-        {project?.params?.kind === 'image' && setShowPromptsModal && (
+        {setShowPromptsModal && (
           <div className="at-input-group">
             <label className="small-gray">Prompts</label>
             <div className="d-flex align-items-center gap-2">
@@ -256,7 +256,7 @@ export const AnnotationModeForm: FC<AnnotationModeFormProps> = ({
                 type="button"
                 className="button"
                 onClick={() => setShowPromptsModal(true)}
-                title="Manage prompts for image selection"
+                title="Manage prompts for embedding-based selection"
               >
                 <LuMessageSquare
                   size={28}
