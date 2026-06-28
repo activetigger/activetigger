@@ -70,6 +70,42 @@ class ProjectsService:
         session.close()
         return [project.project_slug for project in projects]
 
+    def existing_projects_with_meta(self) -> list[dict[str, Any]]:
+        """
+        Return slug, parameters, user_name, time_created for every project in
+        one query — avoids the N+1 pattern of looping existing_projects() and
+        calling get_project() for each slug.
+        """
+        with self.Session() as session:
+            rows = session.execute(
+                select(
+                    Projects.project_slug,
+                    Projects.parameters,
+                    Projects.user_name,
+                    Projects.time_created,
+                )
+            ).all()
+        return [
+            {
+                "project_slug": r.project_slug,
+                "parameters": r.parameters,
+                "user_name": r.user_name,
+                "time_created": r.time_created,
+            }
+            for r in rows
+        ]
+
+    def get_user_auths_all_projects(self, user_name: str) -> dict[str, str]:
+        """
+        Return a {project_slug: status} map of every project the user has
+        an auth row on. One query instead of one per project.
+        """
+        with self.Session() as session:
+            rows = session.execute(
+                select(Auths.project_slug, Auths.status).where(Auths.user_name == user_name)
+            ).all()
+        return {row.project_slug: row.status for row in rows}
+
     def add_token(self, token: str, status: str):
         with self.Session.begin() as session:
             new_token = Tokens(

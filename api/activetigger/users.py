@@ -1,6 +1,9 @@
 import secrets
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import Lock
 
 import yaml
 
@@ -22,6 +25,28 @@ from activetigger.messages import Messages
 
 USERS_PARAMETERS_FILE = "users_parameters.yaml"
 DEFAULT_USERS_PARAMETERS = {"root": {"limit": 100}}
+
+# Recursive disk scans for project sizes dominate the cost of the admin
+# "all projects" listing; cache them with a short TTL so refreshes are cheap.
+_DIR_SIZE_TTL_SECONDS = 300
+_DIR_SIZE_CACHE: dict[str, tuple[float, float]] = {}
+_DIR_SIZE_CACHE_LOCK = Lock()
+
+
+def _cached_dir_size(slug: str, path: str) -> float | None:
+    now = time.monotonic()
+    with _DIR_SIZE_CACHE_LOCK:
+        cached = _DIR_SIZE_CACHE.get(slug)
+        if cached is not None and now - cached[0] < _DIR_SIZE_TTL_SECONDS:
+            return cached[1]
+    try:
+        size = round(get_dir_size(path), 1)
+    except Exception as e:
+        print(e)
+        return None
+    with _DIR_SIZE_CACHE_LOCK:
+        _DIR_SIZE_CACHE[slug] = (now, size)
+    return size
 
 
 class Users:
@@ -374,32 +399,28 @@ class Users:
         Get all existing projects regardless of auth (admin view).
         user_right reflects the given user's auth on each project, or "none".
         """
-        slugs = self.db_manager.projects_service.existing_projects()
+        rows = self.db_manager.projects_service.existing_projects_with_meta()
+        last_activity_map = self.db_manager.logs_service.get_last_activity_all_projects()
+        auths_map = self.db_manager.projects_service.get_user_auths_all_projects(username)
+
+        slugs = [r["project_slug"] for r in rows]
+        projects_root = config.data_path + "/projects/"
+        # Disk scans are I/O bound; threads parallelize them well even under the GIL.
+        with ThreadPoolExecutor(max_workers=min(16, max(4, len(slugs)))) as pool:
+            sizes = list(pool.map(lambda s: _cached_dir_size(s, projects_root + s), slugs))
+
         projects = []
-        for slug in slugs:
-            project = self.db_manager.projects_service.get_project(slug)
-            if project is None:
-                continue
-            parameters = ProjectModel(**project["parameters"])
-            created_by = project["user_name"]
-            created_at = project["time_created"].strftime("%Y-%m-%d %H:%M:%S")
-            try:
-                size = round(get_dir_size(config.data_path + "/projects/" + slug), 1)
-            except Exception as e:
-                print(e)
-                size = None
-            last_activity = self.db_manager.logs_service.get_last_activity_project(slug)
-            auth = self.db_manager.projects_service.get_user_auth(username, slug)
-            user_right = auth[0][1] if auth else "none"
+        for row, size in zip(rows, sizes):
+            slug = row["project_slug"]
             projects.append(
                 ProjectSummaryModel(
                     project_slug=slug,
-                    user_right=user_right,
-                    parameters=parameters,
-                    created_by=created_by,
-                    created_at=created_at,
+                    user_right=auths_map.get(slug, "none"),
+                    parameters=ProjectModel(**row["parameters"]),
+                    created_by=row["user_name"],
+                    created_at=row["time_created"].strftime("%Y-%m-%d %H:%M:%S"),
                     size=size,
-                    last_activity=last_activity,
+                    last_activity=last_activity_map.get(slug),
                 )
             )
         projects.sort(key=lambda p: p.created_at, reverse=True)
