@@ -1,4 +1,4 @@
-import { FC, useEffect, useState } from 'react';
+import { FC, useEffect, useMemo, useState } from 'react';
 import Tab from 'react-bootstrap/Tab';
 import Tabs from 'react-bootstrap/Tabs';
 import DataGrid, { Column } from 'react-data-grid';
@@ -324,6 +324,56 @@ export const MonitorPage: FC = () => {
     },
   ];
 
+  type ProjectSortKey = 'name' | 'slug' | 'created_at' | 'size' | 'last_activity';
+  const [projectSort, setProjectSort] = useState<{ key: ProjectSortKey; dir: 'asc' | 'desc' }>({
+    key: 'created_at',
+    dir: 'desc',
+  });
+  const toggleProjectSort = (key: ProjectSortKey) =>
+    setProjectSort((prev) =>
+      prev.key === key
+        ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
+        : {
+            key,
+            dir: key === 'created_at' || key === 'last_activity' || key === 'size' ? 'desc' : 'asc',
+          },
+    );
+  const sortedProjects = useMemo(() => {
+    const list = (allProjects || []).slice();
+    const { key, dir } = projectSort;
+    const factor = dir === 'asc' ? 1 : -1;
+    const getValue = (p: (typeof list)[number]): string | number | null | undefined => {
+      switch (key) {
+        case 'name':
+          return p.parameters?.project_name;
+        case 'slug':
+          return p.project_slug;
+        case 'created_at':
+          return p.created_at;
+        case 'size':
+          return p.size;
+        case 'last_activity':
+          return p.last_activity;
+      }
+    };
+    list.sort((a, b) => {
+      const av = getValue(a);
+      const bv = getValue(b);
+      // Push nullish to the bottom regardless of sort direction so empty rows
+      // don't dominate the visible area.
+      const aNull = av === null || av === undefined || av === '';
+      const bNull = bv === null || bv === undefined || bv === '';
+      if (aNull && bNull) return 0;
+      if (aNull) return 1;
+      if (bNull) return -1;
+      if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * factor;
+      return String(av).localeCompare(String(bv)) * factor;
+    });
+    return list;
+  }, [allProjects, projectSort]);
+  const sortArrow = (key: ProjectSortKey) =>
+    projectSort.key === key ? (projectSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+
   if (authenticatedUser?.username !== 'root') {
     return (
       <div className="d-flex flex-column align-items-center justify-content-center vh-100 bg-light text-center">
@@ -407,19 +457,44 @@ export const MonitorPage: FC = () => {
                 <table className="table-statistics">
                   <thead>
                     <tr>
-                      <th>Name</th>
+                      <th
+                        onClick={() => toggleProjectSort('name')}
+                        style={{ cursor: 'pointer', userSelect: 'none' }}
+                      >
+                        Name{sortArrow('name')}
+                      </th>
                       <th>Type</th>
-                      <th>Slug</th>
+                      <th
+                        onClick={() => toggleProjectSort('slug')}
+                        style={{ cursor: 'pointer', userSelect: 'none' }}
+                      >
+                        Slug{sortArrow('slug')}
+                      </th>
                       <th>Creator</th>
-                      <th>Created</th>
-                      <th>Size (MB)</th>
-                      <th>Last activity</th>
+                      <th
+                        onClick={() => toggleProjectSort('created_at')}
+                        style={{ cursor: 'pointer', userSelect: 'none' }}
+                      >
+                        Created{sortArrow('created_at')}
+                      </th>
+                      <th
+                        onClick={() => toggleProjectSort('size')}
+                        style={{ cursor: 'pointer', userSelect: 'none' }}
+                      >
+                        Size (MB){sortArrow('size')}
+                      </th>
+                      <th
+                        onClick={() => toggleProjectSort('last_activity')}
+                        style={{ cursor: 'pointer', userSelect: 'none' }}
+                      >
+                        Last activity{sortArrow('last_activity')}
+                      </th>
                       <th>My rights</th>
                       <th>Action</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {(allProjects || []).map((p) => (
+                    {sortedProjects.map((p) => (
                       <tr key={p.project_slug}>
                         <td>{p.parameters?.project_name}</td>
                         <td>{p.parameters?.kind ?? 'text'}</td>
