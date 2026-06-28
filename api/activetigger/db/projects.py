@@ -8,7 +8,18 @@ from sqlalchemy.orm import sessionmaker
 
 from activetigger.datamodels import AnnotationModel, FeatureDescriptionModelOut
 from activetigger.db import DBException
-from activetigger.db.models import Annotations, Auths, Features, Models, Projects, Schemes, Tokens
+from activetigger.db.models import (
+    Annotations,
+    Auths,
+    Features,
+    Generations,
+    GenModels,
+    Models,
+    Projects,
+    Prompts,
+    Schemes,
+    Tokens,
+)
 
 
 class Codebook(TypedDict):
@@ -152,6 +163,156 @@ class ProjectsService:
             if project is None:
                 return None
             session.delete(project)
+
+    def duplicate_project(
+        self,
+        source_slug: str,
+        target_slug: str,
+        target_parameters: dict[str, Any],
+        user_name: str,
+        source_dir: str,
+        target_dir: str,
+    ) -> None:
+        """
+        Clone all DB rows belonging to source_slug under target_slug.
+        """
+        now = datetime.datetime.now(timezone.utc)
+        with self.Session.begin() as session:
+            existing_target = session.scalars(
+                select(Projects).filter_by(project_slug=target_slug)
+            ).first()
+            if existing_target is not None:
+                raise DBException("Target project already exists")
+            source_project = session.scalars(
+                select(Projects).filter_by(project_slug=source_slug)
+            ).first()
+            if source_project is None:
+                raise DBException("Source project not found")
+
+            session.add(
+                Projects(
+                    project_slug=target_slug,
+                    parameters=target_parameters,
+                    time_created=now,
+                    time_modified=now,
+                    user_name=user_name,
+                )
+            )
+
+            for s in session.scalars(select(Schemes).filter_by(project_slug=source_slug)).all():
+                session.add(
+                    Schemes(
+                        name=s.name,
+                        time_created=s.time_created,
+                        time_modified=s.time_modified,
+                        user_name=s.user_name,
+                        project_slug=target_slug,
+                        params=s.params,
+                    )
+                )
+
+            for a in session.scalars(select(Annotations).filter_by(project_slug=source_slug)).all():
+                session.add(
+                    Annotations(
+                        time=a.time,
+                        dataset=a.dataset,
+                        user_name=a.user_name,
+                        project_slug=target_slug,
+                        element_id=a.element_id,
+                        scheme_name=a.scheme_name,
+                        annotation=a.annotation,
+                        comment=a.comment,
+                        selection=a.selection,
+                    )
+                )
+
+            for f in session.scalars(select(Features).filter_by(project_slug=source_slug)).all():
+                session.add(
+                    Features(
+                        time=f.time,
+                        user_name=f.user_name,
+                        project_slug=target_slug,
+                        name=f.name,
+                        kind=f.kind,
+                        parameters=f.parameters,
+                        data=f.data,
+                    )
+                )
+
+            # gen_models must be inserted (and flushed) before generations so we
+            # can remap generations.model_id → the new gen_models.id.
+            gen_model_id_map: dict[int, int] = {}
+            source_gen_models = session.scalars(
+                select(GenModels).filter_by(project_slug=source_slug)
+            ).all()
+            for gm in source_gen_models:
+                new_gm = GenModels(
+                    project_slug=target_slug,
+                    user_name=gm.user_name,
+                    slug=gm.slug,
+                    name=gm.name,
+                    api=gm.api,
+                    endpoint=gm.endpoint,
+                    credentials=gm.credentials,
+                )
+                session.add(new_gm)
+                session.flush()
+                gen_model_id_map[gm.id] = new_gm.id
+
+            for g in session.scalars(select(Generations).filter_by(project_slug=source_slug)).all():
+                new_model_id = gen_model_id_map.get(g.model_id)
+                if new_model_id is None:
+                    # generation pointed at a gen_model not in this project; skip
+                    continue
+                session.add(
+                    Generations(
+                        time=g.time,
+                        user_name=g.user_name,
+                        project_slug=target_slug,
+                        element_id=g.element_id,
+                        model_id=new_model_id,
+                        prompt=g.prompt,
+                        answer=g.answer,
+                        batch=g.batch,
+                    )
+                )
+
+            for p in session.scalars(select(Prompts).filter_by(project_slug=source_slug)).all():
+                session.add(
+                    Prompts(
+                        time=p.time,
+                        time_modified=p.time_modified,
+                        user_name=p.user_name,
+                        project_slug=target_slug,
+                        value=p.value,
+                        parameters=p.parameters,
+                    )
+                )
+
+            for m in session.scalars(select(Models).filter_by(project_slug=source_slug)).all():
+                new_path = (
+                    m.path.replace(source_dir, target_dir, 1)
+                    if m.path and source_dir and m.path.startswith(source_dir)
+                    else m.path
+                )
+                session.add(
+                    Models(
+                        name=m.name,
+                        time=m.time,
+                        time_modified=m.time_modified,
+                        user_name=m.user_name,
+                        project_slug=target_slug,
+                        scheme_name=m.scheme_name,
+                        kind=m.kind,
+                        parameters=m.parameters,
+                        path=new_path,
+                        status=m.status,
+                        statistics=m.statistics,
+                        test=m.test,
+                    )
+                )
+
+            session.add(Auths(project_slug=target_slug, user_name=user_name, status="manager"))
 
     def get_project_auth(self, project_slug: str):
         with self.Session() as session:

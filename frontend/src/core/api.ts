@@ -449,6 +449,64 @@ export function useDeleteProject() {
 }
 
 /**
+ * useDuplicateProject
+ * POST to duplicate an existing project (files + DB rows) under `<slug>-copy`.
+ * Uses raw axios because the openapi types may not yet include the new route.
+ * @returns a function returning the new project slug
+ */
+export function useDuplicateProject() {
+  const { notify } = useNotifications();
+  const { authenticatedUser } = useAuth();
+  const duplicateProject = useCallback(
+    async (projectSlug: string) => {
+      const URL = config.api.url.replace(/\/$/, '');
+      const headers = getAuthHeaders(authenticatedUser)?.headers;
+      try {
+        const res = await axios.post(`${URL}/projects/duplicate`, null, {
+          params: { project_slug: projectSlug },
+          headers,
+        });
+        notify({ type: 'success', message: 'Project duplicated.' });
+        return res.data as string;
+      } catch (error) {
+        notify({ type: 'error', message: formatApiError(error) });
+        throw error;
+      }
+    },
+    [authenticatedUser, notify],
+  );
+  return duplicateProject;
+}
+
+/**
+ * useGetProjectSummary
+ * GET /export/summary — returns the lab-notebook style snapshot as a plain dict.
+ * Uses raw axios because the openapi types may not yet include the new route.
+ */
+export function useGetProjectSummary() {
+  const { notify } = useNotifications();
+  const { authenticatedUser } = useAuth();
+  const getProjectSummary = useCallback(
+    async (projectSlug: string) => {
+      const URL = config.api.url.replace(/\/$/, '');
+      const headers = getAuthHeaders(authenticatedUser)?.headers;
+      try {
+        const res = await axios.get(`${URL}/export/summary`, {
+          params: { project_slug: projectSlug },
+          headers,
+        });
+        return res.data as Record<string, unknown>;
+      } catch (error) {
+        notify({ type: 'error', message: formatApiError(error) });
+        throw error;
+      }
+    },
+    [authenticatedUser, notify],
+  );
+  return getProjectSummary;
+}
+
+/**
  * useStatistics
  * GET the current stats of the project
  * @param projectSlug
@@ -3172,19 +3230,64 @@ export function useSendResetMail() {
 export function useSendMessage() {
   const { notify } = useNotifications();
   const sendMessage = useCallback(
-    async (content: string, kind: string) => {
+    async (
+      content: string,
+      kind: string,
+      opts?: { for_user?: string | null; for_project?: string | null },
+    ) => {
       const res = await api.POST('/messages', {
         body: {
           content: content,
           kind: kind,
+          for_user: opts?.for_user ?? null,
+          for_project: opts?.for_project ?? null,
         },
       });
       if (!res.error) notify({ type: 'success', message: 'Message sent' });
+      return !res.error;
     },
     [notify],
   );
 
   return { sendMessage };
+}
+
+/**
+ * Inbox: DMs + project-distribution copies addressed to the caller.
+ */
+export function useGetInbox() {
+  const [fetchTrigger, setFetchTrigger] = useState<boolean>(false);
+
+  const getInbox = useAsyncMemo(async () => {
+    const res = await api.GET('/messages/inbox', {});
+    return res.data;
+  }, [fetchTrigger]);
+
+  const reFetch = useCallback(() => setFetchTrigger((f) => !f), []);
+
+  return { inbox: getAsyncMemoData(getInbox), reFetchInbox: reFetch };
+}
+
+/**
+ * Project messages still owned by the caller, for the Codebook page.
+ */
+export function useGetCodebookMessages(projectSlug: string | null) {
+  const [fetchTrigger, setFetchTrigger] = useState<boolean>(false);
+
+  const getCodebookMessages = useAsyncMemo(async () => {
+    if (!projectSlug) return [];
+    const res = await api.GET('/messages/codebook', {
+      params: { query: { project_slug: projectSlug } },
+    });
+    return res.data;
+  }, [projectSlug, fetchTrigger]);
+
+  const reFetch = useCallback(() => setFetchTrigger((f) => !f), []);
+
+  return {
+    codebookMessages: getAsyncMemoData(getCodebookMessages),
+    reFetchCodebookMessages: reFetch,
+  };
 }
 
 /**

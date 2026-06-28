@@ -113,11 +113,15 @@ class EmissionsMonitor:
         self._country_iso_code: str | None = None
 
     def start(self) -> None:
-        if not self._enabled or self._tracker is not None:
+        if not self._enabled:
+            print("[EmissionsMonitor] disabled by config (carbon_enabled=false); skipping")
+            return
+        if self._tracker is not None:
             return
         try:
             from codecarbon import OfflineEmissionsTracker  # local import: optional dep
-        except Exception:
+        except Exception as e:
+            print(f"[EmissionsMonitor] codecarbon not importable: {type(e).__name__}: {e}")
             return
         try:
             kwargs: dict = {
@@ -138,6 +142,7 @@ class EmissionsMonitor:
             self._tracker.start()
             self._available = True
         except Exception:
+            print("[EmissionsMonitor] failed to start tracker ")
             self._tracker = None
             self._available = False
 
@@ -152,8 +157,13 @@ class EmissionsMonitor:
             if data is not None:
                 self._energy_kwh = float(getattr(data, "energy_consumed", 0.0) or 0.0)
                 self._country_iso_code = getattr(data, "country_iso_code", None)
-        except Exception:
-            pass
+            else:
+                print(
+                    "[EmissionsMonitor] tracker stopped but final_emissions_data missing; "
+                    "energy_kwh/country left at defaults"
+                )
+        except Exception as e:
+            print(f"[EmissionsMonitor] failed to stop tracker: {type(e).__name__}: {e}")
         finally:
             self._tracker = None
         return self._emissions_kg

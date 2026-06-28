@@ -1354,6 +1354,217 @@ class Project:
         self._state_cache_time = now
         return result
 
+    def export_summary(self) -> dict:
+        """
+        Lab-notebook style snapshot of the project.
+
+        Returns a plain dict (JSON-serializable) covering project parameters,
+        users, schemes (with per-label / per-user / per-dataset annotation counts),
+        features, language models, quick models, generations, projections, bertopic.
+        Dates are ISO-8601 strings.
+
+        This feature can be a bit heavy for the orchestrator ; in the future; move it somewhere else ?
+        """
+
+        # Remove keys linked to credentials
+
+        def _iso(value: Any) -> str | None:
+            if value is None:
+                return None
+            if isinstance(value, datetime):
+                return value.isoformat()
+            return str(value)
+
+        REDACT_KEYS = ("api_key", "apikey", "token", "secret", "password", "credentials")
+
+        def _redact(obj: Any) -> Any:
+            if isinstance(obj, dict):
+                return {
+                    k: ("***" if any(s in k.lower() for s in REDACT_KEYS) else _redact(v))
+                    for k, v in obj.items()
+                }
+            if isinstance(obj, list):
+                return [_redact(v) for v in obj]
+            return obj
+
+        # --- project header --------------------------------------------------
+        slug = self.params.project_slug
+        project_row = self.db_manager.projects_service.get_project(slug) or {}
+        time_created = project_row.get("time_created")
+        time_modified = project_row.get("time_modified")
+        created_by = project_row.get("user_name")
+
+        project_block = {
+            "slug": slug,
+            "name": self.params.project_name,
+            "kind": self.params.kind,
+            "language": self.params.language,
+            "created_at": _iso(time_created),
+            "created_by": created_by,
+            "modified_at": _iso(time_modified),
+            "col_id": self.params.col_id,
+            "cols_text": list(self.params.cols_text or []),
+            "cols_context": list(self.params.cols_context or []),
+            "n_total": self.params.n_total,
+            "n_train": self.params.n_train,
+            "n_test": self.params.n_test,
+            "n_valid": self.params.n_valid,
+            "parameters": _redact(jsonable_encoder(self.params, exclude={"dir"})),
+        }
+
+        # --- users -----------------------------------------------------------
+        auths = self.db_manager.projects_service.get_project_auth(slug) or {}
+        users_block = [
+            {"username": username, "role": role} for username, role in sorted(auths.items())
+        ]
+
+        # --- schemes (with annotation rollups) -------------------------------
+        available_schemes = self.schemes.available()
+        scheme_datasets = ["train", "test", "valid"]
+        schemes_block: list[dict] = []
+
+        # query DB once per scheme via SQLAlchemy for time_created / time_modified
+        # available() does not expose timestamps; reuse the same query other code
+        # uses to read schemes from the DB.
+        scheme_timestamps: dict[str, dict[str, Any]] = {}
+        try:
+            with self.db_manager.projects_service.Session() as session:
+                from activetigger.db.models import Schemes as SchemesTable
+
+                rows = session.query(SchemesTable).filter_by(project_slug=slug).all()
+                for r in rows:
+                    scheme_timestamps[r.name] = {
+                        "time_created": r.time_created,
+                        "time_modified": r.time_modified,
+                        "user_name": r.user_name,
+                    }
+        except Exception:
+            scheme_timestamps = {}
+
+        for scheme_name, scheme in available_schemes.items():
+            per_label: dict[str, int] = {}
+            per_user: dict[str, int] = {}
+            per_dataset: dict[str, int] = {d: 0 for d in scheme_datasets}
+            distinct_elements: set[str] = set()
+            total = 0
+
+            for dataset in scheme_datasets:
+                try:
+                    rows = self.db_manager.projects_service.get_table_annotations_users(
+                        slug, scheme_name, dataset
+                    )
+                except Exception:
+                    rows = []
+                # rows: [element_id, annotation, user_name, time, dataset]
+                for element_id, annotation, user_name, _time, _ds in rows:
+                    if annotation is None:
+                        continue
+                    total += 1
+                    per_dataset[dataset] += 1
+                    distinct_elements.add(element_id)
+                    per_user[user_name] = per_user.get(user_name, 0) + 1
+                    # multilabel uses "|"-separated labels
+                    if scheme.kind == "multilabel" and "|" in annotation:
+                        for lbl in annotation.split("|"):
+                            per_label[lbl] = per_label.get(lbl, 0) + 1
+                    else:
+                        per_label[annotation] = per_label.get(annotation, 0) + 1
+
+            ts = scheme_timestamps.get(scheme_name, {})
+            schemes_block.append(
+                {
+                    "name": scheme_name,
+                    "kind": scheme.kind,
+                    "labels": list(scheme.labels),
+                    "created_at": _iso(ts.get("time_created")),
+                    "modified_at": _iso(ts.get("time_modified")),
+                    "created_by": ts.get("user_name"),
+                    "n_annotations_total": total,
+                    "n_annotations_per_dataset": per_dataset,
+                    "n_distinct_elements_annotated": len(distinct_elements),
+                    "annotations_per_label": dict(sorted(per_label.items())),
+                    "annotations_per_user": dict(sorted(per_user.items())),
+                }
+            )
+
+        # --- features --------------------------------------------------------
+        try:
+            available_features = self.features.get_available()
+        except Exception:
+            available_features = {}
+        features_block = [
+            {
+                "name": name,
+                "kind": getattr(feat, "kind", None),
+                "user": getattr(feat, "user", None),
+                "time": _iso(getattr(feat, "time", None)),
+                "parameters": _redact(getattr(feat, "parameters", {}) or {}),
+            }
+            for name, feat in available_features.items()
+        ]
+
+        # --- language models -------------------------------------------------
+        language_models_block: list[dict] = []
+        try:
+            lm_available = self.languagemodels.available()
+        except Exception:
+            lm_available = {}
+        for scheme_name, models in lm_available.items():
+            for model_name, status in models.items():
+                language_models_block.append(
+                    {
+                        "name": model_name,
+                        "scheme": scheme_name,
+                        "time": _iso(getattr(status, "time", None)),
+                        "predicted": getattr(status, "predicted", False),
+                        "predicted_all": getattr(status, "predicted_all", False),
+                        "predicted_external": getattr(status, "predicted_external", False),
+                        "tested": getattr(status, "tested", False),
+                        "exclude_labels": list(getattr(status, "exclude_labels", []) or []),
+                    }
+                )
+
+        # --- quick models ----------------------------------------------------
+        quick_models_block: list[dict] = []
+        try:
+            qm_available = self.quickmodels.available()
+        except Exception:
+            qm_available = {}
+        for scheme_name, models in qm_available.items():
+            for m in models:
+                quick_models_block.append(
+                    {
+                        "name": m.name,
+                        "scheme": scheme_name,
+                        "kind": m.kind,
+                        "time": _iso(m.time),
+                        "parameters": _redact(m.parameters or {}),
+                    }
+                )
+
+        # --- generations / projections / bertopic / image models -------------
+        def _state_dict(submodule) -> Any:
+            try:
+                return jsonable_encoder(submodule.state())
+            except Exception:
+                return None
+
+        return {
+            "format_version": "1.0",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "project": project_block,
+            "users": users_block,
+            "schemes": schemes_block,
+            "features": features_block,
+            "language_models": language_models_block,
+            "quick_models": quick_models_block,
+            "generations": _state_dict(self.generations),
+            "projections": _state_dict(self.projections),
+            "bertopic": _state_dict(self.bertopic),
+            "imagemodels": _state_dict(self.imagemodels) if self.imagemodels is not None else None,
+            "prompts": _state_dict(self.prompts) if self.prompts is not None else None,
+        }
+
     def export_features(self, features: list, format: str = "parquet") -> FileResponse:
         """
         Export features data in different formats
@@ -1863,7 +2074,7 @@ class Project:
                 f"Prediction does not support this type of scheme (kind: {training_kind})"
             )
         scheme_labels = scheme_.labels
-        self.languagemodels.start_predicting_process(
+        process_id = self.languagemodels.start_predicting_process(
             project_slug=self.name,
             name=model_name,
             user=username,
@@ -1879,6 +2090,12 @@ class Project:
             path_train=path_train,
             path_valid=path_valid,
             path_test=path_test,
+        )
+        self.monitoring.register_process(
+            process_name=process_id,
+            kind="predict_languagemodel",
+            parameters={},
+            user_name=username,
         )
 
     def start_quick_model_prediction(
@@ -2103,6 +2320,8 @@ class Project:
                         ):
                             add_predictions["predict_" + prediction.model_name] = results.path
                         self.languagemodels.add(prediction)
+                        if results is not None and results.events is not None:
+                            self.monitoring.close_process(prediction.unique_id, results.events)
                     case "train_image":
                         if self.imagemodels is None:
                             continue

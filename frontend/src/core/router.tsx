@@ -8,6 +8,7 @@ import { DocPage } from '../pages/DocPage';
 import { RoleSelector } from '../core/RoleSelector';
 import { HomePage } from '../pages/HomePage';
 import { LoginPage } from '../pages/LoginPage';
+import { MessagesPage } from '../pages/MessagesPage';
 import { MonitorPage } from '../pages/MonitorPage';
 import { NotFound } from '../pages/NotFoundPage';
 import { ProjectExplorePage } from '../pages/ProjectExplorePage';
@@ -57,6 +58,14 @@ export function getRouter() {
       element: (
         <APIMiddlewares>
           <MonitorPage />
+        </APIMiddlewares>
+      ),
+    },
+    {
+      path: '/messages',
+      element: (
+        <APIMiddlewares>
+          <MessagesPage />
         </APIMiddlewares>
       ),
     },

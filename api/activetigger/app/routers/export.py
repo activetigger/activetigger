@@ -41,6 +41,21 @@ def export_data(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/export/summary", dependencies=[Depends(verified_user)])
+def export_summary(
+    project: Annotated[Project, Depends(get_project)],
+    current_user: Annotated[UserInDBModel, Depends(verified_user)],
+) -> dict:
+    """
+    Lab-notebook style snapshot of the project (JSON).
+    """
+    test_rights(ProjectAction.EXPORT_DATA, current_user.username, project.name)
+    try:
+        return project.export_summary()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/export/features", dependencies=[Depends(verified_user)])
 def export_features(
     project: Annotated[Project, Depends(get_project)],
