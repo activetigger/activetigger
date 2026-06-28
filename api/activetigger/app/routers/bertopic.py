@@ -49,7 +49,6 @@ def compute_bertopic(
             parameters=bertopic,
             name=bertopic.name,
             user=current_user.username,
-            force_compute_embeddings=bertopic.force_compute_embeddings,
             scheme=bertopic.scheme,
         )
         get_orchestrator().log_action(

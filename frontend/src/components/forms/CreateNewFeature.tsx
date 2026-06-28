@@ -1,4 +1,4 @@
-import { FC } from 'react';
+import { FC, useEffect } from 'react';
 import { SubmitHandler, useForm } from 'react-hook-form';
 import { useParams } from 'react-router-dom';
 
@@ -9,11 +9,13 @@ import { FeatureModelExtended } from '../../types';
 
 interface Options {
   models?: Record<string, unknown> | string[];
+  pooling?: string[];
 }
 
 interface FeaturesOptions {
   fasttext?: Options;
   'sentence-embeddings'?: Options;
+  'bert-embeddings'?: Options;
   'image-embeddings'?: Options;
   'multimodal-embeddings'?: Options;
 }
@@ -37,30 +39,49 @@ export const CreateNewFeature: FC<CreateNewFeatureProps> = ({
   const addFeature = useAddFeature();
 
   // hooks to use the objets
-  const { register, handleSubmit, watch, reset } = useForm<FeatureModelExtended>({
-    defaultValues: {
-      parameters: {
-        dfm_max_term_freq: 100,
-        dfm_min_term_freq: 5,
-        dfm_ngrams: 1,
-        model: 'generic',
-        max_length_tokens: 1024,
-        batch_size: 32,
+  const { register, handleSubmit, watch, reset, setValue, getValues } =
+    useForm<FeatureModelExtended>({
+      defaultValues: {
+        parameters: {
+          dfm_max_term_freq: 100,
+          dfm_min_term_freq: 5,
+          dfm_ngrams: 1,
+          model: 'generic',
+          max_length_tokens: 1024,
+          batch_size: 32,
+        },
+        type:
+          'image-embeddings' in featuresOption
+            ? 'image-embeddings'
+            : 'multimodal-embeddings' in featuresOption
+              ? 'multimodal-embeddings'
+              : 'sentence-embeddings',
+        name: defaultName,
       },
-      type:
-        'image-embeddings' in featuresOption
-          ? 'image-embeddings'
-          : 'multimodal-embeddings' in featuresOption
-            ? 'multimodal-embeddings'
-            : 'sentence-embeddings',
-      name: defaultName,
-    },
-  });
+    });
 
   const { notify } = useNotifications();
 
   // state for the type of feature to create
   const selectedFeatureToCreate = watch('type');
+
+  // bert-embeddings has no "generic" model option — when the user enters that
+  // panel, seed parameters.model with the first available trained model so the
+  // visible dropdown selection and the form state agree.
+  useEffect(() => {
+    if (selectedFeatureToCreate !== 'bert-embeddings') return;
+    const trainedModels = (featuresOption['bert-embeddings']?.models ?? []) as string[];
+    if (trainedModels.length === 0) return;
+    const current = (getValues('parameters') as Record<string, unknown> | undefined)?.model;
+    if (typeof current !== 'string' || !trainedModels.includes(current)) {
+      setValue('parameters.model' as never, trainedModels[0] as never);
+    }
+    const poolingCurrent = (getValues('parameters') as Record<string, unknown> | undefined)
+      ?.pooling;
+    if (typeof poolingCurrent !== 'string') {
+      setValue('parameters.pooling' as never, 'mean' as never);
+    }
+  }, [selectedFeatureToCreate, featuresOption, setValue, getValues]);
 
   // action to create the new feature
   const createNewFeature: SubmitHandler<FeatureModelExtended> = async (formData) => {
@@ -123,6 +144,57 @@ export const CreateNewFeature: FC<CreateNewFeatureProps> = ({
           <input type="number" placeholder="Batch size" {...register('parameters.batch_size')} />
         </details>
       )}
+
+      {selectedFeatureToCreate === 'bert-embeddings' &&
+        (() => {
+          const trainedModels = (featuresOption['bert-embeddings']?.models ?? []) as string[];
+          const poolingOptions = (featuresOption['bert-embeddings']?.pooling ?? [
+            'mean',
+            'cls',
+          ]) as string[];
+          if (trainedModels.length === 0) {
+            return (
+              <small>
+                No trained BERT model is available yet. Train one from the Models page first.
+              </small>
+            );
+          }
+          return (
+            <details open>
+              <summary>Embedding from a trained BERT</summary>
+              <label htmlFor="bert_model">Trained BERT model</label>
+              <select id="bert_model" {...register('parameters.model')}>
+                {trainedModels.map((element) => (
+                  <option key={element} value={element}>
+                    {element}
+                  </option>
+                ))}
+              </select>
+              <label htmlFor="bert_pooling">Pooling</label>
+              <select id="bert_pooling" {...register('parameters.pooling')}>
+                {poolingOptions.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </select>
+              <label htmlFor="bert_length">Max length tokens</label>
+              <input
+                type="number"
+                id="bert_length"
+                placeholder="Max length tokens"
+                {...register('parameters.max_length_tokens')}
+              />
+              <label htmlFor="bert_batch_size">Batch size</label>
+              <input
+                type="number"
+                id="bert_batch_size"
+                placeholder="Batch size"
+                {...register('parameters.batch_size')}
+              />
+            </details>
+          );
+        })()}
 
       {selectedFeatureToCreate === 'image-embeddings' && (
         <details open>

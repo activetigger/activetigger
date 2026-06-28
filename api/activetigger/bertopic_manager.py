@@ -71,16 +71,26 @@ class Bertopic:
         name: str,
         user: str,
         scheme: str,  # This is a dummy necessary to save the model in the database, it will not be used afterwards — Axel
-        force_compute_embeddings: bool = False,
     ) -> str:
         """
         Compute BERTopic model.
+
+        BERTopic always reuses embeddings from an existing project feature
+        (parameters.existing_feature). Embeddings are never recomputed here —
+        the feature must already have been built in the project's Features page.
         """
 
         name = slugify(name)
 
         if len(self.current_user_processes(user)) > 0:
             raise ValueError("You already have computation in progress.")
+
+        if not parameters.existing_feature:
+            raise ValueError(
+                "existing_feature is required: pick a sentence-embeddings or "
+                "bert-embeddings feature from the project's Features page."
+            )
+        self._materialize_feature_embeddings(parameters)
 
         args = ComputeBertopic(
             path_bertopic=self.path,
@@ -89,10 +99,10 @@ class Bertopic:
             col_text=col_text,
             parameters=parameters,
             name=name,
-            force_compute_embeddings=force_compute_embeddings,
+            force_compute_embeddings=False,
             random_seed=config.random_seed,
         )
-        unique_id = self.queue.add_task("bertopic", self.project_slug, args, queue="gpu")
+        unique_id = self.queue.add_task("bertopic", self.project_slug, args, queue="cpu")
         self.computing.append(
             BertopicComputing(
                 user=user,
@@ -104,7 +114,7 @@ class Bertopic:
                 parameters=parameters,
                 time=datetime.now(timezone.utc),
                 kind="bertopic",
-                force_compute_embeddings=force_compute_embeddings,
+                force_compute_embeddings=False,
                 get_progress=self.get_progress(name),
                 scheme=scheme,
             )
@@ -175,8 +185,65 @@ class Bertopic:
         return BertopicProjectStateModel(
             available=self.available(),
             training=self.training(),
-            models=list(config.models_embeddings),
+            bindable_features=self._bindable_features(),
         )
+
+    EMBEDDING_FEATURE_KINDS = {"sentence-embeddings", "bert-embeddings"}
+
+    def _bindable_features(self) -> list[str]:
+        """
+        Project features that can be reused as BERTopic embeddings.
+        Sentence-embeddings (generic SBERT/HF embedders) and bert-embeddings
+        (extracted from a project-trained BERT) both yield per-row vectors
+        compatible with BERTopic.
+        """
+        try:
+            available = self.features.get_available()
+        except Exception:
+            return []
+        return [
+            name for name, feat in available.items() if feat.kind in self.EMBEDDING_FEATURE_KINDS
+        ]
+
+    def _materialize_feature_embeddings(self, parameters: BertopicParamsModel) -> None:
+        """
+        Copy the selected project feature into the BERTopic embeddings folder
+        so the compute task picks it up via its standard caching path.
+
+        Mutates parameters.embedding_model so that the path computed by the task
+        matches the file produced here. The original feature name is preserved
+        via parameters.existing_feature for traceability in params.json.
+        """
+        feature_name = parameters.existing_feature
+        if feature_name is None:
+            return
+        if parameters.input_datasets == "complete":
+            raise ValueError(
+                "Existing features cover only train/valid/test rows; "
+                "input_datasets='complete' is not supported with existing_feature."
+            )
+        if not self.features.exists(feature_name):
+            raise ValueError(f"Feature '{feature_name}' does not exist.")
+        feat_info = self.features.get_available().get(feature_name)
+        if feat_info is None or feat_info.kind not in self.EMBEDDING_FEATURE_KINDS:
+            raise ValueError(
+                f"Feature '{feature_name}' is not a usable embedding feature "
+                f"(must be one of {sorted(self.EMBEDDING_FEATURE_KINDS)})."
+            )
+
+        datasets = ["train"] if parameters.input_datasets == "train" else ["train", "valid", "test"]
+        df = self.features.get([feature_name], dataset=datasets)
+
+        synthetic_model = f"feature-{slugify(feature_name)}"
+        parameters.embedding_model = synthetic_model
+
+        embeddings_dir = self.path.joinpath("embeddings")
+        embeddings_dir.mkdir(parents=True, exist_ok=True)
+        target = embeddings_dir.joinpath(
+            f"bertopic_embeddings_{parameters.input_datasets}_{slugify(synthetic_model)}.parquet"
+        )
+        # Always overwrite to avoid stale data if the feature was recomputed.
+        df.to_parquet(target)
 
     def current_user_processes(self, user: str) -> list:
         """

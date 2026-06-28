@@ -18,6 +18,7 @@ from activetigger.datamodels import (
 )
 from activetigger.db.projects import ProjectsService
 from activetigger.queue_manager import Queue
+from activetigger.tasks.compute_bert_embeddings import ComputeBertEmbeddings
 from activetigger.tasks.compute_clip_imagexp import ComputeClipImagexp
 from activetigger.tasks.compute_dfm import ComputeDfm
 from activetigger.tasks.compute_fasttext import ComputeFasttext
@@ -87,6 +88,7 @@ class Features:
         db_manager,
         lang: str,
         kind: str = "text",
+        languagemodels: Any = None,
     ) -> None:
         """
         Initit features
@@ -103,6 +105,8 @@ class Features:
         self.lang = lang
         self.computing = computing
         self.kind = kind
+        # Reference to the project's LanguageModels manager.
+        self.languagemodels = languagemodels
         # Optional hook called as `on_delete(name, kind)` after a successful
         # feature delete. Project wires this up for image projects so that
         # deleting a multimodal-embeddings feature cascades to prompts.
@@ -136,6 +140,10 @@ class Features:
                 "sentence-embeddings": {
                     "models": config.models_embeddings,
                     "default": "jinaai/jina-embeddings-v5-text-small",
+                },
+                "bert-embeddings": {
+                    "models": [],
+                    "pooling": ["mean", "cls"],
                 },
                 "fasttext": {"models": fasttext_models},
                 "dfm": {
@@ -484,6 +492,14 @@ class Features:
             and use_default_name
         ):
             pretty_name = f"{parameters['dataset_col']}_{parameters['dataset_type'].lower()}"
+        elif kind == "bert-embeddings":
+            model_name = str(parameters.get("model", "")) or "model"
+            pooling = str(parameters.get("pooling", "mean"))
+            short = model_name.split("/")[-1]
+            if use_default_name:
+                pretty_name = f"BERT_{short}_{pooling}"
+            else:
+                pretty_name = f"BERT_{name}_{pooling}"
         elif kind == "image-embeddings":
             ui_label = parameters.get("model") or DEFAULT_IMAGE_EMBEDDING_MODEL_IMAGEXP
             if use_default_name:
@@ -526,6 +542,7 @@ class Features:
 
         if kind not in {
             "sentence-embeddings",
+            "bert-embeddings",
             "fasttext",
             "dfm",
             "regex",
@@ -628,6 +645,47 @@ class Features:
                 "kind": kind,
                 "username": username,
                 "max_length_tokens": parameters["max_length_tokens"],
+            }
+
+        if kind == "bert-embeddings":
+            if self.languagemodels is None:
+                raise ValueError("No LanguageModels manager available for bert-embeddings")
+            model_name = parameters.get("model")
+            if not model_name:
+                raise ValueError("A trained BERT model name must be provided")
+            if not self.languagemodels.exists(model_name):
+                raise ValueError(f"Trained BERT model '{model_name}' does not exist")
+
+            pooling = parameters.get("pooling", "mean")
+            if pooling not in {"cls", "mean"}:
+                raise ValueError("pooling must be 'cls' or 'mean'")
+
+            max_length_tokens = int(parameters.get("max_length_tokens", 512))
+            batch_size = int(parameters.get("batch_size", 32))
+            model_path = self.languagemodels.path.joinpath(model_name)
+
+            unique_id = self.queue.add_task(
+                "feature",
+                self.project_slug,
+                ComputeBertEmbeddings(
+                    texts=df,
+                    path_process=self.path_all.parent,
+                    model_path=model_path,
+                    pooling=pooling,
+                    batch_size=batch_size,
+                    max_tokens=max_length_tokens,
+                ),
+                queue="gpu",
+            )
+
+            parameters = {
+                "model": model_name,
+                "pooling": pooling,
+                "name": name,
+                "kind": kind,
+                "username": username,
+                "max_length_tokens": max_length_tokens,
+                "batch_size": batch_size,
             }
 
         if kind == "image-embeddings":
@@ -756,8 +814,23 @@ class Features:
             return None
 
     def state(self) -> FeaturesProjectStateModel:
+        # Refresh trained-BERT list each call: models are trained out-of-band
+        # via LanguageModels, so the dropdown must reflect what's available now.
+        if "bert-embeddings" in self.options and self.languagemodels is not None:
+            self.options["bert-embeddings"]["models"] = self._available_bert_models()
         return FeaturesProjectStateModel(
             options=self.options,
             available=list(self.map.keys()),
             training=self.current_computing(),
         )
+
+    def _available_bert_models(self) -> list[str]:
+        """
+        Flat list of trained BERT model names available as embedding sources.
+        """
+        if self.languagemodels is None:
+            return []
+        models: list[str] = []
+        for _scheme, by_name in self.languagemodels.available().items():
+            models.extend(by_name.keys())
+        return sorted(set(models))

@@ -129,7 +129,7 @@ class Config(metaclass=_Singleton):
     mail_password: str | None = os.environ.get("MAIL_PASSWORD", None)
     # Carbon footprint tracking via codecarbon. carbon_country is a 3-letter ISO
     # code (e.g. "FRA"); when None, codecarbon attempts geolocation on first use.
-    carbon_enabled: bool = os.environ.get("CARBON_ENABLED", "true").lower() in (
+    carbon_enabled: bool = os.environ.get("CARBON_ENABLED", "false").lower() in (
         "true",
         "1",
         "yes",
