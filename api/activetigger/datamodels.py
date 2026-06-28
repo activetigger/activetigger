@@ -555,21 +555,25 @@ class BertopicParamsModel(BaseModel):
     umap_n_components: int = 2
     # umap_min_dist: float = 0.0 # Removed because 0.0 is the best value to use for clustering - Axel
     embedding_kind: str = "sentence_transformers"
-    embedding_model: str = "all-MiniLM-L6-v2"
+    embedding_model: str | None = "all-MiniLM-L6-v2"
     embedding_batch_size: int = 32
     filter_text_length: int = 2
     input_datasets: str = "train"
+    existing_feature: str | None = None
 
 
 class ComputeBertopicModel(BertopicParamsModel):
     """
-    Parameters for computing BERTopic model
+    Parameters for computing BERTopic model.
+
+    BERTopic reuses embeddings from an existing project feature
+    (existing_feature must reference a sentence-embeddings feature).
+    Embeddings are never recomputed from this endpoint — to add a new
+    embedding model, use the project's Features page.
     """
 
     name: str
-    force_compute_embeddings: bool = False
-    embedding_model: str
-    embedding_batch_size: int = 32
+    existing_feature: str | None = None
     language: str | None = None
     input_datasets: str = "train"
     umap_n_neighbors: int = 30
@@ -579,7 +583,6 @@ class ComputeBertopicModel(BertopicParamsModel):
     umap_n_components: int = 5
     top_n_words: int = 15
     n_gram_range: tuple[int, int] = (1, 2)
-    embedding_kind: str = "sentence_transformers"
     scheme: str
 
 
@@ -965,7 +968,7 @@ class BERTopicDescriptionModel(BaseModel):
 class BertopicProjectStateModel(BaseModel):
     available: dict[str, BERTopicDescriptionModel]
     training: dict[str, dict[str, str | int | float | None]]
-    models: list[str]
+    bindable_features: list[str]
 
 
 class GenerationsProjectStateModel(BaseModel):

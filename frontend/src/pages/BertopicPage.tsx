@@ -52,7 +52,7 @@ export const BertopicPage: FC = () => {
     currentBertopic,
   );
   const currentTraining = currentProject ? Object.entries(currentProject.bertopic.training) : null;
-  const availableModels = currentProject ? currentProject.bertopic.models : [];
+  const bindableFeatures = currentProject ? currentProject.bertopic.bindable_features : [];
   useEffect(() => {
     reFetchTopics();
     reFetchProjection();
@@ -170,7 +170,7 @@ export const BertopicPage: FC = () => {
           <Modal.Body>
             <BertopicForm
               projectSlug={projectName || null}
-              availableModels={availableModels}
+              bindableFeatures={bindableFeatures}
               isComputing={isComputing}
               setStatusDisplay={setShowComputeNewBertopic}
             />
@@ -206,12 +206,8 @@ export const BertopicPage: FC = () => {
                           <td>{parameters?.bertopic_params.language}</td>
                         </tr>
                         <tr>
-                          <td>Embedding model</td>
-                          <td>{parameters?.bertopic_params.embedding_model}</td>
-                        </tr>
-                        <tr>
-                          <td>Embedding batch size</td>
-                          <td>{parameters?.bertopic_params.embedding_batch_size}</td>
+                          <td>Embeddings feature</td>
+                          <td>{parameters?.bertopic_params.existing_feature}</td>
                         </tr>
                         <tr>
                           <td>Number of keywords</td>

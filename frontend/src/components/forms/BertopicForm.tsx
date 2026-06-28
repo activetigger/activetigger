@@ -9,14 +9,14 @@ import { ComputeBertopicModel } from '../../types';
 
 interface BertopicCreationFormProps {
   projectSlug: string | null;
-  availableModels: string[];
+  bindableFeatures: string[];
   isComputing?: boolean;
   setStatusDisplay?: Dispatch<SetStateAction<boolean>>;
 }
 
 export const BertopicForm: FC<BertopicCreationFormProps> = ({
   projectSlug,
-  availableModels,
+  bindableFeatures,
   isComputing = false,
   setStatusDisplay,
 }) => {
@@ -30,15 +30,10 @@ export const BertopicForm: FC<BertopicCreationFormProps> = ({
     defaultValues: {
       name: getRandomName('BERTopic'),
       outlier_reduction: true,
-      // min_topic_size: 10, // Removed because overridden by the hdbscan model - Axel
-      // nr_topics: 'auto', // Removed to propose topic reduction later in the pipeline - Axel
       hdbscan_min_cluster_size: 15,
       umap_n_neighbors: 30,
       umap_n_components: 5,
-      // umap_min_dist: 0.0, // Removed because 0.0 is the best value to use for clustering - Axel
-      embedding_model: availableModels[0],
-      embedding_batch_size: 32,
-      force_compute_embeddings: false,
+      existing_feature: bindableFeatures[0] ?? '',
       filter_text_length: 50,
       input_datasets: 'train',
       scheme: currentScheme,
@@ -50,26 +45,37 @@ export const BertopicForm: FC<BertopicCreationFormProps> = ({
     if (setStatusDisplay) setStatusDisplay(false);
   };
 
+  if (bindableFeatures.length === 0) {
+    return (
+      <div className="alert alert-warning">
+        BERTopic reuses embeddings from a project feature. Compute a sentence-embeddings feature
+        first in the <b>Features</b> page, then come back here to run BERTopic on it.
+      </div>
+    );
+  }
+
   return (
     <div>
       <form onSubmit={handleSubmitNewModel(onSubmitNewModel)}>
         <label htmlFor="name">Name</label>
         <input id="name" type="text" {...register('name')} />
-        <label htmlFor="embedding_model">
-          Embedding model
-          <a className="embedding_model">
+        <label htmlFor="existing_feature">
+          Embeddings feature
+          <a className="existing_feature">
             <HiOutlineQuestionMarkCircle />
           </a>
-          <Tooltip anchorSelect=".embedding_model" place="top">
-            Some models are quite bad for topic modelling tasks, consider changing the embedding
+          <Tooltip anchorSelect=".existing_feature" place="top">
+            BERTopic reuses embeddings already computed for this project.
             <br />
-            model if the results are unsatisfactory.
+            Pick a sentence-embeddings feature; to use a different embedding
+            <br />
+            model, add it from the Features page first.
           </Tooltip>
         </label>
-        <select {...register('embedding_model')}>
-          {availableModels.map((model) => (
-            <option key={model} value={model}>
-              {model}
+        <select id="existing_feature" {...register('existing_feature', { required: true })}>
+          {bindableFeatures.map((feature) => (
+            <option key={feature} value={feature}>
+              {feature}
             </option>
           ))}
         </select>
@@ -117,15 +123,6 @@ export const BertopicForm: FC<BertopicCreationFormProps> = ({
             <input id="outlier_reduction" type="checkbox" {...register('outlier_reduction')} />
             <label htmlFor="outlier_reduction">Outlier reduction</label>
           </div>
-
-          <div>
-            <input
-              id="force_compute_embeddings"
-              type="checkbox"
-              {...register('force_compute_embeddings')}
-            />
-            <label htmlFor="force_compute_embeddings">Force compute embeddings</label>
-          </div>
           <label htmlFor="input_datasets">Input dataset</label>
           <select {...register('input_datasets')}>
             {/* TODO: Add the number of element in each option */}
@@ -135,31 +132,9 @@ export const BertopicForm: FC<BertopicCreationFormProps> = ({
             <option key="all_sets" value="all_sets">
               All sets (train + test + valid)
             </option>
-            <option key="complete" value="complete">
-              Complete
-            </option>
           </select>
           <label htmlFor="filter_text_length">Filter out texts of length lower than</label>
           <input id="filter_text_length" type="number" {...register('filter_text_length')} />
-          <label htmlFor="embedding_batch_size">
-            Embedding batch size
-            <a className="embedding_batch_size">
-              <HiOutlineQuestionMarkCircle />
-            </a>
-            <Tooltip anchorSelect=".embedding_batch_size" place="top">
-              Number of texts encoded together when computing embeddings.
-              <br />
-              Larger values speed up embedding on GPUs but use more memory — lower
-              <br />
-              it if you run out of memory, raise it for large datasets on capable hardware.
-            </Tooltip>
-          </label>
-          <input
-            id="embedding_batch_size"
-            type="number"
-            min={1}
-            {...register('embedding_batch_size', { valueAsNumber: true })}
-          />
           <label htmlFor="umap_n_components">
             Number of components (dimension reduction parameter)
             <a className="umap_n_components">

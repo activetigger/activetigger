@@ -2454,8 +2454,8 @@ export interface components {
             }
           | undefined;
       };
-      /** Models */
-      models: string[];
+      /** Bindable Features */
+      bindable_features: string[];
     };
     /**
      * BertopicProjectionData
@@ -2583,7 +2583,10 @@ export interface components {
     };
     /**
      * ComputeBertopicModel
-     * @description Parameters for computing BERTopic model
+     * @description Parameters for computing BERTopic model. BERTopic reuses embeddings
+     *     from an existing project feature (existing_feature). Embeddings are
+     *     never recomputed here — to add a new embedding model use the
+     *     project's Features page.
      */
     ComputeBertopicModel: {
       /** Language */
@@ -2622,18 +2625,6 @@ export interface components {
        */
       umap_n_components: number;
       /**
-       * Embedding Kind
-       * @default sentence_transformers
-       */
-      embedding_kind: string;
-      /** Embedding Model */
-      embedding_model: string;
-      /**
-       * Embedding Batch Size
-       * @default 32
-       */
-      embedding_batch_size: number;
-      /**
        * Filter Text Length
        * @default 50
        */
@@ -2645,11 +2636,8 @@ export interface components {
       input_datasets: string;
       /** Name */
       name: string;
-      /**
-       * Force Compute Embeddings
-       * @default false
-       */
-      force_compute_embeddings: boolean;
+      /** Existing Feature */
+      existing_feature?: string | null;
       /** Scheme */
       scheme: string;
     };
