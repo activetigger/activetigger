@@ -220,6 +220,16 @@ class Project:
             self.db_manager,
             self.data,
         )
+        # LanguageModels is built first so Features can take a reference to
+        # it (needed to list trained BERTs as a source for bert-embeddings).
+        self.languagemodels = LanguageModels(
+            project_slug,
+            self.params.dir,
+            self.queue,
+            self.computing,
+            self.db_manager,
+            config.file_bert_models,
+        )
         self.features = Features(
             project_slug,
             self.data,
@@ -229,6 +239,7 @@ class Project:
             self.db_manager,
             self.params.language,
             kind=getattr(self.params, "kind", "text"),
+            languagemodels=self.languagemodels,
         )
         # Experimental multimodal prompt panel — image projects only.
         # See docs/multimodal-prompt-selection.md.
@@ -252,14 +263,6 @@ class Project:
 
             self.features.on_delete = _cascade_prompts
             self.features.on_reset = _reset_prompts
-        self.languagemodels = LanguageModels(
-            project_slug,
-            self.params.dir,
-            self.queue,
-            self.computing,
-            self.db_manager,
-            config.file_bert_models,
-        )
         # Image fine-tuning is only meaningful for image projects.
         self.imagemodels: ImageModels | None = None
         if getattr(self.params, "kind", "text") == "image":

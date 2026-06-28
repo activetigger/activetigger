@@ -268,7 +268,7 @@ class ComputeBertopic(BaseTask):
         path_embeddings = self.path_bertopic.joinpath("embeddings").joinpath(
             (
                 f"bertopic_embeddings_{self.input_datasets}_"
-                f"{slugify(self.parameters.embedding_model)}"
+                f"{slugify(self.parameters.embedding_model or '')}"
                 f".parquet"
             )
         )

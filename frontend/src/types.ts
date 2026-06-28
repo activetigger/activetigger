@@ -114,12 +114,20 @@ export interface FeatureSbertParameters {
   batch_size?: number;
 }
 
+export interface FeatureBertEmbeddingsParameters {
+  model?: string;
+  pooling?: 'mean' | 'cls';
+  max_length_tokens?: number;
+  batch_size?: number;
+}
+
 export interface FeatureModelExtended {
   name: string;
   type: string;
   parameters:
     | null
     | FeatureSbertParameters
+    | FeatureBertEmbeddingsParameters
     | FeatureDfmParameters
     | FeatureRegexParameters
     | FeatureDatasetParameters

@@ -87,8 +87,8 @@ class Bertopic:
 
         if not parameters.existing_feature:
             raise ValueError(
-                "existing_feature is required: pick a sentence-embeddings feature "
-                "from the project's Features page."
+                "existing_feature is required: pick a sentence-embeddings or "
+                "bert-embeddings feature from the project's Features page."
             )
         self._materialize_feature_embeddings(parameters)
 
@@ -188,16 +188,22 @@ class Bertopic:
             bindable_features=self._bindable_features(),
         )
 
+    EMBEDDING_FEATURE_KINDS = {"sentence-embeddings", "bert-embeddings"}
+
     def _bindable_features(self) -> list[str]:
         """
         Project features that can be reused as BERTopic embeddings.
-        Currently restricted to sentence-embeddings features.
+        Sentence-embeddings (generic SBERT/HF embedders) and bert-embeddings
+        (extracted from a project-trained BERT) both yield per-row vectors
+        compatible with BERTopic.
         """
         try:
             available = self.features.get_available()
         except Exception:
             return []
-        return [name for name, feat in available.items() if feat.kind == "sentence-embeddings"]
+        return [
+            name for name, feat in available.items() if feat.kind in self.EMBEDDING_FEATURE_KINDS
+        ]
 
     def _materialize_feature_embeddings(self, parameters: BertopicParamsModel) -> None:
         """
@@ -219,8 +225,11 @@ class Bertopic:
         if not self.features.exists(feature_name):
             raise ValueError(f"Feature '{feature_name}' does not exist.")
         feat_info = self.features.get_available().get(feature_name)
-        if feat_info is None or feat_info.kind != "sentence-embeddings":
-            raise ValueError(f"Feature '{feature_name}' is not a sentence-embeddings feature.")
+        if feat_info is None or feat_info.kind not in self.EMBEDDING_FEATURE_KINDS:
+            raise ValueError(
+                f"Feature '{feature_name}' is not a usable embedding feature "
+                f"(must be one of {sorted(self.EMBEDDING_FEATURE_KINDS)})."
+            )
 
         datasets = ["train"] if parameters.input_datasets == "train" else ["train", "valid", "test"]
         df = self.features.get([feature_name], dataset=datasets)
