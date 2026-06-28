@@ -71,9 +71,7 @@ class ComputeSbertPrompt(BaseTask):
             with open(self.path_progress, "w") as f:
                 f.write("10.0")
 
-            model = SentenceTransformer(
-                self.model_name, device=str(device), trust_remote_code=True
-            )
+            model = SentenceTransformer(self.model_name, device=str(device), trust_remote_code=True)
 
             if self.event is not None and self.event.is_set():
                 raise Exception("Process interrupted by user")
