@@ -71,7 +71,7 @@ from activetigger.languagemodels import LanguageModels
 from activetigger.messages import Messages
 from activetigger.monitoring import Monitoring
 from activetigger.projections import Projections
-from activetigger.prompts import Prompts
+from activetigger.prompts import BINDABLE_FEATURE_KINDS, Prompts
 from activetigger.queue_manager import Queue
 from activetigger.quickmodels import QuickModels
 from activetigger.schemes import Schemes
@@ -241,10 +241,10 @@ class Project:
             kind=getattr(self.params, "kind", "text"),
             languagemodels=self.languagemodels,
         )
-        # Experimental multimodal prompt panel — image projects only.
-        # See docs/multimodal-prompt-selection.md.
+        # Prompt-based selection — available on image projects (multimodal-
+        # embeddings features) and text projects (sentence-embeddings features).
         self.prompts: Prompts | None = None
-        if getattr(self.params, "kind", "text") == "image" and self.params.dir is not None:
+        if self.params.dir is not None:
             self.prompts = Prompts(
                 project_slug,
                 self.params.dir,
@@ -254,7 +254,7 @@ class Project:
             )
 
             def _cascade_prompts(name: str, kind: str | None) -> None:
-                if kind == "multimodal-embeddings" and self.prompts is not None:
+                if kind in BINDABLE_FEATURE_KINDS and self.prompts is not None:
                     self.prompts.delete_by_feature(name)
 
             def _reset_prompts() -> None:
@@ -981,13 +981,14 @@ class Project:
                 indicator = f"entropy: {round(proba.loc[element_id, 'entropy'], 2)}"
 
         # prompt: cosine similarity between a saved prompt embedding and the
-        # image embeddings of its bound multimodal-embeddings feature.
-        # The full sorted ranking is cached on the Prompts object per
-        # (prompt_id, dataset); each call then just does an index
-        # intersection with the candidate set ss.
+        # element embeddings of its bound feature (multimodal-embeddings on
+        # image projects, sentence-embeddings on text projects). The full
+        # sorted ranking is cached on the Prompts object per (prompt_id,
+        # dataset); each call then just does an index intersection with the
+        # candidate set ss.
         if next.selection == "prompt":
             if self.prompts is None:
-                raise ValueError("Prompt selection is only available on image projects")
+                raise ValueError("Prompt selection is not available on this project")
             if next.prompt_id is None:
                 raise ValueError("prompt_id is required for prompt selection")
             ranked = self.prompts.get_ranking(next.prompt_id, next.dataset)
@@ -1317,17 +1318,18 @@ class Project:
         ):
             return self._state_cache
 
-        # expose "prompt" selection only when the image project has at least
-        # one multimodal-embeddings feature AND at least one saved prompt.
+        # expose "prompt" selection only when the project has at least one
+        # bindable feature (multimodal-embeddings for image, sentence-embeddings
+        # for text) AND at least one saved prompt.
         methods = ["fixed", "random", "maxprob", "active"]
         if self.prompts is not None:
             try:
                 available = self.features.get_available()
             except Exception:
                 available = {}
-            has_mm_feature = any(f.kind == "multimodal-embeddings" for f in available.values())
+            has_bindable_feature = any(f.kind in BINDABLE_FEATURE_KINDS for f in available.values())
             has_prompt = len(self.prompts.list()) > 0
-            if has_mm_feature and has_prompt:
+            if has_bindable_feature and has_prompt:
                 methods.append("prompt")
 
         result = ProjectStateModel(

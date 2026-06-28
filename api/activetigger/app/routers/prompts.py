@@ -1,6 +1,7 @@
 """
-Prompts router — multimodal prompt-based image retrieval.
-See docs/multimodal-prompt-selection.md.
+Prompts router — prompt-based selection by cosine similarity against a bound
+embedding feature (multimodal-embeddings on image projects, sentence-embeddings
+on text projects). See docs/multimodal-prompt-selection.md.
 """
 
 from typing import Annotated
@@ -24,7 +25,7 @@ def _require_prompts(project: Project):
     if project.prompts is None:
         raise HTTPException(
             status_code=400,
-            detail="Prompts are only available on image projects.",
+            detail="Prompts are not available on this project.",
         )
     return project.prompts
 

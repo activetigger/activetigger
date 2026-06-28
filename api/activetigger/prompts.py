@@ -1,14 +1,18 @@
-# Experimental image projects — see docs/multimodal-prompt-selection.md
 """
-Prompt management for multimodal image projects.
+Prompt management for embedding-based selection.
 
-A prompt is a short text query that is embedded with the same
-sentence-transformer model used for a `multimodal-embeddings` feature; the
-prompt vector and the image vectors then live in the same space, and
-get_next can rank candidates by cosine similarity.
+A prompt is a short text query that is embedded with the same model used for
+the bound feature, so the query vector and the document/image vectors live in
+the same space; `get_next` then ranks candidates by cosine similarity.
 
-Storage lives in a dedicated `prompts.parquet` (one row per prompt, with
-the embedding columns inline), separate from `features.parquet`.
+Supported feature kinds:
+- `multimodal-embeddings` (image projects): query encoded with the feature's
+  multimodal sentence-transformer (e.g. CLIP / BGE-VL / Qwen-VL).
+- `sentence-embeddings` (text projects): query encoded with the same
+  SentenceTransformer used to compute the feature.
+
+Storage lives in a dedicated `prompts.parquet` (one row per prompt, with the
+embedding columns inline), separate from `features.parquet`.
 """
 
 import uuid
@@ -22,7 +26,12 @@ import pandas as pd
 from activetigger.datamodels import PromptComputing, PromptOutModel, PromptsProjectStateModel
 from activetigger.features import Features
 from activetigger.queue_manager import Queue
+from activetigger.tasks.base_task import BaseTask
 from activetigger.tasks.compute_multimodal_prompt import ComputeMultimodalPrompt
+from activetigger.tasks.compute_sbert_prompt import ComputeSbertPrompt
+
+# Feature kinds whose vectors live in a space we can encode a text query into.
+BINDABLE_FEATURE_KINDS = {"multimodal-embeddings", "sentence-embeddings"}
 
 PROMPTS_FILE = "prompts.parquet"
 
@@ -69,21 +78,28 @@ class Prompts:
             return
         df.to_parquet(self.path_file, index=True)
 
-    def _resolve_feature(self, feature_name: str) -> str:
-        """Return the HF model name for a multimodal-embeddings feature."""
+    def _resolve_feature(self, feature_name: str) -> tuple[str, str]:
+        """
+        Return (model_name, kind) for a bindable feature.
+
+        Model name is read from `parameters.hf_name` (multimodal-embeddings,
+        set in features.py) or `parameters.model` (sentence-embeddings); both
+        keys are checked so future kinds can use either convention.
+        """
         available = self.features.get_available()
         feat = available.get(feature_name)
         if feat is None:
             raise ValueError(f"Feature '{feature_name}' does not exist")
-        if feat.kind != "multimodal-embeddings":
+        if feat.kind not in BINDABLE_FEATURE_KINDS:
             raise ValueError(
-                f"Feature '{feature_name}' is not a multimodal-embeddings feature "
-                f"(kind={feat.kind})"
+                f"Feature '{feature_name}' kind '{feat.kind}' is not bindable to a prompt "
+                f"(expected one of {sorted(BINDABLE_FEATURE_KINDS)})"
             )
-        hf_name = (feat.parameters or {}).get("hf_name")
-        if not hf_name:
-            raise ValueError(f"Feature '{feature_name}' has no stored HF model name")
-        return hf_name
+        params = feat.parameters or {}
+        model_name = params.get("hf_name") or params.get("model")
+        if not model_name:
+            raise ValueError(f"Feature '{feature_name}' has no stored model name")
+        return str(model_name), feat.kind
 
     # ---------- public API ----------
 
@@ -96,19 +112,22 @@ class Prompts:
         text = text.strip()
         if not text:
             raise ValueError("Prompt text cannot be empty")
-        hf_name = self._resolve_feature(feature_name)
+        model_name, kind = self._resolve_feature(feature_name)
         prompt_id = str(uuid.uuid4())
 
-        unique_id = self.queue.add_task(
-            "prompt",
-            self.project_slug,
-            ComputeMultimodalPrompt(
-                text=text,
-                model_name=hf_name,
-                path_process=self.path_dir,
-            ),
-            queue="gpu",
-        )
+        task: BaseTask
+        if kind == "multimodal-embeddings":
+            task = ComputeMultimodalPrompt(
+                text=text, model_name=model_name, path_process=self.path_dir
+            )
+        elif kind == "sentence-embeddings":
+            task = ComputeSbertPrompt(text=text, model_name=model_name, path_process=self.path_dir)
+        else:
+            # Defensive: _resolve_feature already gates on BINDABLE_FEATURE_KINDS,
+            # so this only fires if a new bindable kind is added without a task.
+            raise ValueError(f"No prompt encoder for feature kind '{kind}'")
+
+        unique_id = self.queue.add_task("prompt", self.project_slug, task, queue="gpu")
 
         self.computing.append(
             PromptComputing(
@@ -119,7 +138,7 @@ class Prompts:
                 prompt_id=prompt_id,
                 text=text,
                 feature_name=feature_name,
-                hf_name=hf_name,
+                hf_name=model_name,
             )
         )
         return unique_id
@@ -216,7 +235,7 @@ class Prompts:
     def get_ranking(self, prompt_id: str, dataset: str) -> pd.Series:
         """
         Return element_ids sorted by descending cosine similarity between the
-        prompt embedding and the bound feature's image embeddings, over the
+        prompt embedding and the bound feature's element embeddings, over the
         full given dataset. Cached per (prompt_id, dataset) — subsequent
         get_next calls on the same prompt only do an index intersection.
         """
@@ -226,12 +245,10 @@ class Prompts:
             return cached
 
         prompt_vec, feature_name = self.get_embedding_and_feature(prompt_id)
-        img_df = self.features.get([feature_name], dataset=[dataset])
-        if img_df.empty:
-            raise ValueError(
-                f"No image embeddings for feature '{feature_name}' in dataset '{dataset}'"
-            )
-        mat = img_df.to_numpy(dtype=float)
+        feat_df = self.features.get([feature_name], dataset=[dataset])
+        if feat_df.empty:
+            raise ValueError(f"No embeddings for feature '{feature_name}' in dataset '{dataset}'")
+        mat = feat_df.to_numpy(dtype=float)
         prompt_vec = np.asarray(prompt_vec, dtype=float).reshape(-1)
         if mat.shape[1] != prompt_vec.shape[0]:
             raise ValueError(
@@ -239,10 +256,10 @@ class Prompts:
                 f"and feature '{feature_name}' ({mat.shape[1]}). "
                 "The feature may have been recomputed with a different model."
             )
-        img_norms = np.linalg.norm(mat, axis=1)
+        row_norms = np.linalg.norm(mat, axis=1)
         prompt_norm = float(np.linalg.norm(prompt_vec))
-        sims = (mat @ prompt_vec) / (img_norms * prompt_norm + 1e-12)
-        ranked = pd.Series(sims, index=img_df.index).sort_values(ascending=False)
+        sims = (mat @ prompt_vec) / (row_norms * prompt_norm + 1e-12)
+        ranked = pd.Series(sims, index=feat_df.index).sort_values(ascending=False)
 
         cache_by_ds[dataset] = ranked
         return ranked
@@ -273,19 +290,9 @@ class Prompts:
             available = self.features.get_available()
         except Exception:
             available = {}
-        bindable = [
-            name for name, feat in available.items() if feat.kind == "multimodal-embeddings"
-        ]
+        bindable = [name for name, feat in available.items() if feat.kind in BINDABLE_FEATURE_KINDS]
         return PromptsProjectStateModel(
             available=self.list(),
             bindable_features=bindable,
             training=self.current_computing(),
         )
-
-    def _is_multimodal_feature(self, name: str) -> bool:
-        try:
-            available = self.features.get_available()
-        except Exception:
-            return False
-        feat = available.get(name)
-        return feat is not None and feat.kind == "multimodal-embeddings"

@@ -41,6 +41,15 @@ export const TextClassificationPanel: FC<ClassificationPanelProps> = ({
         }
         ref={frameRef as unknown as LegacyRef<HTMLDivElement>}
       >
+        {element?.selection === 'prompt' && element.similarity != null && (
+          <small
+            className="text-muted d-block mb-1"
+            title="Cosine similarity between the prompt embedding and this text. Rank is the absolute position in the prompt's full ranking."
+          >
+            {element.rank != null && <>rank #{element.rank} · </>}
+            similarity {element.similarity.toFixed(3)}
+          </small>
+        )}
         {element?.history && element.history[0] && element.history[0].label && (
           <span className="position-absolute end-0 top-0 me-1">
             <AnnotationIcon title={element.history[0].label} />
