@@ -25,6 +25,7 @@ from activetigger.datamodels import (
 )
 from activetigger.generation.generations import Generations
 from activetigger.generation.ollama import Ollama
+from activetigger.generation.openapi import OpenAPI
 from activetigger.orchestrator import get_orchestrator
 from activetigger.project import Project
 
@@ -50,6 +51,19 @@ def list_ollama_models(endpoint: str) -> list[dict[str, str]]:
     """
     try:
         return Ollama.list_models(endpoint)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/generate/openai/models")
+def list_openai_compatible_models(
+    endpoint: str, credentials: str | None = None
+) -> list[dict[str, str]]:
+    """
+    Query an OpenAI-compatible endpoint to list available models via /v1/models
+    """
+    try:
+        return OpenAPI.list_models(endpoint, credentials)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

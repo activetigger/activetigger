@@ -1,6 +1,6 @@
 import { ChangeEvent, FC, useEffect, useState } from 'react';
 import { SubmitHandler, useForm } from 'react-hook-form';
-import { fetchOllamaModels, useGetGenModels } from '../../core/api';
+import { fetchOllamaModels, fetchOpenAICompatibleModels, useGetGenModels } from '../../core/api';
 import { useNotifications } from '../../core/notifications';
 import { GenerationModelApi, GenModel, SupportedAPI } from '../../types';
 
@@ -17,6 +17,10 @@ export const GenModelSetupForm: FC<{
   const [ollamaEndpoint, setOllamaEndpoint] = useState<string>('');
   const [ollamaModels, setOllamaModels] = useState<Array<{ slug: string; name: string }>>([]);
   const [ollamaLoading, setOllamaLoading] = useState(false);
+  const [openaiEndpoint, setOpenaiEndpoint] = useState<string>('');
+  const [openaiCredentials, setOpenaiCredentials] = useState<string>('');
+  const [openaiModels, setOpenaiModels] = useState<Array<{ slug: string; name: string }>>([]);
+  const [openaiLoading, setOpenaiLoading] = useState(false);
   const { models } = useGetGenModels();
   const { register, handleSubmit, setValue } = useForm<FormValues>();
   useEffect(() => {
@@ -37,13 +41,26 @@ export const GenModelSetupForm: FC<{
     setSelectedAPI(availableAPIs[index]);
     setOllamaModels([]);
     setOllamaEndpoint('');
+    setOpenaiModels([]);
+    setOpenaiEndpoint('');
+    setOpenaiCredentials('');
   };
 
   const onSubmit: SubmitHandler<FormValues> = (data: FormValues) => {
     const slug = data.model;
     const name = modelName;
-    const endpoint = selectedAPI?.name === 'Ollama' ? ollamaEndpoint : data.endpoint;
-    const credentials = data.credentials;
+    let endpoint: string | undefined;
+    let credentials: string | undefined;
+    if (selectedAPI?.name === 'Ollama') {
+      endpoint = ollamaEndpoint;
+      credentials = undefined;
+    } else if (selectedAPI?.name === 'OpenAICompatible') {
+      endpoint = openaiEndpoint;
+      credentials = openaiCredentials || undefined;
+    } else {
+      endpoint = data.endpoint;
+      credentials = data.credentials;
+    }
     if (slug === null || slug === '') {
       notify({ type: 'error', message: 'You must select a model' });
       return;
@@ -54,6 +71,10 @@ export const GenModelSetupForm: FC<{
     }
     if (selectedAPI?.name === 'Ollama' && (!endpoint || endpoint === '')) {
       notify({ type: 'error', message: 'You must provide an Ollama endpoint' });
+      return;
+    }
+    if (selectedAPI?.name === 'OpenAICompatible' && (!endpoint || endpoint === '')) {
+      notify({ type: 'error', message: 'You must provide an endpoint URL' });
       return;
     }
     add({
@@ -91,6 +112,27 @@ export const GenModelSetupForm: FC<{
       setOllamaModels([]);
     } finally {
       setOllamaLoading(false);
+    }
+  };
+
+  const handleFetchOpenAIModels = async () => {
+    if (!openaiEndpoint) {
+      notify({ type: 'error', message: 'Please enter an endpoint URL' });
+      return;
+    }
+    setOpenaiLoading(true);
+    try {
+      const models = await fetchOpenAICompatibleModels(openaiEndpoint, openaiCredentials);
+      setOpenaiModels(models);
+      if (models.length > 0) {
+        setValue('model', models[0].slug);
+        setModelName(selectedAPI.name + '-' + models[0].slug);
+      }
+    } catch (e) {
+      notify({ type: 'error', message: `Failed to fetch models: ${e}` });
+      setOpenaiModels([]);
+    } finally {
+      setOpenaiLoading(false);
     }
   };
 
@@ -145,19 +187,69 @@ export const GenModelSetupForm: FC<{
                 </div>,
               );
             }
-          } else if (selectedAPI.name === 'OpenAI' || selectedAPI.name === 'ilaas') {
+          } else if (selectedAPI.name === 'OpenAICompatible') {
             inputs.push(
-              <div key="model">
-                <label htmlFor="model">Model</label>
-                <select id="model" {...register('model', { onChange: onModelChange })}>
-                  {selectedAPI.models.map((model) => (
-                    <option key={model.slug} value={model.slug}>
-                      {model.name}
-                    </option>
-                  ))}
-                </select>
+              <div key="endpoint">
+                <label htmlFor="endpoint">Endpoint</label>
+                <input
+                  type="text"
+                  id="endpoint"
+                  placeholder="e.g. https://api.example.com/v1"
+                  value={openaiEndpoint}
+                  onChange={(e) => setOpenaiEndpoint(e.target.value)}
+                />
               </div>,
             );
+            inputs.push(
+              <div key="credentials">
+                <label htmlFor="credentials">API Credentials</label>
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                  <input
+                    type="text"
+                    id="credentials"
+                    placeholder="API key (optional)"
+                    autoComplete="off"
+                    value={openaiCredentials}
+                    onChange={(e) => setOpenaiCredentials(e.target.value)}
+                    style={{ flex: 1 }}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={handleFetchOpenAIModels}
+                    disabled={openaiLoading}
+                  >
+                    {openaiLoading ? 'Loading...' : 'Fetch models'}
+                  </button>
+                </div>
+              </div>,
+            );
+            if (openaiModels.length > 0) {
+              inputs.push(
+                <div key="model">
+                  <label htmlFor="model">Model</label>
+                  <select id="model" {...register('model', { onChange: onModelChange })}>
+                    {openaiModels.map((model) => (
+                      <option key={model.slug} value={model.slug}>
+                        {model.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>,
+              );
+            } else {
+              inputs.push(
+                <div key="model">
+                  <label htmlFor="model">Model</label>
+                  <input
+                    type="text"
+                    id="model"
+                    placeholder="ID of the model"
+                    {...register('model', { onChange: onModelChange })}
+                  />
+                </div>,
+              );
+            }
           } else {
             inputs.push(
               <div key="model">
@@ -184,7 +276,7 @@ export const GenModelSetupForm: FC<{
               );
           }
 
-          if (selectedAPI.name !== 'Ollama')
+          if (selectedAPI.name !== 'Ollama' && selectedAPI.name !== 'OpenAICompatible')
             inputs.push(
               <div key="credentials">
                 <label htmlFor="credentials">API Credentials</label>

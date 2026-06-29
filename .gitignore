@@ -41,6 +41,7 @@ embeddings.yaml
 QUALITY_REPORT.md
 SECURITY_REPORT.md
 api/users_parameters.yaml
+api/generative.yaml
 
 # DOCKER
 docker/api/projects/

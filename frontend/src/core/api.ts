@@ -2262,6 +2262,27 @@ export async function fetchOllamaModels(
   return res.json();
 }
 
+export async function fetchOpenAICompatibleModels(
+  endpoint: string,
+  credentials?: string,
+): Promise<Array<{ slug: string; name: string }>> {
+  const baseUrl = config.api.url.replace(/\/+$/, '');
+  const params = new URLSearchParams({ endpoint });
+  if (credentials) params.append('credentials', credentials);
+  const url = `${baseUrl}/generate/openai/models?${params.toString()}`;
+  const auth = JSON.parse(localStorage.getItem('activeTigger.auth') || '{}');
+  const res = await fetch(url, {
+    headers: {
+      ...(auth.access_token ? { Authorization: `Bearer ${auth.access_token}` } : {}),
+    },
+  });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => null);
+    throw new Error(detail?.detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
 /**
  * Post generate data
  */
@@ -2275,6 +2296,7 @@ export function useGenerate(
   dataset: string | null,
   token?: string,
   promptName?: string,
+  n_workers?: number | null,
 ) {
   const { notify } = useNotifications();
   const generate = useCallback(async () => {
@@ -2289,6 +2311,7 @@ export function useGenerate(
           model_id: modelId,
           prompt: prompt,
           n_batch: n_batch,
+          n_workers: n_workers && n_workers > 0 ? n_workers : 1,
           token: token,
           scheme: currentScheme,
           mode: mode,
@@ -2305,6 +2328,7 @@ export function useGenerate(
     modelId,
     prompt,
     n_batch,
+    n_workers,
     currentScheme,
     mode,
     dataset,

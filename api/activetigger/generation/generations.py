@@ -4,6 +4,7 @@ from typing import cast
 import pandas as pd
 from pandas import DataFrame
 
+from activetigger.config import config
 from activetigger.datamodels import (  # ignore[import]
     ExportGenerationsParams,
     GenerationAvailableModel,
@@ -19,6 +20,17 @@ from activetigger.datamodels import (  # ignore[import]
 from activetigger.db.generations import GenerationsService
 from activetigger.db.manager import DatabaseManager
 from activetigger.functions import remove_punctuation, replace_accented_chars
+
+# Maps the `type` key used in generative.yaml to the internal `api` identifier
+# used by the generation clients.
+GENERATIVE_YAML_TYPE_MAP = {
+    "openapi": "OpenAICompatible",
+    "openai-compatible": "OpenAICompatible",
+    "openai": "OpenAI",
+    "ollama": "Ollama",
+    "openrouter": "OpenRouter",
+    "huggingface": "HuggingFace",
+}
 
 
 class Generations:
@@ -38,22 +50,11 @@ class Generations:
         """
         return [
             GenerationModelApi(
-                name="ilaas",
-                models=[
-                    GenerationAvailableModel(slug="gpt-oss-120b", api="ilaas", name="gpt-oss-120b"),
-                    GenerationAvailableModel(
-                        slug="mistral-small-3.2-24b", api="ilaas", name="mistral-small-3.2-24b"
-                    ),
-                    GenerationAvailableModel(
-                        slug="llama-3.3-70b", api="ilaas", name="llama-3.3-70b"
-                    ),
-                ],
-            ),
-            GenerationModelApi(
                 name="Ollama",
                 models=[],
             ),
             GenerationModelApi(name="OpenRouter", models=[]),
+            GenerationModelApi(name="OpenAICompatible", models=[]),
             GenerationModelApi(
                 name="OpenAI",
                 models=[
@@ -223,6 +224,43 @@ class Generations:
         if self.model_exists(project_slug, model.name):
             raise Exception("A model with this name already exists")
         return self.generations_service.add_project_gen_model(project_slug, model, user_name)
+
+    def add_default_models(self, project_slug: str, user_name: str) -> None:
+        """
+        Pre-populate a project with the generative models declared in
+        generative.yaml. Per-model errors are logged but don't abort the call.
+
+        Expected YAML schema:
+            models:
+              <display-name>:
+                type: openapi          # required, see GENERATIVE_YAML_TYPE_MAP
+                url: https://...       # endpoint (alias: endpoint)
+                key: <api-key>         # credentials (alias: credentials)
+                model: <model-id>      # model identifier sent to the API
+                                       # (aliases: slug; defaults to <display-name>)
+        """
+        models = getattr(config, "models_generative", {}) or {}
+        for name, params in models.items():
+            params = params or {}
+            try:
+                mtype = str(params.get("type", "")).strip().lower()
+                api = GENERATIVE_YAML_TYPE_MAP.get(mtype)
+                if api is None:
+                    print(f"Skipping generative model {name!r}: unknown type {mtype!r}")
+                    continue
+                slug = params.get("model") or params.get("slug") or name
+                model = GenerationCreationModel(
+                    slug=str(slug),
+                    api=api,
+                    name=str(name),
+                    endpoint=params.get("url") or params.get("endpoint"),
+                    credentials=params.get("key") or params.get("credentials"),
+                )
+                if self.model_exists(project_slug, model.name):
+                    continue
+                self.generations_service.add_project_gen_model(project_slug, model, user_name)
+            except Exception as e:
+                print(f"Failed to add default generative model {name!r}: {e}")
 
     def delete_model(self, project_slug: str, model_id: int) -> None:
         """

@@ -629,6 +629,7 @@ class GenerationRequest(BaseModel):
     token: str | None = None
     prompt: str
     n_batch: int = 1
+    n_workers: int = 1
     scheme: str
     mode: str = "all"
     dataset: str = "train"

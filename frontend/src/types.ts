@@ -172,6 +172,7 @@ export interface GenerateConfig {
   prompt?: string;
   promptId?: string;
   n_batch?: number;
+  n_workers?: number;
   selectionMode?: string;
   dataset?: string;
   selectedModel?: GenModel & { api: string };
@@ -241,7 +242,7 @@ export interface EvalSetImageModel {
   scheme?: string | null;
 }
 
-export type SupportedAPI = 'Ollama' | 'OpenAI' | 'HuggingFace';
+export type SupportedAPI = 'Ollama' | 'OpenAI' | 'HuggingFace' | 'OpenAICompatible';
 
 export type GenModelAPI = { models: GenModel[] } & (
   | {
