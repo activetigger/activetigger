@@ -152,6 +152,7 @@ export const GenPage: FC = () => {
     generateConfig.dataset || 'train',
     generateConfig.token,
     promptName,
+    generateConfig.n_workers || 1,
   );
 
   // to stop generation
@@ -439,14 +440,37 @@ export const GenPage: FC = () => {
                     </button>
                   </div>
                 ) : (
-                  <button
-                    className="btn btn-secondary mt-3 generatebutton"
-                    onClick={() => {
-                      generate();
-                    }}
-                  >
-                    <HiOutlineSparkles size={30} /> Generate
-                  </button>
+                  <div className="d-flex align-items-end justify-content-center gap-3 mt-3">
+                    <div>
+                      <label htmlFor="n_workers" className="form-label mb-1">
+                        Workers
+                      </label>
+                      <input
+                        type="number"
+                        id="n_workers"
+                        className="form-control"
+                        min={1}
+                        style={{ width: '6rem' }}
+                        value={generateConfig.n_workers ?? 1}
+                        title="Number of concurrent API calls (1 = sequential)"
+                        onChange={(e) => {
+                          const v = Math.max(1, Number(e.target.value) || 1);
+                          setAppContext((prev) => ({
+                            ...prev,
+                            generateConfig: { ...generateConfig, n_workers: v },
+                          }));
+                        }}
+                      />
+                    </div>
+                    <button
+                      className="btn btn-secondary generatebutton"
+                      onClick={() => {
+                        generate();
+                      }}
+                    >
+                      <HiOutlineSparkles size={30} /> Generate
+                    </button>
+                  </div>
                 )}
               </div>
             </div>

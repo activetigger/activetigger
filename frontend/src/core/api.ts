@@ -2296,6 +2296,7 @@ export function useGenerate(
   dataset: string | null,
   token?: string,
   promptName?: string,
+  n_workers?: number | null,
 ) {
   const { notify } = useNotifications();
   const generate = useCallback(async () => {
@@ -2310,6 +2311,7 @@ export function useGenerate(
           model_id: modelId,
           prompt: prompt,
           n_batch: n_batch,
+          n_workers: n_workers && n_workers > 0 ? n_workers : 1,
           token: token,
           scheme: currentScheme,
           mode: mode,
@@ -2326,6 +2328,7 @@ export function useGenerate(
     modelId,
     prompt,
     n_batch,
+    n_workers,
     currentScheme,
     mode,
     dataset,

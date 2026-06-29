@@ -172,6 +172,7 @@ export interface GenerateConfig {
   prompt?: string;
   promptId?: string;
   n_batch?: number;
+  n_workers?: number;
   selectionMode?: string;
   dataset?: string;
   selectedModel?: GenModel & { api: string };

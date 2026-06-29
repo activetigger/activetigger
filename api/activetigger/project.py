@@ -2164,6 +2164,7 @@ class Project:
                 cols_context=self.params.cols_context,
                 dataset=request.dataset,
                 prompt_name=request.prompt_name if request.prompt_name else "",
+                n_workers=request.n_workers,
             ),
         )
         self.computing.append(
