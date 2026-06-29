@@ -106,11 +106,6 @@ class GenerateCall(BaseTask):
             return HuggingFace(credentials=self.model.credentials, endpoint=self.model.endpoint)
         if self.model.api == "OpenRouter":
             return OpenRouter(credentials=self.model.credentials)
-        if self.model.api == "ilaas":
-            return OpenAPI(
-                endpoint="https://llm.ilaas.fr/v1/chat/completions",
-                credentials=self.model.credentials,
-            )
         if self.model.api == "OpenAICompatible":
             if not self.model.endpoint:
                 raise Exception("You need to provide an endpoint for the OpenAI-compatible model")

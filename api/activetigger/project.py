@@ -463,6 +463,13 @@ class Project:
             AuthUserModel(username=username, project_slug=project.project_slug, status="manager")
         )
 
+        # pre-populate the project with the generative models declared in
+        # generative.yaml (no-op if the file is missing or empty)
+        try:
+            Generations(self.db_manager, []).add_default_models(project.project_slug, username)
+        except Exception as e:
+            print(f"Failed to add default generative models for {project.project_slug}: {e}")
+
         self.status = "created"
 
     def delete(self) -> None:

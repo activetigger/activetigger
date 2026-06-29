@@ -123,6 +123,7 @@ class Config(metaclass=_Singleton):
     file_bert_models: str = "bert_models.csv"
     file_image_models: str = "image_models.csv"
     file_embeddings_models: str = "embeddings.yaml"
+    file_generative_models: str = "generative.yaml"
     default_scheme: str = "default"
     mail_server: str | None = os.environ.get("MAIL_SERVER", None)
     mail_account: str | None = os.environ.get("MAIL_ACCOUNT", None)
@@ -157,6 +158,7 @@ class Config(metaclass=_Singleton):
             self.mail_available = True
         self.mail_server_port = parse_environ("MAIL_SERVER_PORT", int, 465)
         self.models_embeddings = self._load_models_embeddings()
+        self.models_generative = self._load_models_generative()
 
     def _get_embeddings_path(self) -> Path:
         return Path(self.data_path) / self.file_embeddings_models
@@ -183,6 +185,36 @@ class Config(metaclass=_Singleton):
     def reload_embeddings(self) -> None:
         """Reload embeddings models from the YAML file without restarting."""
         self.models_embeddings = self._load_models_embeddings()
+
+    def _get_generative_path(self) -> Path:
+        return Path(self.data_path) / self.file_generative_models
+
+    def _load_models_generative(self) -> dict:
+        """
+        Load preconfigured generative models that will be auto-added to every
+        new project. Missing file is OK and means no defaults.
+        """
+        path = self._get_generative_path()
+        if not path.exists():
+            return {}
+        try:
+            with open(path, "r") as f:
+                content = yaml.safe_load(f)
+        except Exception as e:
+            print(f"Failed to read {path}: {e}")
+            return {}
+        if not isinstance(content, dict) or "models" not in content:
+            print(f"Invalid generative config {path}: expected a 'models' key")
+            return {}
+        models = content.get("models") or {}
+        if not isinstance(models, dict):
+            print(f"Invalid generative config {path}: 'models' must be a mapping")
+            return {}
+        return models
+
+    def reload_generative(self) -> None:
+        """Reload preconfigured generative models from the YAML file."""
+        self.models_generative = self._load_models_generative()
 
 
 # the configuration is safe to share as it's a singleton (initialized only once)

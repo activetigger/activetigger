@@ -250,19 +250,6 @@ export const GenModelSetupForm: FC<{
                 </div>,
               );
             }
-          } else if (selectedAPI.name === 'OpenAI' || selectedAPI.name === 'ilaas') {
-            inputs.push(
-              <div key="model">
-                <label htmlFor="model">Model</label>
-                <select id="model" {...register('model', { onChange: onModelChange })}>
-                  {selectedAPI.models.map((model) => (
-                    <option key={model.slug} value={model.slug}>
-                      {model.name}
-                    </option>
-                  ))}
-                </select>
-              </div>,
-            );
           } else {
             inputs.push(
               <div key="model">
