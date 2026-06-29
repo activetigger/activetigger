@@ -54,6 +54,7 @@ class Generations:
                 models=[],
             ),
             GenerationModelApi(name="OpenRouter", models=[]),
+            GenerationModelApi(name="OpenAICompatible", models=[]),
             GenerationModelApi(
                 name="OpenAI",
                 models=[

@@ -141,6 +141,15 @@ class GenerateCall(BaseTask):
                         endpoint="https://llm.ilaas.fr/v1/chat/completions",
                         credentials=self.model.credentials,
                     )
+                elif self.model.api == "OpenAICompatible":
+                    if not self.model.endpoint:
+                        raise Exception(
+                            "You need to provide an endpoint for the OpenAI-compatible model"
+                        )
+                    gen_model = OpenAPI(
+                        endpoint=self.model.endpoint,
+                        credentials=self.model.credentials,
+                    )
                 else:
                     errors.append(Exception("Model does not exist"))
                     continue

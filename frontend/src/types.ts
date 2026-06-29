@@ -241,7 +241,7 @@ export interface EvalSetImageModel {
   scheme?: string | null;
 }
 
-export type SupportedAPI = 'Ollama' | 'OpenAI' | 'HuggingFace';
+export type SupportedAPI = 'Ollama' | 'OpenAI' | 'HuggingFace' | 'OpenAICompatible';
 
 export type GenModelAPI = { models: GenModel[] } & (
   | {
