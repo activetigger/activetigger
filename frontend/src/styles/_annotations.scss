@@ -227,19 +227,20 @@
 
   .span-annotation-label-selector{
     --label-color : red;
-    width: 100%;
+    width: var(--tag-action-width);
+    height: var(--tag-action-height, 40px);
     text-align: center;
-    padding: 8px 12px;
+    padding: 0.25rem 0.75rem;
     border-radius: 6px;
     border: var(--label-color) 1px solid;
-    background-color:white;
+    background-color: white;
     color: var(--label-color);
     cursor: pointer;
-    font-weight: 600;
+    font-weight: 500;
     transition: background-color 0.15s ease, color 0.15s ease;
     &.active{
       background-color: var(--label-color);
-      color: white
+      color: white;
     }
   }
 
@@ -361,6 +362,20 @@
       &:focus-visible {
         background-color: $gray-600;
         border-color: $gray-600;
+        color: white;
+      }
+    }
+    // green validate button for span annotation
+    .btn-annotate-general-action.span-annotation-validate {
+      background-color: $success;
+      border-color: $success;
+      &:hover,
+      &:focus,
+      &:active,
+      &.active,
+      &:focus-visible {
+        background-color: darken($success, 8%);
+        border-color: darken($success, 8%);
         color: white;
       }
     }

@@ -2,10 +2,10 @@ import { FC, useCallback, useEffect, useMemo, useState } from 'react';
 import { FaCheck } from 'react-icons/fa6';
 import { useNavigate, useParams } from 'react-router-dom';
 import Select from 'react-select';
-import { ElementOutModel } from '../../types';
 import { useAppContext } from '../../core/useAppContext';
 import { useAnnotationSessionHistory } from '../../core/useHistory';
 import { reorderLabels } from '../../core/utils';
+import { ElementOutModel } from '../../types';
 
 interface MultilabelInputProps {
   elementId: string;
@@ -188,7 +188,7 @@ export const MultilabelInput: FC<MultilabelInputProps> = ({
         postAnnotation(selectedLabels.join('|'), elementId, comment);
         setSelectedLabels([]);
       }
-      if (ev.code === 'KeyS') {
+      if (ev.code === 'KeyS' || ev.key === 'ArrowRight') {
         skipAnnotation();
       }
     },
@@ -328,7 +328,7 @@ export const MultilabelInput: FC<MultilabelInputProps> = ({
           }}
         >
           <span className="fw-semibold">Skip</span>
-          <span className="badge hotkey">S</span>
+          <span className="badge hotkey">→</span>
         </button>
       </div>
       <textarea
