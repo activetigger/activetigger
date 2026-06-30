@@ -41,15 +41,25 @@ export const SelectCurrentScheme: FC<{ username?: string | null }> = ({ username
 
   // If the active scheme just became hidden (user turned dev mode off while
   // sitting on a span scheme), switch to the first visible non-default one.
+  // BUT: only switch if we actually have a non-span scheme to switch TO.
+  // When a project is created by importing only a span column, there is no
+  // "default" scheme at all (project.py:464 skips the default-scheme creation
+  // when import_trainset_labels has columns), so `availableSchemes` is empty
+  // here. Setting `currentScheme = undefined` in that case lets
+  // CurrentProjectState's auto-selector immediately re-pick the span scheme
+  // (it iterates unfiltered Object.keys), and the two effects oscillate at
+  // React-render speed — flooding /statistics and /schemes/codebook until
+  // the browser hits ERR_INSUFFICIENT_RESOURCES.
   useEffect(() => {
     if (
       currentScheme &&
       !developmentMode &&
       currentProject?.schemes.available[currentScheme]?.kind === 'span'
     ) {
-      const fallback =
-        availableSchemes.find((s) => s !== 'default') || availableSchemes[0] || undefined;
-      setAppContext((state) => ({ ...state, currentScheme: fallback, activeModel: null }));
+      const fallback = availableSchemes.find((s) => s !== 'default') || availableSchemes[0];
+      if (fallback && fallback !== currentScheme) {
+        setAppContext((state) => ({ ...state, currentScheme: fallback, activeModel: null }));
+      }
     }
   }, [currentScheme, developmentMode, currentProject, availableSchemes, setAppContext]);
 
