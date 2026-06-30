@@ -34,10 +34,14 @@ export const ProjectPage: FC = () => {
     [currentScheme, project],
   );
 
-  // sort labels according to the displayConfig
-  const availableLabelsSorted = reorderLabels(
-    availableLabels as string[],
-    displayConfig.labelsOrder || [],
+  // Memoize so children that depend on this prop reference (e.g. the labels
+  // sync effect in LabelsManagement) don't re-fire every time project state
+  // is re-polled. Key off the joined contents — the underlying arrays come
+  // from a freshly-parsed project response and get new identities every poll
+  // even when nothing changed.
+  const availableLabelsSorted = useMemo(
+    () => reorderLabels(availableLabels as string[], displayConfig.labelsOrder || []),
+    [availableLabels, displayConfig.labelsOrder],
   );
 
   // redirect if at least 2 tags
