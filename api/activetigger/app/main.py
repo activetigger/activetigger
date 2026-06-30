@@ -218,7 +218,7 @@ def login_for_access_token(
         orchestrator = get_orchestrator()
         user = orchestrator.users.authenticate_user(form_data.username, form_data.password)
         access_token = orchestrator.create_access_token(
-            data={"sub": user.username}, expires_min=120
+            data={"sub": user.username}, expires_min=1440
         )
         return TokenModel(access_token=access_token, token_type="bearer", status=user.status)
     except Exception as e:

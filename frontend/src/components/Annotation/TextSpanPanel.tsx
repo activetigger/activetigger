@@ -1,13 +1,14 @@
 import chroma from 'chroma-js';
 import cx from 'classnames';
 import { motion } from 'framer-motion';
-import { CSSProperties, FC, useCallback, useEffect, useState } from 'react';
+import { CSSProperties, FC, useCallback, useEffect, useMemo, useState } from 'react';
 import { FaCheck, FaForward } from 'react-icons/fa';
 import { MdClear } from 'react-icons/md';
 import { useNavigate, useParams } from 'react-router-dom';
 import { AnnotateBlendTag, TextAnnotateBlend } from 'react-text-annotate-blend';
 
 import { useAnnotationSessionHistory } from '../../core/useHistory';
+import { reorderLabels } from '../../core/utils';
 import { DisplayConfig, ElementOutModel } from '../../types';
 
 interface SpanInputProps {
@@ -33,8 +34,13 @@ export const TextSpanPanel: FC<SpanInputProps> = ({
   const navigate = useNavigate();
   const { addElementInAnnotationSessionHistory } = useAnnotationSessionHistory();
 
+  const reorderedLabels = useMemo(
+    () => reorderLabels(labels || [], displayConfig.labelsOrder || []),
+    [displayConfig.labelsOrder, labels],
+  );
+
   const [value, setValue] = useState<AnnotateBlendTag[]>([]);
-  const [tag, setTag] = useState<string | null>(labels[0] || null);
+  const [tag, setTag] = useState<string | null>(reorderedLabels[0] || null);
   const [comment, setComment] = useState<string>(
     element?.history ? element.history[0]?.comment || '' : '',
   );
@@ -91,9 +97,11 @@ export const TextSpanPanel: FC<SpanInputProps> = ({
     return () => document.removeEventListener('keydown', handler);
   }, [validateAnnotation, skipAnnotation]);
 
-  const colormap = chroma.scale('Paired').colors(labels.length);
-  const COLORS = Object.fromEntries(labels.map((label, index) => [label, colormap[index]]));
-  const options = labels.map((label) => ({
+  const colormap = chroma.scale('Paired').colors(reorderedLabels.length);
+  const COLORS = Object.fromEntries(
+    reorderedLabels.map((label, index) => [label, colormap[index]]),
+  );
+  const options = reorderedLabels.map((label) => ({
     value: label,
     label: label,
     color: COLORS[label],
