@@ -49,7 +49,8 @@ export const BertopicForm: FC<BertopicCreationFormProps> = ({
     return (
       <div className="alert alert-warning">
         BERTopic reuses embeddings from a project feature. Compute a sentence-embeddings feature
-        first in the <b>Features</b> page, then come back here to run BERTopic on it.
+        first from the project <b>Settings</b> page, under the <b>Features</b> tab (
+        <i>Add a new feature</i>), then come back here to run BERTopic on it.
       </div>
     );
   }
@@ -69,7 +70,7 @@ export const BertopicForm: FC<BertopicCreationFormProps> = ({
             <br />
             Pick a sentence-embeddings feature; to use a different embedding
             <br />
-            model, add it from the Features page first.
+            model, add it first from Settings &gt; Features tab.
           </Tooltip>
         </label>
         <select id="existing_feature" {...register('existing_feature', { required: true })}>

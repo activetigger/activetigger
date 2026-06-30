@@ -53,8 +53,11 @@ const _useAuth = (): AuthContext => {
             setAuthenticatedUser((previousAuthUser) => {
               // before setting new user, if app had previously another user reset the app context
               if (previousAuthUser && previousAuthUser.username !== user.username) {
-                //reset context
-                setAppContext(DEFAULT_CONTEXT);
+                //reset context, but keep the experimental toggle (per-browser preference)
+                setAppContext((prev) => ({
+                  ...DEFAULT_CONTEXT,
+                  developmentMode: prev.developmentMode,
+                }));
               }
               // force the type of interface
               setAppContext((appContext) => {
@@ -89,8 +92,11 @@ const _useAuth = (): AuthContext => {
           const success = await logout(authenticatedUser.access_token);
           if (success) {
             localStorage.removeItem('activeTigger.auth');
-            //Reset context
-            setAppContext(DEFAULT_CONTEXT);
+            //Reset context, but keep the experimental toggle (per-browser preference)
+            setAppContext((prev) => ({
+              ...DEFAULT_CONTEXT,
+              developmentMode: prev.developmentMode,
+            }));
             setAuthenticatedUser(undefined);
             return success;
           }

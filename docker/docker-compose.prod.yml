@@ -13,7 +13,13 @@ services:
       - ${PROJECT_PATH}/docker/nginx.prod_template.conf:/etc/nginx/nginx.prod.template
       - ${PROJECT_PATH}/frontend/dist:/var/www/frontend
       - ${DATA_PATH}/projects/static:/api/static
-      - ${PROJECT_PATH}/docker/certificates:/etc/letsencrypt/live/activetigger/
+      # Mount the entire /etc/letsencrypt directory (not just live/<name>/):
+      # certbot stores real cert files in /etc/letsencrypt/archive/<name>/
+      # and /etc/letsencrypt/live/<name>/ holds *symlinks* into archive/.
+      # A narrow bind on just live/<name>/ preserves the symlinks across
+      # restarts but loses archive/, so the symlinks resolve to nothing and
+      # the jonasal/nginx-certbot pre-flight disables the user config.
+      - ${PROJECT_PATH}/docker/certificates:/etc/letsencrypt
     command: ["bash", "/scripts/template_start.sh"]
     depends_on:
       api:
