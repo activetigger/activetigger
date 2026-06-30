@@ -28,8 +28,20 @@ export const ProjectModelPage: FC = () => {
   const [predictionModel, setPredictionModel] = useState<string | null>(null);
   const isImage = currentProject?.params?.kind === 'image';
 
-  const availableBertModels =
-    currentScheme && currentProject?.languagemodels.available[currentScheme]
+  // For span schemes the Prediction tab targets the trained NER models;
+  // everything else targets the BERT models. Same UI, same component.
+  const kindScheme =
+    currentScheme && currentProject?.schemes.available[currentScheme]
+      ? currentProject.schemes.available[currentScheme].kind || 'multiclass'
+      : 'multiclass';
+  const isNer = kindScheme === 'span';
+  const predictKind = isNer ? 'ner' : 'bert';
+
+  const availableBertModels = isNer
+    ? currentScheme && currentProject?.nermodels?.available?.[currentScheme]
+      ? Object.keys(currentProject.nermodels.available[currentScheme])
+      : []
+    : currentScheme && currentProject?.languagemodels.available[currentScheme]
       ? Object.keys(currentProject.languagemodels.available[currentScheme])
       : [];
 
@@ -68,14 +80,15 @@ export const ProjectModelPage: FC = () => {
               {!isImage && (
                 <Tab eventKey="prediction" title="Prediction">
                   <div className="explanations ms-3">
-                    Run a trained BERT model on the full dataset or on an external dataset. Once a
-                    prediction is computed, you can download it from the Export page.
+                    Run a trained {isNer ? 'NER' : 'BERT'} model on the full dataset or on an
+                    external dataset. Once a prediction is computed, you can download it from the
+                    Export page.
                   </div>
                   <div className="ms-3 mt-3">
                     {availableBertModels.length === 0 ? (
                       <div className="text-muted small">
-                        No BERT model available for the current scheme. Train one in the Training
-                        tab first.
+                        No {isNer ? 'NER' : 'BERT'} model available for the current scheme. Train
+                        one in the Training tab first.
                       </div>
                     ) : (
                       <>
@@ -87,7 +100,7 @@ export const ProjectModelPage: FC = () => {
                         />
                         {predictionModel && (
                           <div className="mt-3">
-                            <ModelPredict currentModel={predictionModel} />
+                            <ModelPredict currentModel={predictionModel} kind={predictKind} />
                           </div>
                         )}
                       </>

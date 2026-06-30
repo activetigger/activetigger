@@ -59,6 +59,7 @@ export const StatusNotch: FC<{
   const currentComputation =
     projectState && projectState.languagemodels
       ? currentUser in projectState.languagemodels.training ||
+        (projectState.nermodels ? currentUser in projectState.nermodels.training : false) ||
         currentUser in projectState.quickmodel.training ||
         currentUser in projectState.projections.training ||
         currentUser in projectState.bertopic.training ||
@@ -68,6 +69,8 @@ export const StatusNotch: FC<{
   const whatComutation = (projectState: ProjectStateModel) => {
     if (currentUser in projectState.languagemodels.training) {
       return 'BERT';
+    } else if (projectState.nermodels && currentUser in projectState.nermodels.training) {
+      return 'NER';
     } else if (currentUser in projectState.quickmodel.training) {
       return 'Quick model';
     } else if (currentUser in projectState.projections.training) {

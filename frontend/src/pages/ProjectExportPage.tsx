@@ -39,11 +39,23 @@ export const ProjectExportPage: FC = () => {
     setFeatures((prev) => (prev.includes(name) ? prev.filter((f) => f !== name) : [...prev, name]));
   };
 
+  // For span schemes the exports come from NER models; everything else
+  // from BERT models. Same flag names, just a different manager in state.
+  const kindScheme =
+    currentScheme && project?.schemes.available[currentScheme]
+      ? project.schemes.available[currentScheme].kind || 'multiclass'
+      : 'multiclass';
+  const isNer = kindScheme === 'span';
+  const exportKind = isNer ? 'ner' : 'bert';
+  const modelAvailabilityMap = isNer
+    ? project?.nermodels?.available
+    : project?.languagemodels?.available;
+
   const downloadPrediction = async (dataset: 'all' | 'test' | 'external') => {
     if (!model) return;
     setPredictionLoading(dataset);
     try {
-      await getPredictionsFile(model, format, dataset, currentScheme);
+      await getPredictionsFile(model, format, dataset, currentScheme, exportKind);
     } finally {
       setPredictionLoading(null);
     }
@@ -55,23 +67,18 @@ export const ProjectExportPage: FC = () => {
       ? project?.projections.available[authenticatedUser?.username]
       : null;
   const availableModels =
-    currentScheme && project?.languagemodels.available[currentScheme]
-      ? Object.keys(project?.languagemodels.available[currentScheme])
+    currentScheme && modelAvailabilityMap?.[currentScheme]
+      ? Object.keys(modelAvailabilityMap[currentScheme])
       : [];
   const availablePredictionAll =
-    (currentScheme &&
-      model &&
-      project?.languagemodels?.available?.[currentScheme]?.[model]?.['predicted_all']) ??
+    (currentScheme && model && modelAvailabilityMap?.[currentScheme]?.[model]?.['predicted_all']) ??
     false;
   const availablePredictionTest =
-    (currentScheme &&
-      model &&
-      project?.languagemodels?.available?.[currentScheme]?.[model]?.['tested']) ??
-    false;
+    (currentScheme && model && modelAvailabilityMap?.[currentScheme]?.[model]?.['tested']) ?? false;
   const availablePredictionExternal =
     (currentScheme &&
       model &&
-      project?.languagemodels?.available?.[currentScheme]?.[model]?.['predicted_external']) ??
+      modelAvailabilityMap?.[currentScheme]?.[model]?.['predicted_external']) ??
     false;
 
   const { getFeaturesFile } = useGetFeaturesFile(projectName || null);
@@ -203,7 +210,7 @@ export const ProjectExportPage: FC = () => {
             </section>
 
             <section className="mt-4">
-              <h5 className="fw-semibold">BERT models</h5>
+              <h5 className="fw-semibold">{isNer ? 'NER models' : 'BERT models'}</h5>
               <hr className="mt-1" />
               {availableModels.length === 0 ? (
                 <div className="text-muted small">No models available for the current scheme.</div>
