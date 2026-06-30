@@ -26,6 +26,9 @@ export interface ImportPredictionDatasetProps {
   modelName: string;
   availablePredictionExternal?: boolean;
   batchSize?: number;
+  // Defaults to "bert" for back-compat; pass "ner" to route the external
+  // prediction through the NER model endpoints.
+  kind?: string;
 }
 
 // component
@@ -35,6 +38,7 @@ export const ImportPredictionDataset: FC<ImportPredictionDatasetProps> = ({
   modelName,
   availablePredictionExternal,
   batchSize,
+  kind = 'bert',
 }) => {
   const maxSizeMB = 300;
   const maxSize = maxSizeMB * 1024 * 1024; // 100 MB in bytes
@@ -111,6 +115,7 @@ export const ImportPredictionDataset: FC<ImportPredictionDatasetProps> = ({
             filename: data.filename,
           },
           batchSize,
+          kind,
         );
         setData(null);
         reset();
@@ -154,7 +159,7 @@ export const ImportPredictionDataset: FC<ImportPredictionDatasetProps> = ({
               href="#"
               onClick={(e) => {
                 e.preventDefault();
-                getPredictionsFile(modelName, 'csv', 'external', scheme);
+                getPredictionsFile(modelName, 'csv', 'external', scheme, kind);
               }}
               className="text-blue-600 hover:underline"
             >

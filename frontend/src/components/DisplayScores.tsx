@@ -4,6 +4,7 @@ import DataGrid, { Column } from 'react-data-grid';
 import { FaCloudDownloadAlt } from 'react-icons/fa';
 import { Link } from 'react-router-dom';
 import { MLStatisticsModel } from '../types';
+import { DisplaySpanFalsePredictions, SpanFalsePredictionDoc } from './DisplaySpanFalsePredictions';
 import { DisplayTableStatistics } from './DisplayTableStatistics';
 import { DisplayTableStatisticsReact } from './DisplayTableStatisticsReact';
 import { DisplayTableStatisticsReactMultilabel } from './DisplayTableStatisticsReactMultiLabel';
@@ -172,12 +173,22 @@ export const DisplayScores: FC<DisplayScoresProps> = ({
           <Modal.Title>Wrong predictions of the model {modelName}</Modal.Title>
         </Modal.Header>
         <Modal.Body>
-          <DataGrid<Row>
-            className="fill-grid rdg-light"
-            columns={columns}
-            rows={scores['false_predictions'] as Row[]}
-            rowHeight={80}
-          />
+          {scores.training_kind === 'ner' ? (
+            <DisplaySpanFalsePredictions
+              falsePredictions={
+                (scores['false_predictions'] as unknown as SpanFalsePredictionDoc[]) || []
+              }
+              projectSlug={projectSlug}
+              dataset={dataset}
+            />
+          ) : (
+            <DataGrid<Row>
+              className="fill-grid rdg-light"
+              columns={columns}
+              rows={scores['false_predictions'] as Row[]}
+              rowHeight={80}
+            />
+          )}
         </Modal.Body>
       </Modal>
     </div>

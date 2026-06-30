@@ -28,6 +28,7 @@ import {
   TextDatasetModel,
   newBertModel,
   newImageModel,
+  newNerModel,
 } from '../types';
 import config from './config';
 import { HttpError, formatApiError } from './HTTPError';
@@ -401,6 +402,7 @@ export function usePredictOnDataset() {
       model_name: string,
       data: TextDatasetModel,
       batchSize?: number,
+      kind: string = 'bert',
     ) => {
       // do the new projects POST call
       const res = await api_withouttimeout.POST('/models/predict', {
@@ -411,7 +413,7 @@ export function usePredictOnDataset() {
             model_name: model_name,
             dataset_type: 'external',
             scheme: scheme,
-            kind: 'bert',
+            kind: kind,
             batch_size: batchSize,
           },
         },
@@ -1502,6 +1504,85 @@ export function useDeleteBertModel(projectSlug: string | null) {
 }
 
 /**
+ * Train a NER (token-classification) model for a span scheme.
+ * Experimental feature — only callable when developmentMode is enabled.
+ */
+export function useTrainNerModel(projectSlug: string | null, scheme: string | null) {
+  const { notify } = useNotifications();
+  const trainNerModel = useCallback(
+    async (dataForm: newNerModel) => {
+      if (projectSlug && scheme && dataForm) {
+        // @ts-expect-error openapi client not yet regenerated for /models/ner/*
+        const res = await api.POST('/models/ner/train', {
+          params: { query: { project_slug: projectSlug } },
+          body: {
+            project_slug: projectSlug,
+            scheme: scheme,
+            base_model: dataForm.base,
+            name: dataForm.name || '',
+            test_size: dataForm.test_size ?? 0.2,
+            params: dataForm.parameters,
+            max_length: dataForm.max_length || 512,
+          },
+        });
+        if (!res.error) notify({ type: 'warning', message: 'NER model training.' });
+        return true;
+      }
+      return null;
+    },
+    [projectSlug, notify, scheme],
+  );
+  return { trainNerModel };
+}
+
+export function useDeleteNerModel(projectSlug: string | null) {
+  const { notify } = useNotifications();
+  const deleteNerModel = useCallback(
+    async (model_name: string) => {
+      if (projectSlug) {
+        // @ts-expect-error openapi client not yet regenerated for /models/ner/*
+        const res = await api.POST('/models/ner/delete', {
+          params: { query: { project_slug: projectSlug, ner_name: model_name } },
+        });
+        if (!res.error) {
+          notify({ type: 'success', message: 'NER model deleted.' });
+          window.dispatchEvent(new Event(PROJECTS_REFRESH_EVENT));
+        }
+        return true;
+      }
+      return null;
+    },
+    [projectSlug, notify],
+  );
+  return { deleteNerModel };
+}
+
+export function useRenameNerModel(projectSlug: string | null) {
+  const { notify } = useNotifications();
+  const renameNerModel = useCallback(
+    async (former_model_name: string, new_model_name: string) => {
+      if (projectSlug) {
+        // @ts-expect-error openapi client not yet regenerated for /models/ner/*
+        const res = await api.POST('/models/ner/rename', {
+          params: {
+            query: {
+              project_slug: projectSlug,
+              former_name: former_model_name,
+              new_name: new_model_name,
+            },
+          },
+        });
+        if (!res.error) notify({ type: 'success', message: 'NER model renamed.' });
+        return true;
+      }
+      return null;
+    },
+    [projectSlug, notify],
+  );
+  return { renameNerModel };
+}
+
+/**
  * Train an image-classification model on an image project.
  */
 export function useTrainImageModel(projectSlug: string | null, scheme: string | null) {
@@ -1761,7 +1842,13 @@ export function useGetAnnotationsFile(projectSlug: string | null) {
 export function useGetPredictionsFile(projectSlug: string | null) {
   const { notify } = useNotifications();
   const getPredictionsFile = useCallback(
-    async (model: string, format: string, dataset: string = 'all', scheme: string = '') => {
+    async (
+      model: string,
+      format: string,
+      dataset: string = 'all',
+      scheme: string = '',
+      kind: string = 'bert',
+    ) => {
       if (projectSlug) {
         const res = await api.GET('/export/prediction', {
           params: {
@@ -1770,6 +1857,7 @@ export function useGetPredictionsFile(projectSlug: string | null) {
               name: model,
               format: format,
               dataset: dataset,
+              kind: kind,
             },
           },
           parseAs: 'blob',

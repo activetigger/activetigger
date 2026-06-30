@@ -13,7 +13,18 @@ export type UserModel = components['schemas']['UserModel'];
 
 export type ProjectModel = components['schemas']['ProjectModel'];
 export type ProjectBaseModel = components['schemas']['ProjectBaseModel'];
-export type ProjectStateModel = components['schemas']['ProjectStateModel'];
+// Base type comes from the generated client. We extend it locally with an
+// optional `nermodels` field until /models/ner/* makes it into the OpenAPI
+// regen — mirrors api/activetigger/datamodels.py::ProjectStateModel.
+export type NerModelsProjectStateModel = {
+  options: Record<string, unknown>[];
+  available: Record<string, Record<string, components['schemas']['LMStatusModel']>>;
+  training: Record<string, components['schemas']['LMComputingOutModel']>;
+  base_parameters: components['schemas']['LMParametersModel'];
+};
+export type ProjectStateModel = components['schemas']['ProjectStateModel'] & {
+  nermodels?: NerModelsProjectStateModel | null;
+};
 export type ElementOutModel = components['schemas']['ElementOutModel'];
 
 export type AvailableProjectsModel = {
@@ -221,6 +232,16 @@ export interface newImageModel {
   test_size?: number;
   exclude_labels: string[];
   fp16: boolean;
+}
+
+// Mirrors api/activetigger/datamodels.py::NerModelModel. Defined locally
+// until the openapi client is regenerated for /models/ner/*.
+export interface newNerModel {
+  name?: string;
+  base: string;
+  parameters: LMParametersModel;
+  test_size?: number;
+  max_length?: number;
 }
 
 export interface EvalSetModel {

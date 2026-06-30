@@ -34,6 +34,7 @@ from activetigger.datamodels import (
     GenerationResult,
     ImageModelModel,
     LMComputing,
+    NerModelModel,
     NextInModel,
     NextProjectStateModel,
     PredictedLabel,
@@ -70,6 +71,7 @@ from activetigger.imagemodels import ImageModels
 from activetigger.languagemodels import LanguageModels
 from activetigger.messages import Messages
 from activetigger.monitoring import Monitoring
+from activetigger.nermodels import NerModels
 from activetigger.projections import Projections
 from activetigger.prompts import BINDABLE_FEATURE_KINDS, Prompts
 from activetigger.queue_manager import Queue
@@ -115,6 +117,53 @@ class Errors:
         return self.__stack
 
 
+def _detect_span_scheme(values: pd.Series) -> tuple[bool, list[str]]:
+    """Detect whether a label column holds span-style annotations.
+
+    A span annotation is a JSON string parsing to a list of dicts with
+    ``start`` / ``end`` / ``tag`` keys (the same shape that
+    ``TextSpanPanel`` writes to the DB).
+
+    The column is treated as a span scheme when:
+    - at least one cell starts with ``[`` (so we don't run JSON on free text), AND
+    - the majority of non-null cells parse to that shape (allowing empty
+      ``[]`` lists, since "no entities" is a valid annotation).
+
+    Returns ``(is_span, sorted_unique_tags)``. ``sorted_unique_tags`` may be
+    empty if every row had ``[]`` — the caller can still create the scheme
+    and let the user add tags later.
+    """
+    if values.empty:
+        return False, []
+    bracket_lead = values.str.lstrip().str.startswith("[")
+    if not bracket_lead.any():
+        return False, []
+    tags: set[str] = set()
+    matches = 0
+    for raw in values:
+        try:
+            parsed = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(parsed, list):
+            continue
+        # Empty list still counts as a span cell (explicit "no spans")
+        if not parsed:
+            matches += 1
+            continue
+        if all(
+            isinstance(item, dict) and {"start", "end", "tag"} <= item.keys() for item in parsed
+        ):
+            matches += 1
+            for item in parsed:
+                tag = item.get("tag")
+                if isinstance(tag, str) and tag:
+                    tags.add(tag)
+    if matches > len(values) / 2:
+        return True, sorted(tags)
+    return False, []
+
+
 class Project:
     """
     Project object
@@ -132,6 +181,7 @@ class Project:
     schemes: Schemes
     features: Features
     languagemodels: LanguageModels
+    nermodels: NerModels | None
     quickmodels: QuickModels
     generations: Generations
     projections: Projections
@@ -274,6 +324,20 @@ class Project:
                 self.db_manager,
                 config.file_image_models,
             )
+        # NER fine-tuning is text-only (span schemes don't exist on image
+        # projects). Always instantiated for text projects so the state /
+        # routes can address it uniformly; whether the UI exposes it is
+        # gated by experimental mode on the frontend.
+        self.nermodels: NerModels | None = None
+        if getattr(self.params, "kind", "text") != "image":
+            self.nermodels = NerModels(
+                project_slug,
+                self.params.dir,
+                self.queue,
+                self.computing,
+                self.db_manager,
+                getattr(config, "file_bert_models", None),
+            )
         self.quickmodels = QuickModels(
             project_slug, self.params.dir, self.queue, self.computing, self.db_manager
         )
@@ -406,15 +470,19 @@ class Project:
         else:
             for col in import_trainset_labels.columns:
                 scheme_name = col.replace("dataset_", "")
-                delimiters = import_trainset_labels[col].str.contains("|", regex=False).sum()
-                if delimiters < 5:
-                    scheme_type = "multiclass"
-                    scheme_labels = list(import_trainset_labels[col].dropna().unique())
+                non_null = import_trainset_labels[col].dropna().astype(str)
+                span_kind, span_labels = _detect_span_scheme(non_null)
+                if span_kind:
+                    scheme_type = "span"
+                    scheme_labels = span_labels
                 else:
-                    scheme_type = "multilabel"
-                    scheme_labels = list(
-                        import_trainset_labels[col].dropna().str.split("|").explode().unique()
-                    )
+                    delimiters = non_null.str.contains("|", regex=False).sum()
+                    if delimiters < 5:
+                        scheme_type = "multiclass"
+                        scheme_labels = list(non_null.unique())
+                    else:
+                        scheme_type = "multilabel"
+                        scheme_labels = list(non_null.str.split("|").explode().unique())
                 self.db_manager.projects_service.add_scheme(
                     self.project_slug,
                     scheme_name,
@@ -1352,6 +1420,7 @@ class Project:
             quickmodel=self.quickmodels.state(),
             languagemodels=self.languagemodels.state(),
             imagemodels=self.imagemodels.state() if self.imagemodels is not None else None,
+            nermodels=self.nermodels.state() if self.nermodels is not None else None,
             projections=self.projections.state(),
             generations=self.generations.state(),
             bertopic=self.bertopic.state(),
@@ -1574,6 +1643,7 @@ class Project:
             "projections": _state_dict(self.projections),
             "bertopic": _state_dict(self.bertopic),
             "imagemodels": _state_dict(self.imagemodels) if self.imagemodels is not None else None,
+            "nermodels": _state_dict(self.nermodels) if self.nermodels is not None else None,
             "prompts": _state_dict(self.prompts) if self.prompts is not None else None,
         }
 
@@ -1898,6 +1968,130 @@ class Project:
         self.monitoring.register_process(
             process_name=process_id,
             kind="train_languagemodel",
+            parameters={},
+            user_name=username,
+        )
+
+    def start_ner_training(self, ner: NerModelModel, username: str) -> None:
+        """
+        Launch fine-tuning of a token-classification model for a span scheme.
+
+        Span schemes store their annotation as JSON ([{start,end,tag}, ...]);
+        the dataframe column is forwarded as-is and parsed inside the task.
+        Skips dichotomization / class-balance / exclude-labels, none of
+        which apply to BIO tagging.
+        """
+        if self.nermodels is None:
+            raise Exception("NER fine-tuning is not available for this project")
+        if (
+            len(self.languagemodels.current_user_processes(username))
+            + len(self.nermodels.current_user_processes(username))
+            > 0
+        ):
+            raise Exception(
+                "User already has a process launched, please wait before launching another one"
+            )
+
+        df = self.schemes.get_scheme(ner.scheme, datasets=["train"], complete=True)
+        df = df[["text", "labels"]].dropna(subset=["text"])
+        # keep rows with explicit "[]" (no spans) but drop ones never annotated
+        df = df[df["labels"].notna()]
+
+        scheme = self.schemes.available()[ner.scheme]
+        if scheme.kind != "span":
+            raise Exception(f"NER training requires a span scheme (got kind: {scheme.kind})")
+
+        process_id = self.nermodels.start_training_process(
+            name=ner.name,
+            project=self.name,
+            user=username,
+            scheme=ner.scheme,
+            df=df,
+            scheme_labels=scheme.labels,
+            col_text=df.columns[0],
+            col_label=df.columns[1],
+            base_model=ner.base_model,
+            params=ner.params,
+            test_size=ner.test_size,
+            max_length=ner.max_length,
+        )
+        self.monitoring.register_process(
+            process_name=process_id,
+            kind="train_ner",
+            parameters={},
+            user_name=username,
+        )
+
+    def start_ner_prediction(
+        self,
+        username: str,
+        dataset_type: str,
+        datasets: list[str] | None,
+        scheme_name: str,
+        model_name: str,
+        external_dataset: TextDatasetModel | None = None,
+        batch_size: int = 16,
+    ) -> None:
+        """
+        Launch a NER prediction run. Mirrors start_language_model_prediction
+        but drops training_kind dispatch (always "ner") and routes to
+        self.nermodels.
+        """
+        if self.nermodels is None:
+            raise Exception("NER prediction is not available for this project")
+
+        path_train = None
+        path_valid = None
+        path_test = None
+        if dataset_type == "external":
+            if external_dataset is None:
+                raise Exception("No external dataset available for prediction")
+            df = None
+            col_label = None
+            datasets = None
+            path_data = self.data.get_path(external_dataset.filename)
+        elif dataset_type == "all":
+            df = None
+            col_label = None
+            datasets = None
+            path_data = self.data.path_data_all
+            path_train = self.data.path_train
+            path_valid = self.data.path_valid if self.data.path_valid.exists() else None
+            path_test = self.data.path_test if self.data.path_test.exists() else None
+        elif dataset_type == "annotable":
+            if datasets is None:
+                raise Exception("No dataset available for prediction")
+            df = self.schemes.get_scheme(
+                scheme=scheme_name, complete=True, datasets=datasets, id_external=True
+            )
+            col_label = "labels"
+            path_data = None
+        else:
+            raise Exception(f"Dataset {dataset_type} not recognized")
+
+        scheme = self.schemes.available()[scheme_name]
+        if scheme.kind != "span":
+            raise Exception(f"NER prediction requires a span scheme (got kind: {scheme.kind})")
+
+        process_id = self.nermodels.start_predicting_process(
+            project_slug=self.name,
+            name=model_name,
+            user=username,
+            df=df,
+            scheme_labels=scheme.labels,
+            col_label=col_label,
+            dataset=dataset_type,
+            batch_size=batch_size,
+            statistics=datasets,
+            path_data=path_data,
+            external_dataset=external_dataset,
+            path_train=path_train,
+            path_valid=path_valid,
+            path_test=path_test,
+        )
+        self.monitoring.register_process(
+            process_name=process_id,
+            kind="predict_ner",
             parameters={},
             user_name=username,
         )
@@ -2353,6 +2547,26 @@ class Project:
                         ):
                             add_predictions["predict_" + prediction.model_name] = results.path
                         self.imagemodels.add(prediction)
+                    case "train_ner":
+                        if self.nermodels is None:
+                            continue
+                        model = cast(LMComputing, e)
+                        events = cast(EventsModel, results)
+                        self.nermodels.add(model)
+                        self.monitoring.close_process(model.unique_id, events)
+                    case "predict_ner":
+                        if self.nermodels is None:
+                            continue
+                        prediction = cast(LMComputing, e)
+                        if (
+                            results is not None
+                            and results.path
+                            and "predict_annotable.parquet" in results.path
+                        ):
+                            add_predictions["predict_" + prediction.model_name] = results.path
+                        self.nermodels.add(prediction)
+                        if results is not None and results.events is not None:
+                            self.monitoring.close_process(prediction.unique_id, results.events)
                     case "train_quickmodel":
                         sm = cast(QuickModelComputing, e)
 
@@ -2440,6 +2654,11 @@ class Project:
                         image_task = cast(LMComputing, e)
                         self.db_manager.language_models_service.delete_model(
                             self.name, image_task.model_name
+                        )
+                    case "train_ner":
+                        ner_task = cast(LMComputing, e)
+                        self.db_manager.language_models_service.delete_model(
+                            self.name, ner_task.model_name
                         )
             # clean the process from the list and the queue
             finally:

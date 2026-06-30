@@ -18,6 +18,7 @@ from activetigger.datamodels import (
     BertModelModel,
     ImageModelModel,
     ModelInformationsModel,
+    NerModelModel,
     QuickModelInModel,
     QuickModelOutModel,
     TextDatasetModel,
@@ -167,6 +168,10 @@ def get_model_information(
             if project.imagemodels is None:
                 raise Exception("Image models are only available for image projects")
             return project.imagemodels.get_informations(name)
+        elif kind == "ner":
+            if project.nermodels is None:
+                raise Exception("NER models are not available for this project")
+            return project.nermodels.get_informations(name)
         else:
             raise Exception(f"Model kind {kind} not recognized")
     except Exception as e:
@@ -198,7 +203,7 @@ def predict(
     test_rights(ProjectAction.ADD, current_user.username, project.name)
     try:
         # types of prediction
-        if kind not in ["quick", "bert", "image"]:
+        if kind not in ["quick", "bert", "image", "ner"]:
             raise Exception(f"Model kind {kind} not recognized")
 
         if dataset_type not in ["annotable", "external", "all"]:
@@ -256,6 +261,17 @@ def predict(
                 datasets=datasets,
                 scheme_name=scheme,
                 model_name=model_name,
+                batch_size=batch_size,
+            )
+
+        if kind == "ner":
+            project.start_ner_prediction(
+                username=current_user.username,
+                dataset_type=dataset_type,
+                datasets=datasets,
+                scheme_name=scheme,
+                model_name=model_name,
+                external_dataset=external_dataset,
                 batch_size=batch_size,
             )
         get_orchestrator().log_action(
@@ -408,6 +424,83 @@ def delete_image(
             project.features.delete(f)
         get_orchestrator().log_action(
             current_user.username, f"DELETE IMAGE MODEL + FEATURES: {image_name}", project.name
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/models/ner/train", dependencies=[Depends(verified_user)])
+def post_ner(
+    project: Annotated[Project, Depends(get_project)],
+    current_user: Annotated[UserInDBModel, Depends(verified_user)],
+    ner: NerModelModel,
+) -> None:
+    """
+    Fine-tune a token-classification model on a span scheme.
+    Experimental feature — gated in the frontend by developmentMode.
+    """
+    test_rights(ProjectAction.ADD, current_user.username, project.name)
+    if getattr(project.params, "kind", "text") == "image":
+        raise HTTPException(
+            status_code=400, detail="NER models are not supported for image projects"
+        )
+    try:
+        orchestrator = get_orchestrator()
+        if not orchestrator.available_storage(current_user.username):
+            raise HTTPException(
+                status_code=403,
+                detail="Storage limit exceeded. Please delete models or contact the administrator.",
+            )
+        project.start_ner_training(ner=ner, username=current_user.username)
+        orchestrator.log_action(current_user.username, f"TRAIN NER MODEL: {ner.name}", project.name)
+        return None
+    except Exception as e:
+        print(f"ERROR /models/ner/train: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/models/ner/delete", dependencies=[Depends(verified_user)])
+def delete_ner(
+    project: Annotated[Project, Depends(get_project)],
+    current_user: Annotated[UserInDBModel, Depends(verified_user)],
+    ner_name: ModelName,
+) -> None:
+    """
+    Delete a trained NER model and any features derived from it.
+    """
+    test_rights(ProjectAction.DELETE, current_user.username, project.name)
+    if project.nermodels is None:
+        raise HTTPException(status_code=400, detail="NER models are not available for this project")
+    try:
+        project.nermodels.delete(ner_name)
+        for f in [i for i in project.features.map.keys() if ner_name.replace("__", "_") in i]:
+            project.features.delete(f)
+        get_orchestrator().log_action(
+            current_user.username, f"DELETE NER MODEL: {ner_name}", project.name
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/models/ner/rename", dependencies=[Depends(verified_user)])
+def rename_ner(
+    project: Annotated[Project, Depends(get_project)],
+    current_user: Annotated[UserInDBModel, Depends(verified_user)],
+    former_name: ModelName,
+    new_name: ModelName,
+) -> None:
+    """
+    Rename a NER model.
+    """
+    test_rights(ProjectAction.UPDATE, current_user.username, project.name)
+    if project.nermodels is None:
+        raise HTTPException(status_code=400, detail="NER models are not available for this project")
+    try:
+        project.nermodels.rename(former_name, new_name)
+        get_orchestrator().log_action(
+            current_user.username,
+            f"INFO RENAME NER MODEL: {former_name} -> {new_name}",
+            project.name,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

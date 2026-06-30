@@ -101,13 +101,24 @@ def export_prediction(
     format: str = Query(),
     name: str = Query(),
     dataset: str = Query("all"),
+    kind: str = Query("bert"),
 ) -> FileResponse:
     """
-    Export annotations
+    Export prediction file (parquet/csv/xlsx). `kind` selects which manager
+    owns the file: BERT classifications under `languagemodels`, NER span
+    predictions under `nermodels`.
     """
     test_rights(ProjectAction.EXPORT_DATA, current_user.username, project.name)
     try:
-        return project.languagemodels.export_prediction(
+        if kind == "ner":
+            if project.nermodels is None:
+                raise HTTPException(
+                    status_code=400, detail="NER models are not available for this project"
+                )
+            manager = project.nermodels
+        else:
+            manager = project.languagemodels
+        return manager.export_prediction(
             name=name,
             file_name=f"predict_{dataset}.parquet",
             format=format,

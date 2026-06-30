@@ -6,7 +6,10 @@ import { useAppContext } from '../core/useAppContext';
 import { DisplayTrainingProcesses } from './DisplayTrainingProcesses';
 import { ImportPredictionDataset } from './forms/ImportPredictionDataset';
 
-export const ModelPredict: FC<{ currentModel: string | null }> = ({ currentModel }) => {
+export const ModelPredict: FC<{ currentModel: string | null; kind?: string }> = ({
+  currentModel,
+  kind = 'bert',
+}) => {
   const { projectName: projectSlug } = useParams();
 
   const [batchSize, setBatchSize] = useState<number>(32);
@@ -19,7 +22,7 @@ export const ModelPredict: FC<{ currentModel: string | null }> = ({ currentModel
   const { model } = useModelInformations(
     projectSlug || null,
     currentModel || null,
-    'bert',
+    kind,
     isComputing,
   );
 
@@ -28,13 +31,18 @@ export const ModelPredict: FC<{ currentModel: string | null }> = ({ currentModel
 
   // display external form
   const [displayExternalForm, setDisplayExternalForm] = useState<boolean>(false);
+  // Look up the right manager's `predicted_external` flag. NER models live
+  // under `nermodels`; everything else under `languagemodels`.
+  const availabilityMap =
+    kind === 'ner' ? project?.nermodels?.available : project?.languagemodels?.available;
   const availablePredictionExternal =
     (currentScheme &&
       currentModel &&
-      project?.languagemodels?.available?.[currentScheme]?.[currentModel]?.[
-        'predicted_external'
-      ]) ??
+      availabilityMap?.[currentScheme]?.[currentModel]?.['predicted_external']) ??
     false;
+  // Polling source for the in-progress prediction badge — same split.
+  const trainingMap =
+    kind === 'ner' ? project?.nermodels?.training : project?.languagemodels?.training;
 
   return (
     <div>
@@ -56,7 +64,7 @@ export const ModelPredict: FC<{ currentModel: string | null }> = ({ currentModel
             disabled={isComputing}
             onClick={() => {
               setDisplayExternalForm(false);
-              computeModelPrediction(currentModel, 'all', currentScheme || '', 'bert');
+              computeModelPrediction(currentModel, 'all', currentScheme || '', kind);
             }}
           >
             Prediction on the entire dataset
@@ -85,11 +93,12 @@ export const ModelPredict: FC<{ currentModel: string | null }> = ({ currentModel
             scheme={currentScheme || ''}
             availablePredictionExternal={availablePredictionExternal || false}
             batchSize={batchSize}
+            kind={kind}
           />
         )}
         <DisplayTrainingProcesses
           projectSlug={projectSlug || null}
-          processes={project?.languagemodels.training}
+          processes={trainingMap}
           processStatus="predicting"
           displayStopButton={isComputing}
         />

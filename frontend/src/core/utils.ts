@@ -484,6 +484,9 @@ export function getRandomName(prefix: string) {
   if (prefix === 'bertmodel') {
     random_name = ('bert-' + sample(animalsList)) as string;
   }
+  if (prefix === 'nermodel') {
+    random_name = ('ner-' + sample(animalsList)) as string;
+  }
   if (prefix === 'imagemodel') {
     random_name = ('image-' + sample(animalsList)) as string;
   }

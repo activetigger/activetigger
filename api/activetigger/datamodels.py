@@ -426,6 +426,22 @@ class ImageModelModel(BaseModel):
     fp16: bool = True
 
 
+class NerModelModel(BaseModel):
+    """
+    Request to fine-tune a token-classification (NER) model for a span scheme.
+    Drops classification-only fields (loss, dichotomize, class_balance,
+    class_min_freq, exclude_labels) — BIO tagging makes them moot.
+    """
+
+    project_slug: str
+    scheme: str
+    name: str = Field(pattern=MODEL_NAME_PATTERN)
+    base_model: str
+    params: LMParametersModel
+    test_size: float = 0.2
+    max_length: int = 512
+
+
 class UmapModel(BaseModel):
     """
     Params UmapModel
@@ -955,6 +971,13 @@ class ImageModelsProjectStateModel(BaseModel):
     base_parameters: LMParametersModel
 
 
+class NerModelsProjectStateModel(BaseModel):
+    options: list[dict[str, Any]]
+    available: dict[str, dict[str, LMStatusModel]]
+    training: dict[str, LMComputingOutModel]
+    base_parameters: LMParametersModel
+
+
 class ProjectionsProjectStateModel(BaseModel):
     options: dict[str, dict[str, Any]]
     available: dict[str, str | int]
@@ -998,6 +1021,7 @@ class ProjectStateModel(BaseModel):
     quickmodel: QuickModelsProjectStateModel
     languagemodels: LanguageModelsProjectStateModel
     imagemodels: ImageModelsProjectStateModel | None = None
+    nermodels: NerModelsProjectStateModel | None = None
     projections: ProjectionsProjectStateModel
     generations: GenerationsProjectStateModel
     bertopic: BertopicProjectStateModel
