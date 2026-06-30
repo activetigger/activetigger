@@ -166,9 +166,7 @@ def _compute_flavor(
     # Walk f_values + labels in lockstep so the type checker doesn't have to
     # narrow `f1_label[lab]` (a dict[str, float | None] lookup, which it
     # can't prove non-None even under an `is not None` filter).
-    f1_weighted = (
-        sum(f * support_label[lab] for f, lab in zip(f_values, labels)) / total_support
-    )
+    f1_weighted = sum(f * support_label[lab] for f, lab in zip(f_values, labels)) / total_support
 
     table = _build_confusion_table(confusion, labels, fn, fp)
 
