@@ -238,6 +238,11 @@
     cursor: pointer;
     font-weight: 500;
     transition: background-color 0.15s ease, color 0.15s ease;
+    &:hover:not(:disabled){
+      filter: none;
+      background-color: var(--label-color);
+      color: white;
+    }
     &.active{
       background-color: var(--label-color);
       color: white;
