@@ -228,8 +228,7 @@ export const TagDisplayParameters: FC = () => {
               ...prev,
               displayConfig: {
                 ...displayConfig,
-                spanAnnotationMode:
-                  displayConfig.spanAnnotationMode === 'neutral' ? 'locked' : 'neutral',
+                spanAnnotationMode: e.target.checked === true ? 'neutral' : 'locked',
               },
             }))
           }
