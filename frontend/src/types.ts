@@ -206,6 +206,7 @@ export interface DisplayConfig {
   forceCompleteLabel?: boolean;
   displayFormat?: 'table' | 'cards';
   displayMeanAnnotationTime?: boolean;
+  spanAnnotationMode?: 'locked' | 'neutral';
 }
 
 export interface newBertModel {

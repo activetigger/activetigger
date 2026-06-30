@@ -136,8 +136,6 @@ class Users:
         """
         Delete user auth
         """
-        if username == "root":
-            raise Exception("Can't delete root user auth")
         self.get_user(username)
         self.db_manager.projects_service.delete_auth(project_slug, username)
 

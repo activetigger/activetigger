@@ -219,6 +219,24 @@ export const TagDisplayParameters: FC = () => {
         Force complete label
       </label>
 
+      <label title="Locked: pick a label, then highlight text to tag it. Neutral: highlight text first, then click a label to apply it.">
+        <input
+          type="checkbox"
+          checked={displayConfig.spanAnnotationMode === 'neutral'}
+          onChange={(e) =>
+            setAppContext((prev) => ({
+              ...prev,
+              displayConfig: {
+                ...displayConfig,
+                spanAnnotationMode:
+                  displayConfig.spanAnnotationMode === 'neutral' ? 'locked' : 'neutral',
+              },
+            }))
+          }
+        />
+        Highlight first
+      </label>
+
       <label>Highlight words in the text</label>
       <textarea
         placeholder="Line break to separate"

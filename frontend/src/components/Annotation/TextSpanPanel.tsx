@@ -39,11 +39,16 @@ export const TextSpanPanel: FC<SpanInputProps> = ({
     [displayConfig.labelsOrder, labels],
   );
 
+  const mode = displayConfig.spanAnnotationMode || 'locked';
+
   const [value, setValue] = useState<AnnotateBlendTag[]>([]);
   const [tag, setTag] = useState<string | null>(reorderedLabels[0] || null);
   const [comment, setComment] = useState<string>(
     element?.history ? element.history[0]?.comment || '' : '',
   );
+
+  const UNTAGGED = '__untagged__';
+  const UNTAGGED_COLOR = '#d1d5db';
 
   useEffect(() => setComment(element?.history ? element.history[0]?.comment || '' : ''), [element]);
 
@@ -54,6 +59,14 @@ export const TextSpanPanel: FC<SpanInputProps> = ({
       setValue([]);
     }
   }, [lastTag]);
+
+  useEffect(() => {
+    if (mode === 'neutral') {
+      setTag(null);
+    } else if (!tag) {
+      setTag(reorderedLabels[0] || null);
+    }
+  }, [mode, reorderedLabels, tag]);
 
   const handleChange = (value: AnnotateBlendTag[]) => {
     setValue(value);
@@ -72,7 +85,8 @@ export const TextSpanPanel: FC<SpanInputProps> = ({
   }, [navigate, projectName, addElementInAnnotationSessionHistory, element]);
 
   const validateAnnotation = useCallback(() => {
-    postAnnotation(JSON.stringify(value) || JSON.stringify([]), elementId, comment);
+    const cleaned = value.filter((s) => s.tag !== UNTAGGED);
+    postAnnotation(JSON.stringify(cleaned) || JSON.stringify([]), elementId, comment);
     setValue([]);
   }, [postAnnotation, value, elementId, comment]);
 
@@ -122,6 +136,9 @@ export const TextSpanPanel: FC<SpanInputProps> = ({
             onChange={handleChange}
             value={value || []}
             getSpan={(span) => {
+              if (mode === 'neutral') {
+                return { ...span, tag: UNTAGGED, color: UNTAGGED_COLOR };
+              }
               if (!tag) return span;
               return {
                 ...span,
@@ -134,12 +151,23 @@ export const TextSpanPanel: FC<SpanInputProps> = ({
       </div>
       <div className="tag-action-container">
         {options.map((opt) => {
-          const isActive = opt.value === tag;
+          const isActive = mode === 'locked' && opt.value === tag;
+          const handleClick = () => {
+            if (mode === 'neutral') {
+              setValue((prev) =>
+                prev.map((s) =>
+                  s.tag === UNTAGGED ? { ...s, tag: opt.value, color: opt.color } : s,
+                ),
+              );
+            } else {
+              setTag(opt.value);
+            }
+          };
           return (
             <button
               key={opt.value}
               type="button"
-              onClick={() => setTag(opt.value)}
+              onClick={handleClick}
               className={cx('span-annotation-label-selector', isActive && 'active')}
               style={{ '--label-color': opt.color } as CSSProperties}
             >

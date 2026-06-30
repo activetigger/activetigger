@@ -23,6 +23,7 @@ export const DEFAULT_CONTEXT: AppContextValue = {
     forceCompleteLabel: false,
     displayFormat: 'cards',
     displayMeanAnnotationTime: false,
+    spanAnnotationMode: 'locked',
   },
   selectionConfig: {
     mode: 'random',
