@@ -147,8 +147,7 @@ class EvalSetDataModel(BaseModel):
     n_eval: int
     filename: str
     csv: str
-    col_label: str | None = None
-    scheme: str | None = None
+    cols_label: list[str] = []  # each column name must match an existing scheme name
 
 
 class EvalSetImageModel(BaseModel):

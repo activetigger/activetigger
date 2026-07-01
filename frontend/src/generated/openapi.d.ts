@@ -2709,10 +2709,8 @@ export interface components {
       filename: string;
       /** Csv */
       csv: string;
-      /** Col Label */
-      col_label?: string | null;
-      /** Scheme */
-      scheme?: string | null;
+      /** Cols Label */
+      cols_label?: string[];
     };
     /**
      * EvalSetImageModel

@@ -83,7 +83,6 @@ export const ProjectSettingsPage: FC = () => {
           ) : (
             <EvalSetsManagement
               projectSlug={projectSlug}
-              currentScheme={currentScheme || ''}
               dataset={'valid'}
               exist={project?.params.valid}
             />
@@ -99,7 +98,6 @@ export const ProjectSettingsPage: FC = () => {
           ) : (
             <EvalSetsManagement
               projectSlug={projectSlug}
-              currentScheme={currentScheme || ''}
               dataset={'test'}
               exist={project?.params.test}
             />

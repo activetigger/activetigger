@@ -5,15 +5,16 @@ import Select from 'react-select';
 
 import { omit } from 'lodash';
 import { unparse } from 'papaparse';
-import { useCreateValidSet, useDropEvalSet, useStopProcesses } from '../../core/api';
-import { useNotifications } from '../../core/notifications';
-import { loadFile } from '../../core/utils';
-import { useAppContext } from '../../core/useAppContext';
-
 import { Modal } from 'react-bootstrap';
 import { useNavigate } from 'react-router-dom';
+import { Tooltip } from 'react-tooltip';
+import { useCreateValidSet, useDropEvalSet, useStopProcesses } from '../../core/api';
+import { useNotifications } from '../../core/notifications';
+import { useAppContext } from '../../core/useAppContext';
+import { loadFile } from '../../core/utils';
 import { EvalSetModel } from '../../types';
 
+import { HiOutlineQuestionMarkCircle } from 'react-icons/hi';
 import { UploadProgressBar } from '../UploadProgressBar';
 
 // format of the data table
@@ -25,7 +26,6 @@ export interface DataType {
 
 export interface EvalSetsManagementModel {
   projectSlug: string;
-  currentScheme: string;
   dataset: string;
   exist: boolean;
 }
@@ -33,7 +33,6 @@ export interface EvalSetsManagementModel {
 // component
 export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
   projectSlug,
-  currentScheme,
   dataset,
   exist,
 }) => {
@@ -41,13 +40,14 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
   const datasetCleanForPrinting = dataset == 'test' ? 'Test' : 'Validation';
   const { register, control, handleSubmit, setValue } = useForm<EvalSetModel & { files: FileList }>(
     {
-      defaultValues: { scheme: currentScheme },
+      defaultValues: { cols_label: [] },
     },
   );
   const {
     appContext: { currentProject },
   } = useAppContext();
   const proj_errors = currentProject?.errors || [];
+  const availableSchemes = Object.keys(currentProject?.schemes.available || {});
 
   const { progression, createValidSet, cancel } = useCreateValidSet(); // API call
   const { notify } = useNotifications();
@@ -217,8 +217,17 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
         notify({ type: 'error', message: 'Please fill all the fields.' });
         return;
       }
+      // each selected label column name must match an existing scheme
+      const cols_label = formData.cols_label ?? [];
+      const unknownSchemes = cols_label.filter((c) => !availableSchemes.includes(c));
+      if (unknownSchemes.length > 0) {
+        notify({
+          type: 'error',
+          message: `The selected label column(s) do not match any existing scheme: ${unknownSchemes.join(', ')}. Column names must match a scheme name.`,
+        });
+        return;
+      }
       const csv = data ? unparse(data.data, { header: true, columns: data.headers }) : '';
-      formData.scheme = currentScheme;
       errorCountAtSubmit.current = proj_errors.length;
       isUploading(true);
       try {
@@ -265,40 +274,52 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
             </div>
             <label htmlFor="csvFile">File to upload</label>
             <input id="csvFile" className="form-control" type="file" {...register('files')} />
-            {
-              // display datable if data available
-              data !== null && (
+          </div>
+          {
+            // display datable if data available (pulled out of col-lg-6 so long rows can breathe)
+            data !== null && (
+              <div className="my-3">
+                <div className="explanations">Preview</div>
                 <div>
-                  <div className="explanations">Preview</div>
-                  <div>
-                    Size of the dataset : <b>{data.data.length - 1}</b>
-                  </div>
-                  <DataTable<Record<DataType['headers'][number], string | number>>
-                    customStyles={{
-                      responsiveWrapper: {
-                        style: {
-                          maxWidth: '600px',
-                          overflowX: 'auto',
-                        },
-                      },
-                    }}
-                    columns={data.headers.map((h) => ({
-                      name: h,
-                      selector: (row) => row[h],
-                      format: (row) => {
-                        const v = row[h];
-                        return typeof v === 'bigint' ? Number(v) : v;
-                      },
-                      width: '200px',
-                      wrap: true,
-                    }))}
-                    data={
-                      data.data.slice(0, 5) as Record<keyof DataType['headers'], string | number>[]
-                    }
-                  />
+                  Size of the dataset : <b>{data.data.length - 1}</b>
                 </div>
-              )
-            }
+                <DataTable<Record<DataType['headers'][number], string | number>>
+                  customStyles={{
+                    responsiveWrapper: {
+                      style: {
+                        maxWidth: '100%',
+                        overflowX: 'auto',
+                      },
+                    },
+                    cells: {
+                      style: {
+                        maxHeight: '120px',
+                        overflowY: 'auto',
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-word',
+                        paddingTop: '8px',
+                        paddingBottom: '8px',
+                      },
+                    },
+                  }}
+                  columns={data.headers.map((h) => ({
+                    name: h,
+                    selector: (row) => row[h],
+                    format: (row) => {
+                      const v = row[h];
+                      return typeof v === 'bigint' ? Number(v) : v;
+                    },
+                    minWidth: '250px',
+                    wrap: true,
+                  }))}
+                  data={
+                    data.data.slice(0, 5) as Record<keyof DataType['headers'], string | number>[]
+                  }
+                />
+              </div>
+            )
+          }
+          <div className="col-lg-6">
             {
               // only display if data
               data != null && (
@@ -329,17 +350,41 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
                       />
                     )}
                   />
-                  <label htmlFor="col_label">
-                    Column(s) for existing annotations (optional, labels must already exist in the
-                    current scheme, otherwise they are ignored)
+                  <label htmlFor="cols_label">
+                    Columns for existing annotations (optional)
+                    <HiOutlineQuestionMarkCircle className="search" />
+                    <Tooltip anchorSelect=".search">
+                      Select one or more columns whose name matches an existing scheme name: each
+                      column will be imported as annotations for the scheme with the same name.
+                      Labels must already exist in the matching scheme.
+                    </Tooltip>
+                    {availableSchemes.length > 0 && (
+                      <div className="explanations">
+                        Available schemes: {availableSchemes.join(', ')}
+                      </div>
+                    )}
                   </label>
-                  <select id="col_label" disabled={data === null} {...register('col_label')}>
-                    <option key="none" value="">
-                      No label
-                    </option>
-
-                    {columns}
-                  </select>
+                  <Controller
+                    name="cols_label"
+                    control={control}
+                    render={({ field: { onChange, value } }) => (
+                      <Select
+                        inputId="cols_label"
+                        options={(data?.headers || []).map((e) => ({
+                          value: e,
+                          label: availableSchemes.includes(e) ? e : `${e} (not a scheme)`,
+                          isDisabled: !availableSchemes.includes(e),
+                        }))}
+                        isMulti
+                        value={(value || []).map((v: string) => ({ value: v, label: v }))}
+                        onChange={(selectedOptions) => {
+                          onChange(
+                            selectedOptions ? selectedOptions.map((option) => option.value) : [],
+                          );
+                        }}
+                      />
+                    )}
+                  />
                   <label htmlFor="n_test">Number of rows to import</label>
                   <input id="n_test" type="number" {...register('n_eval')} />
 

@@ -248,8 +248,7 @@ export interface newNerModel {
 export interface EvalSetModel {
   col_id: string;
   cols_text: string[];
-  col_label?: string | null;
-  scheme?: string | null;
+  cols_label?: string[];
   n_eval: number;
 }
 
