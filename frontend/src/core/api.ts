@@ -772,6 +772,52 @@ export function useResetFeatures(projectSlug: string | null) {
 }
 
 /**
+ * Import a pre-computed feature from a file.
+ * Uploads the file with column-mapping form fields as multipart/form-data.
+ */
+export function useImportFeature() {
+  const { notify } = useNotifications();
+  const { authenticatedUser } = useAuth();
+  const [progression, setProgression] = useState<{ loaded?: number; total?: number }>({});
+
+  const importFeature = useCallback(
+    async (
+      projectSlug: string,
+      params: { file: File; name: string; idColumn: string; columns?: string[] | null },
+    ) => {
+      const URL = config.api.url.replace(/\/$/, '');
+      const headers = getAuthHeaders(authenticatedUser)?.headers;
+      try {
+        await axios.postForm(
+          `${URL}/features/import`,
+          {
+            file: params.file,
+            name: params.name,
+            id_column: params.idColumn,
+            columns: params.columns && params.columns.length ? params.columns.join(',') : '',
+          },
+          {
+            params: { project_slug: projectSlug },
+            headers,
+            onUploadProgress: ({ loaded, total }) => setProgression({ loaded, total }),
+          },
+        );
+        notify({ type: 'success', message: 'Feature imported.' });
+        return true;
+      } catch (error: unknown) {
+        notify({ type: 'error', message: formatApiError(error) });
+        return false;
+      } finally {
+        setProgression({});
+      }
+    },
+    [notify, authenticatedUser],
+  );
+
+  return { importFeature, progression };
+}
+
+/**
  * Get feature info
  */
 export function useGetFeatureInfo(project_slug: string | null, project: unknown) {
@@ -1512,7 +1558,6 @@ export function useTrainNerModel(projectSlug: string | null, scheme: string | nu
   const trainNerModel = useCallback(
     async (dataForm: newNerModel) => {
       if (projectSlug && scheme && dataForm) {
-        // @ts-expect-error openapi client not yet regenerated for /models/ner/*
         const res = await api.POST('/models/ner/train', {
           params: { query: { project_slug: projectSlug } },
           body: {
@@ -1540,7 +1585,6 @@ export function useDeleteNerModel(projectSlug: string | null) {
   const deleteNerModel = useCallback(
     async (model_name: string) => {
       if (projectSlug) {
-        // @ts-expect-error openapi client not yet regenerated for /models/ner/*
         const res = await api.POST('/models/ner/delete', {
           params: { query: { project_slug: projectSlug, ner_name: model_name } },
         });
@@ -1562,7 +1606,6 @@ export function useRenameNerModel(projectSlug: string | null) {
   const renameNerModel = useCallback(
     async (former_model_name: string, new_model_name: string) => {
       if (projectSlug) {
-        // @ts-expect-error openapi client not yet regenerated for /models/ner/*
         const res = await api.POST('/models/ner/rename', {
           params: {
             query: {

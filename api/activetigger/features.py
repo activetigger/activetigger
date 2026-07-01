@@ -279,6 +279,92 @@ class Features:
                 errors.append(f"Error in adding prediction : {str(ex)}")
         return errors
 
+    def import_from_dataframe(
+        self,
+        *,
+        name: str,
+        id_column: str,
+        df: DataFrame,
+        columns: list[str] | None,
+        username: str,
+        source_file: str = "",
+    ) -> str:
+        """
+        Import a pre-computed feature from a user-provided DataFrame.
+
+        Matches rows on `id_external`. All target columns must be numeric.
+        If `columns` is None or empty, every non-id column is imported as one
+        multi-column embedding; otherwise only the selected columns are used.
+
+        The stored feature is named `imported-<name>`. Returns that name.
+
+        Raises ValueError on any validation issue.
+        """
+        clean_name = (name or "").strip()
+        if not clean_name:
+            raise ValueError("Feature name is required")
+        if not id_column:
+            raise ValueError("ID column is required")
+        if id_column not in df.columns:
+            raise ValueError(f"ID column '{id_column}' not found in file")
+
+        if columns:
+            mode = "select"
+            target = [c for c in columns if c and c != id_column]
+            missing_cols = [c for c in target if c not in df.columns]
+            if missing_cols:
+                raise ValueError(f"Columns not found in file: {missing_cols}")
+        else:
+            mode = "embedding"
+            target = [c for c in df.columns if c != id_column]
+
+        if not target:
+            raise ValueError("No feature columns to import")
+
+        non_numeric = [c for c in target if not pd.api.types.is_numeric_dtype(df[c])]
+        if non_numeric:
+            raise ValueError(f"Non-numeric columns cannot be imported as features: {non_numeric}")
+
+        ids = df[id_column].astype(str)
+        if ids.duplicated().any():
+            dups = ids[ids.duplicated()].unique().tolist()
+            raise ValueError(f"Duplicate values in ID column (e.g. {dups[:5]})")
+
+        uploaded = df[target].copy()
+        uploaded.index = ids
+        uploaded.index.name = None
+
+        project_ids = self.data.index["id_external"].astype(str)
+        uploaded_ids = set(uploaded.index)
+        missing = [i for i in project_ids if i not in uploaded_ids]
+        if missing:
+            raise ValueError(
+                f"{len(missing)} project rows are missing from the file (e.g. {missing[:5]})"
+            )
+
+        aligned = uploaded.loc[pd.Index(project_ids)]
+        aligned.index = self.data.index.index
+
+        full_name = f"imported-{clean_name}"
+        parameters: dict[str, Any] = {
+            "id_column": id_column,
+            "source_file": source_file,
+            "mode": mode,
+        }
+        if mode == "embedding":
+            parameters["embedding_size"] = len(target)
+        else:
+            parameters["columns"] = target
+
+        self.add(
+            name=full_name,
+            kind="imported",
+            username=username,
+            parameters=parameters,
+            new_content=aligned,
+        )
+        return full_name
+
     def add(
         self,
         name: str,

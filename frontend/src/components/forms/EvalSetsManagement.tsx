@@ -233,6 +233,7 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
       try {
         const res = await createValidSet(projectSlug, dataset, {
           ...omit(formData, 'files'),
+          cols_label,
           csv,
           filename: data.filename,
         });
