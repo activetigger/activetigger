@@ -792,6 +792,7 @@ class QuickModelComputing(ProcessComputing):
     exclude_labels: list[str] = []
     test_size: float = 0.2
     retrain: bool = False
+    get_progress: Callable[[], float | None] | None = None
 
 
 class QuickModelComputed(BaseModel):
@@ -949,6 +950,8 @@ class ModelDescriptionModel(BaseModel):
     parameters: dict[str, Any]
     path: str
     time: str
+    predicted_all: bool = False
+    predicted_external: bool = False
 
 
 class QuickModelsProjectStateModel(BaseModel):
@@ -956,7 +959,7 @@ class QuickModelsProjectStateModel(BaseModel):
     # available: dict[str, dict[str, QuickModelOutModel]]
     # training: dict[str, list[str]]
     available: dict[str, list[ModelDescriptionModel]]
-    training: dict[str, list[str]]
+    training: dict[str, LMComputingOutModel]
 
 
 class LanguageModelsProjectStateModel(BaseModel):

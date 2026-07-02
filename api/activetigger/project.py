@@ -339,7 +339,12 @@ class Project:
                 getattr(config, "file_bert_models", None),
             )
         self.quickmodels = QuickModels(
-            project_slug, self.params.dir, self.queue, self.computing, self.db_manager
+            project_slug,
+            self.params.dir,
+            self.queue,
+            self.computing,
+            self.db_manager,
+            features=self.features,
         )
         self.generations = Generations(
             self.db_manager, cast(list[GenerationComputing], self.computing)
@@ -2586,6 +2591,9 @@ class Project:
                         self.monitoring.close_process(sm.unique_id, events)
                     case "predict_quickmodel":
                         sm = cast(QuickModelComputing, e)
+                    case "predict_with_features":
+                        pf = cast(QuickModelComputing, e)
+                        self.quickmodels.mark_prediction_done(pf.name, pf.dataset)
                     case "feature":
                         feature_computation = cast(FeatureComputing, e)
                         self.features.add(

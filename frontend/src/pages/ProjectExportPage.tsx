@@ -78,6 +78,25 @@ export const ProjectExportPage: FC = () => {
     currentScheme && modelAvailabilityMap?.[currentScheme]
       ? Object.keys(modelAvailabilityMap[currentScheme])
       : [];
+
+  const availableQuickModels =
+    !isNer && currentScheme && project?.quickmodel?.available?.[currentScheme]
+      ? project.quickmodel.available[currentScheme].map((m) => m.name)
+      : [];
+  const [quickModel, setQuickModel] = useState<string | null>(null);
+  const [quickPredictionLoading, setQuickPredictionLoading] = useState<'all' | 'external' | null>(
+    null,
+  );
+
+  const downloadQuickPrediction = async (dataset: 'all' | 'external') => {
+    if (!quickModel) return;
+    setQuickPredictionLoading(dataset);
+    try {
+      await getPredictionsFile(quickModel, format, dataset, currentScheme, 'quick');
+    } finally {
+      setQuickPredictionLoading(null);
+    }
+  };
   const availablePredictionAll =
     (currentScheme && model && modelAvailabilityMap?.[currentScheme]?.[model]?.['predicted_all']) ??
     false;
@@ -234,6 +253,58 @@ export const ProjectExportPage: FC = () => {
                 )}
               </div>
             </section>
+
+            {!isNer && (
+              <section className="mt-4">
+                <h5 className="fw-semibold">Quickmodels</h5>
+                <hr className="mt-1" />
+                {availableQuickModels.length === 0 ? (
+                  <div className="text-muted small">
+                    No quickmodel available for the current scheme.
+                  </div>
+                ) : (
+                  <>
+                    <div className="text-muted small mb-2">Select a quickmodel</div>
+                    <ModelsPillDisplay
+                      modelNames={availableQuickModels}
+                      currentModelName={quickModel}
+                      setCurrentModelName={setQuickModel}
+                    />
+                  </>
+                )}
+                {quickModel && (
+                  <div className="d-flex flex-wrap gap-2 mt-3">
+                    <button
+                      className="btn-secondary-action"
+                      disabled={quickPredictionLoading !== null}
+                      onClick={() => downloadQuickPrediction('all')}
+                    >
+                      Export prediction complete dataset
+                      {quickPredictionLoading === 'all' && (
+                        <PulseLoader color="white" size={6} className="ms-2" />
+                      )}
+                    </button>
+                    <button
+                      className="btn-secondary-action"
+                      disabled={quickPredictionLoading !== null}
+                      onClick={() => downloadQuickPrediction('external')}
+                    >
+                      Export prediction external dataset
+                      {quickPredictionLoading === 'external' && (
+                        <PulseLoader color="white" size={6} className="ms-2" />
+                      )}
+                    </button>
+                  </div>
+                )}
+                {quickModel && (
+                  <div className="text-muted small mt-2">
+                    Run the prediction from the{' '}
+                    <Link to={`/projects/${projectName}/model/`}>Prediction tab</Link> first if the
+                    file is not available yet.
+                  </div>
+                )}
+              </section>
+            )}
 
             <section className="mt-4">
               <h5 className="fw-semibold">{isNer ? 'NER models' : 'BERT models'}</h5>

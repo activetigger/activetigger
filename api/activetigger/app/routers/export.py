@@ -107,7 +107,8 @@ def export_prediction(
     """
     Export prediction file (parquet/csv/xlsx). `kind` selects which manager
     owns the file: BERT classifications under `languagemodels`, NER span
-    predictions under `nermodels`.
+    predictions under `nermodels`, quickmodel predictions on the whole
+    dataset under `quickmodels`.
     """
     test_rights(ProjectAction.EXPORT_DATA, current_user.username, project.name)
     try:
@@ -116,10 +117,20 @@ def export_prediction(
                 raise HTTPException(
                     status_code=400, detail="NER models are not available for this project"
                 )
-            manager = project.nermodels
-        else:
-            manager = project.languagemodels
-        return manager.export_prediction(
+            return project.nermodels.export_prediction(
+                name=name,
+                file_name=f"predict_{dataset}.parquet",
+                format=format,
+                col_id=project.params.col_id,
+            )
+        if kind == "quick":
+            return project.quickmodels.export_prediction_file(
+                name=name,
+                dataset=dataset,
+                format=format,
+                col_id=project.params.col_id,
+            )
+        return project.languagemodels.export_prediction(
             name=name,
             file_name=f"predict_{dataset}.parquet",
             format=format,

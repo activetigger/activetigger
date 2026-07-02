@@ -218,8 +218,10 @@ def predict(
             if project.data.test is not None:
                 datasets.append("test")
         if dataset_type == "external":
-            if kind != "bert":
-                raise Exception("External dataset prediction is only available for bert models")
+            if kind not in ("bert", "quick"):
+                raise Exception(
+                    "External dataset prediction is only available for bert and quick models"
+                )
 
         if kind == "bert":
             if dataset_type == "external" and external_dataset is None:
@@ -244,15 +246,40 @@ def predict(
             )
 
         if kind == "quick":
-            if datasets is None:
-                raise Exception("Dataset parameter must be specified for quick model prediction")
-            project.start_quick_model_prediction(
-                username=current_user.username,
-                dataset_type=dataset_type,
-                datasets=datasets,
-                scheme_name=scheme,
-                model_name=model_name,
-            )
+            if dataset_type == "all":
+                # Predict on the whole source dataset (path_data_all) — the
+                # PredictWithFeatures task (re)computes the features the
+                # model was trained on and applies the model in one go.
+                project.quickmodels.predict_on_dataset(
+                    name=model_name,
+                    username=current_user.username,
+                    dataset="all",
+                )
+            elif dataset_type == "external":
+                if external_dataset is None:
+                    raise Exception("External dataset must be provided for external prediction")
+                if not project.data.get_path(external_dataset.filename).exists():
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"External dataset file {external_dataset.filename} not found",
+                    )
+                project.quickmodels.predict_on_external_dataset(
+                    name=model_name,
+                    username=current_user.username,
+                    external_dataset=external_dataset,
+                )
+            else:
+                if datasets is None:
+                    raise Exception(
+                        "Dataset parameter must be specified for quick model prediction"
+                    )
+                project.start_quick_model_prediction(
+                    username=current_user.username,
+                    dataset_type=dataset_type,
+                    datasets=datasets,
+                    scheme_name=scheme,
+                    model_name=model_name,
+                )
 
         if kind == "image":
             project.start_image_model_prediction(

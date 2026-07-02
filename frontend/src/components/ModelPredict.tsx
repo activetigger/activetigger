@@ -1,5 +1,6 @@
 import { FC, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { Button, Modal } from 'react-bootstrap';
+import { Link, useParams } from 'react-router-dom';
 
 import { useComputeModelPrediction, useModelInformations } from '../core/api';
 import { useAppContext } from '../core/useAppContext';
@@ -31,18 +32,23 @@ export const ModelPredict: FC<{ currentModel: string | null; kind?: string }> = 
 
   // display external form
   const [displayExternalForm, setDisplayExternalForm] = useState<boolean>(false);
-  // Look up the right manager's `predicted_external` flag. NER models live
-  // under `nermodels`; everything else under `languagemodels`.
+  const [showOverwriteConfirm, setShowOverwriteConfirm] = useState(false);
+  // Look up the right manager's flags. NER models live under
+  // `nermodels`; everything else under `languagemodels`.
   const availabilityMap =
     kind === 'ner' ? project?.nermodels?.available : project?.languagemodels?.available;
-  const availablePredictionExternal =
-    (currentScheme &&
-      currentModel &&
-      availabilityMap?.[currentScheme]?.[currentModel]?.['predicted_external']) ??
-    false;
+  const modelStatus =
+    (currentScheme && currentModel && availabilityMap?.[currentScheme]?.[currentModel]) || null;
+  const availablePredictionAll = Boolean(modelStatus?.['predicted_all']);
+  const availablePredictionExternal = Boolean(modelStatus?.['predicted_external']);
   // Polling source for the in-progress prediction badge — same split.
   const trainingMap =
     kind === 'ner' ? project?.nermodels?.training : project?.languagemodels?.training;
+
+  const launchWholeDatasetPrediction = () => {
+    setDisplayExternalForm(false);
+    computeModelPrediction(currentModel, 'all', currentScheme || '', kind);
+  };
 
   return (
     <div>
@@ -63,8 +69,11 @@ export const ModelPredict: FC<{ currentModel: string | null; kind?: string }> = 
             className="btn-primary-action mt-4"
             disabled={isComputing}
             onClick={() => {
-              setDisplayExternalForm(false);
-              computeModelPrediction(currentModel, 'all', currentScheme || '', kind);
+              if (availablePredictionAll) {
+                setShowOverwriteConfirm(true);
+                return;
+              }
+              launchWholeDatasetPrediction();
             }}
           >
             Prediction on the entire dataset
@@ -85,6 +94,18 @@ export const ModelPredict: FC<{ currentModel: string | null; kind?: string }> = 
           </label>
         )}
       </div>
+      {model && (availablePredictionAll || availablePredictionExternal) && (
+        <div className="alert alert-info mt-3 py-2 small mb-0" role="alert">
+          A prediction already exists for this model
+          {availablePredictionAll && availablePredictionExternal
+            ? ' (entire dataset and external dataset)'
+            : availablePredictionAll
+              ? ' (entire dataset)'
+              : ' (external dataset)'}
+          . Go to the <Link to={`/projects/${projectSlug}/export`}>Export page</Link> to download
+          it.
+        </div>
+      )}
       <div>
         {model && displayExternalForm && (
           <ImportPredictionDataset
@@ -103,6 +124,29 @@ export const ModelPredict: FC<{ currentModel: string | null; kind?: string }> = 
           displayStopButton={isComputing}
         />
       </div>
+      <Modal show={showOverwriteConfirm} onHide={() => setShowOverwriteConfirm(false)} centered>
+        <Modal.Header closeButton>
+          <Modal.Title>Overwrite existing prediction?</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          A prediction on the entire dataset already exists for this model. Computing it again will
+          overwrite the previous one.
+        </Modal.Body>
+        <Modal.Footer>
+          <Button
+            variant="danger"
+            onClick={() => {
+              setShowOverwriteConfirm(false);
+              launchWholeDatasetPrediction();
+            }}
+          >
+            Predict
+          </Button>
+          <Button variant="secondary" onClick={() => setShowOverwriteConfirm(false)}>
+            Cancel
+          </Button>
+        </Modal.Footer>
+      </Modal>
     </div>
   );
 };

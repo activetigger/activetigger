@@ -65,6 +65,21 @@ class Features:
     - add a column dataset to separate train, valid, test
     """
 
+    # Feature kinds whose values can be reproduced from their stored parameters
+    # (as opposed to `imported` / `prediction`, which come from external data
+    # and cannot be recomputed by this project).
+    COMPUTABLE_KINDS: frozenset[str] = frozenset(
+        {
+            "sentence-embeddings",
+            "bert-embeddings",
+            "fasttext",
+            "dfm",
+            "regex",
+            "image-embeddings",
+            "multimodal-embeddings",
+        }
+    )
+
     project_slug: str
     data: Data
     path_model: Path
@@ -887,6 +902,80 @@ class Features:
             )
             return None
         raise ValueError("Error in the process")
+
+    def build_compute_specs(
+        self, names: list[str], data: Series
+    ) -> list[dict[str, Any]]:
+        """
+        Assemble the `specs` list consumed by `PredictWithFeatures` for a
+        set of existing feature names.
+
+        For each name:
+          - checks it exists in the project,
+          - checks its `kind` is in `COMPUTABLE_KINDS` (imported /
+            prediction features can't be recomputed → `ValueError`),
+          - retrieves the stored parameters from the DB,
+          - attaches the shared `data` series (texts or image paths),
+          - resolves the trained-model path for `bert-embeddings` so
+            the task stays independent of `LanguageModels`.
+        """
+        if not names:
+            raise ValueError("No features to compute")
+
+        specs: list[dict[str, Any]] = []
+        for name in names:
+            if not self.exists(name):
+                raise ValueError(f"Feature '{name}' does not exist")
+            feature = self.projects_service.get_feature(self.project_slug, name)
+            if feature is None:
+                raise ValueError(f"Feature '{name}' has no DB record")
+            kind = feature.kind
+            if kind not in self.COMPUTABLE_KINDS:
+                raise ValueError(f"Feature '{name}' has kind '{kind}' which is not computable")
+
+            spec: dict[str, Any] = {
+                "name": name,
+                "kind": kind,
+                "parameters": feature.parameters,
+                "data": data,
+            }
+            if kind == "bert-embeddings":
+                if self.languagemodels is None:
+                    raise ValueError(
+                        f"Feature '{name}' needs a LanguageModels manager to resolve its model path"
+                    )
+                spec["model_path"] = self.languagemodels.path.joinpath(
+                    feature.parameters["model"]
+                )
+            specs.append(spec)
+        return specs
+
+    def concat_split_column(self, column: str, dataset: str = "all") -> Series:
+        """
+        Concatenate `column` across the requested split(s).
+
+        `dataset` ∈ {"train", "valid", "test", "all"}. "all" returns
+        train + (valid) + (test) in the natural order — the same layout
+        used by the features parquet file.
+        """
+        if dataset == "train":
+            return self.data.train[column]
+        if dataset == "valid":
+            if self.data.valid is None:
+                raise ValueError("No valid dataset available")
+            return self.data.valid[column]
+        if dataset == "test":
+            if self.data.test is None:
+                raise ValueError("No test dataset available")
+            return self.data.test[column]
+        if dataset != "all":
+            raise ValueError(f"Unknown dataset '{dataset}'")
+        parts: list[Series] = [self.data.train[column]]
+        if self.data.valid is not None:
+            parts.append(self.data.valid[column])
+        if self.data.test is not None:
+            parts.append(self.data.test[column])
+        return pd.concat(parts)
 
     def computing_progress(self, unique_id: str) -> str | None:
         """
