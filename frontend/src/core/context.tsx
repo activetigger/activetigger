@@ -21,6 +21,7 @@ export type AppContextValue = {
   currentProject?: ProjectStateModel | null; // current project selected
   currentScheme?: string; // scheme selected to annotate
   currentProjection?: ProjectionOutModel;
+  currentProjectionName?: string | null;
   labelColorMapping?: { [key: string]: string };
   activeModel?: ActiveModel | null;
   freqRefreshQuickModel: number; // freq to refresh active learning model

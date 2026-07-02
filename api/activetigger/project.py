@@ -976,20 +976,20 @@ class Project:
 
         # filter with a frame (projection coordinates)
         if next.frame and len(next.frame) == 4:
-            if username in self.projections.available:
-                if self.projections.available[username].data is not None:
-                    projection = self.projections.available[username].data
-                    f_frame = (
-                        (projection[0] > next.frame[0])
-                        & (projection[0] < next.frame[1])
-                        & (projection[1] > next.frame[2])
-                        & (projection[1] < next.frame[3])
-                    )
-                    f = f & f_frame
-                else:
-                    raise ValueError("No vizualisation data available")
-            else:
-                raise ValueError("No vizualisation available")
+            if not next.projection_name:
+                raise ValueError("No active projection selected for frame selection")
+            if next.projection_name not in self.projections.available:
+                raise ValueError(f"Projection '{next.projection_name}' does not exist")
+            projection_data = self.projections.available[next.projection_name].data
+            if projection_data is None:
+                raise ValueError("No vizualisation data available")
+            f_frame = (
+                (projection_data[0] > next.frame[0])
+                & (projection_data[0] < next.frame[1])
+                & (projection_data[1] > next.frame[2])
+                & (projection_data[1] < next.frame[3])
+            )
+            f = f & f_frame
 
         # test if there is at least one element available
         if f.sum() == 0:
@@ -1320,14 +1320,14 @@ class Project:
 
     def get_projection(
         self,
-        username: str,
+        projection_name: str,
         scheme: str,
         active_model: ActiveModel | None = None,
     ) -> ProjectionOutModel | None:
         """
-        Get projection if computed
+        Get a projection by name if computed
         """
-        projection = self.projections.get(username)
+        projection = self.projections.get(projection_name)
         if projection is None:
             return None
         # get annotations - use copy to avoid mutating stored projection data

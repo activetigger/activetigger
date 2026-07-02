@@ -490,6 +490,9 @@ export function getRandomName(prefix: string) {
   if (prefix === 'imagemodel') {
     random_name = ('image-' + sample(animalsList)) as string;
   }
+  if (prefix === 'projection') {
+    random_name = ('projection-' + sample(animalsList)) as string;
+  }
   if (prefix === 'Scheme') {
     random_name = 'New_Scheme';
   }

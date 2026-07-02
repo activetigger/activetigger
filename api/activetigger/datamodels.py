@@ -199,6 +199,7 @@ class NextInModel(BaseModel):
     on_users: list[str] | None = None
     label_prob: str | None = None
     frame: list[Any] | None = None
+    projection_name: str | None = None
     history: list[str] = []
     filter: str | None = None
     dataset: str = "train"
@@ -467,6 +468,7 @@ class ProjectionParametersModel(BaseModel):
     Request projection
     """
 
+    name: str
     method: str
     features: list
     parameters: dict[str, float | str | bool | list] = {}
@@ -476,6 +478,7 @@ class ProjectionParametersModel(BaseModel):
 class ProjectionDataModel(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
     id: str
+    name: str = ""
     data: DataFrame
     parameters: ProjectionParametersModel
 

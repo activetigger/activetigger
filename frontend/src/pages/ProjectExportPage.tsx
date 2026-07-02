@@ -1,5 +1,5 @@
 import cx from 'classnames';
-import { FC, useState } from 'react';
+import { FC, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
 import PulseLoader from 'react-spinners/PulseLoader';
@@ -16,7 +16,6 @@ import {
 } from '../core/api';
 import { downloadSummaryJson, downloadSummaryMd, ProjectSummary } from '../core/projectSummary';
 import { useAppContext } from '../core/useAppContext';
-import { useAuth } from '../core/useAuth';
 
 /**
  * Component to display the export page
@@ -28,7 +27,6 @@ export const ProjectExportPage: FC = () => {
   const {
     appContext: { currentProject: project, currentScheme },
   } = useAppContext();
-  const { authenticatedUser } = useAuth();
 
   const [format, setFormat] = useState<string>('csv');
   const [features, setFeatures] = useState<string[]>([]);
@@ -62,10 +60,20 @@ export const ProjectExportPage: FC = () => {
   };
 
   const availableFeatures = project?.features.available ? project?.features.available : [];
-  const availableProjection =
-    authenticatedUser?.username && project?.projections.available[authenticatedUser?.username]
-      ? project?.projections.available[authenticatedUser?.username]
-      : null;
+  const availableProjectionNames = Object.keys(project?.projections.available || {});
+  const [selectedProjectionForExport, setSelectedProjectionForExport] = useState<string | null>(
+    null,
+  );
+  useEffect(() => {
+    if (!selectedProjectionForExport && availableProjectionNames.length > 0) {
+      setSelectedProjectionForExport(availableProjectionNames[0]);
+    } else if (
+      selectedProjectionForExport &&
+      !availableProjectionNames.includes(selectedProjectionForExport)
+    ) {
+      setSelectedProjectionForExport(availableProjectionNames[0] || null);
+    }
+  }, [availableProjectionNames, selectedProjectionForExport]);
   const availableModels =
     currentScheme && modelAvailabilityMap?.[currentScheme]
       ? Object.keys(modelAvailabilityMap[currentScheme])
@@ -198,13 +206,31 @@ export const ProjectExportPage: FC = () => {
                 >
                   Export selected features
                 </button>
-                {availableProjection && (
-                  <button
-                    className="btn-secondary-action"
-                    onClick={() => getProjectionFile(format)}
-                  >
-                    Export current projection
-                  </button>
+                {availableProjectionNames.length > 0 && (
+                  <div className="d-flex align-items-center gap-2">
+                    <select
+                      className="form-select form-select-sm"
+                      style={{ maxWidth: 220 }}
+                      value={selectedProjectionForExport || ''}
+                      onChange={(e) => setSelectedProjectionForExport(e.target.value)}
+                    >
+                      {availableProjectionNames.map((name) => (
+                        <option key={name} value={name}>
+                          {name}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      className="btn-secondary-action"
+                      disabled={!selectedProjectionForExport}
+                      onClick={() => {
+                        if (selectedProjectionForExport)
+                          getProjectionFile(format, selectedProjectionForExport);
+                      }}
+                    >
+                      Export projection
+                    </button>
+                  </div>
                 )}
               </div>
             </section>

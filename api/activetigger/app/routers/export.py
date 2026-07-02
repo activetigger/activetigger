@@ -78,14 +78,15 @@ def export_projection(
     project: Annotated[Project, Depends(get_project)],
     current_user: Annotated[UserInDBModel, Depends(verified_user)],
     format: str = Query(),
+    projection_name: str = Query(),
 ) -> FileResponse:
     """
-    Export features
+    Export a named projection
     """
     test_rights(ProjectAction.EXPORT_DATA, current_user.username, project.name)
     try:
         return project.projections.export(
-            user_name=current_user.username,
+            name=projection_name,
             format=format,
             col_id=project.params.col_id,
             id_mapping=project.data.index,

@@ -51,11 +51,12 @@ def get_projection(
     project: Annotated[Project, Depends(get_project)],
     current_user: Annotated[UserInDBModel, Depends(verified_user)],
     scheme: str = Query(),
+    projection_name: str = Query(),
     model_name: str | None = Query(None),
     model_type: str | None = Query(None),
 ) -> ProjectionOutModel | None:
     """
-    Get projection if computed
+    Get a named projection if computed
     """
     test_rights(ProjectAction.GET, current_user.username, project.name)
     try:
@@ -63,7 +64,7 @@ def get_projection(
         if model_name is not None and model_type is not None:
             active_model = ActiveModel(type=model_type, value=model_name, label=model_name)
         return project.get_projection(
-            username=current_user.username, scheme=scheme, active_model=active_model
+            projection_name=projection_name, scheme=scheme, active_model=active_model
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -76,11 +77,12 @@ def compute_projection(
     projection: ProjectionParametersModel,
 ) -> WaitingModel:
     """
-    Start projection computation using futures
-    Dedicated process, end with a file on the project
-    projection__user.parquet
+    Start projection computation using futures.
+    Multiple named projections can coexist per project.
     """
     test_rights(ProjectAction.UPDATE, current_user.username, project.name)
+    if not projection.name:
+        raise HTTPException(status_code=400, detail="A projection name is required")
     if len(projection.features) == 0:
         raise HTTPException(status_code=400, detail="No features available")
     try:
@@ -94,12 +96,34 @@ def compute_projection(
         )
         get_orchestrator().log_action(
             current_user.username,
-            f"COMPUTE PROJECTION: {projection.method}",
+            f"COMPUTE PROJECTION: {projection.name} ({projection.method})",
             project.project_slug,
         )
-        return WaitingModel(detail=f"Projection {projection.method} is computing")
+        return WaitingModel(detail=f"Projection {projection.name} is computing")
     except Exception as e:
         print(e)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/elements/projection/delete", dependencies=[Depends(verified_user)])
+def delete_projection(
+    project: Annotated[Project, Depends(get_project)],
+    current_user: Annotated[UserInDBModel, Depends(verified_user)],
+    projection_name: str = Query(),
+) -> WaitingModel:
+    """
+    Delete a named projection.
+    """
+    test_rights(ProjectAction.UPDATE, current_user.username, project.name)
+    try:
+        project.projections.delete(projection_name)
+        get_orchestrator().log_action(
+            current_user.username,
+            f"DELETE PROJECTION: {projection_name}",
+            project.project_slug,
+        )
+        return WaitingModel(detail=f"Projection {projection_name} deleted")
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 

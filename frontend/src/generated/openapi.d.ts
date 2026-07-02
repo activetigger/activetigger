@@ -631,6 +631,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/elements/projection/delete': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Delete Projection
+     * @description Delete a named projection.
+     */
+    post: operations['delete_projection_elements_projection_delete_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/elements/table': {
     parameters: {
       query?: never;
@@ -3555,6 +3575,8 @@ export interface components {
       label_prob?: string | null;
       /** Frame */
       frame?: unknown[] | null;
+      /** Projection Name */
+      projection_name?: string | null;
       /**
        * History
        * @default []
@@ -3977,6 +3999,8 @@ export interface components {
      * @description Request projection
      */
     ProjectionParametersModel: {
+      /** Name */
+      name: string;
       /** Method */
       method: string;
       /** Features */
@@ -5317,6 +5341,7 @@ export interface operations {
     parameters: {
       query: {
         scheme: string;
+        projection_name: string;
         model_name?: string | null;
         model_type?: string | null;
         project_slug: string;
@@ -5361,6 +5386,38 @@ export interface operations {
         'application/json': components['schemas']['ProjectionParametersModel'];
       };
     };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WaitingModel'];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
+  delete_projection_elements_projection_delete_post: {
+    parameters: {
+      query: {
+        projection_name: string;
+        project_slug: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
     responses: {
       /** @description Successful Response */
       200: {
@@ -6270,6 +6327,7 @@ export interface operations {
     parameters: {
       query: {
         format: string;
+        projection_name: string;
         project_slug: string;
       };
       header?: never;
