@@ -631,6 +631,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/elements/projection/delete': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Delete Projection
+     * @description Delete a named projection.
+     */
+    post: operations['delete_projection_elements_projection_delete_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/elements/table': {
     parameters: {
       query?: never;
@@ -964,6 +984,35 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/features/import': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Import Feature
+     * @description Import a pre-computed feature from an uploaded file.
+     *
+     *     The file must contain one row per project element (matched on id_external).
+     *     Either:
+     *       - `columns` is None/empty: every non-id column becomes part of the feature
+     *         (treated as one multi-column embedding).
+     *       - `columns` is a comma-separated list: only those columns are used.
+     *
+     *     All target columns must be numeric. The stored feature is named
+     *     `imported-<name>`.
+     */
+    post: operations['import_feature_features_import_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/features/available': {
     parameters: {
       query?: never;
@@ -1068,8 +1117,6 @@ export interface paths {
     /**
      * Export Summary
      * @description Lab-notebook style snapshot of the project (JSON).
-     *
-     *     Frontend renders a Markdown view from this same payload.
      */
     get: operations['export_summary_export_summary_get'];
     put?: never;
@@ -1129,7 +1176,9 @@ export interface paths {
     };
     /**
      * Export Prediction
-     * @description Export annotations
+     * @description Export prediction file (parquet/csv/xlsx). `kind` selects which manager
+     *     owns the file: BERT classifications under `languagemodels`, NER span
+     *     predictions under `nermodels`.
      */
     get: operations['export_prediction_export_prediction_get'];
     put?: never;
@@ -1538,6 +1587,67 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/models/ner/train': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Post Ner
+     * @description Fine-tune a token-classification model on a span scheme.
+     *     Experimental feature — gated in the frontend by developmentMode.
+     */
+    post: operations['post_ner_models_ner_train_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/models/ner/delete': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Delete Ner
+     * @description Delete a trained NER model and any features derived from it.
+     */
+    post: operations['delete_ner_models_ner_delete_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/models/ner/rename': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Rename Ner
+     * @description Rename a NER model.
+     */
+    post: operations['rename_ner_models_ner_rename_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/models/image/rename': {
     parameters: {
       query?: never;
@@ -1591,6 +1701,26 @@ export interface paths {
      * @description Query an Ollama server endpoint to list available models
      */
     get: operations['list_ollama_models_generate_ollama_models_get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/generate/openai/models': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Openai Compatible Models
+     * @description Query an OpenAI-compatible endpoint to list available models via /v1/models
+     */
+    get: operations['list_openai_compatible_models_generate_openai_models_get'];
     put?: never;
     post?: never;
     delete?: never;
@@ -2491,6 +2621,17 @@ export interface components {
       topics: components['schemas']['TopicsOutModel'][];
       parameters: components['schemas']['BertopicOutModelParameters'];
     };
+    /** Body_import_feature_features_import_post */
+    Body_import_feature_features_import_post: {
+      /** Name */
+      name: string;
+      /** Id Column */
+      id_column: string;
+      /** File */
+      file: string;
+      /** Columns */
+      columns?: string | null;
+    };
     /** Body_login_for_access_token_token_post */
     Body_login_for_access_token_token_post: {
       /** Grant Type */
@@ -2583,10 +2724,12 @@ export interface components {
     };
     /**
      * ComputeBertopicModel
-     * @description Parameters for computing BERTopic model. BERTopic reuses embeddings
-     *     from an existing project feature (existing_feature). Embeddings are
-     *     never recomputed here — to add a new embedding model use the
-     *     project's Features page.
+     * @description Parameters for computing BERTopic model.
+     *
+     *     BERTopic reuses embeddings from an existing project feature
+     *     (existing_feature must reference a sentence-embeddings feature).
+     *     Embeddings are never recomputed from this endpoint — to add a new
+     *     embedding model, use the project's Features page.
      */
     ComputeBertopicModel: {
       /** Language */
@@ -2625,6 +2768,21 @@ export interface components {
        */
       umap_n_components: number;
       /**
+       * Embedding Kind
+       * @default sentence_transformers
+       */
+      embedding_kind: string;
+      /**
+       * Embedding Model
+       * @default all-MiniLM-L6-v2
+       */
+      embedding_model: string | null;
+      /**
+       * Embedding Batch Size
+       * @default 32
+       */
+      embedding_batch_size: number;
+      /**
        * Filter Text Length
        * @default 50
        */
@@ -2634,10 +2792,10 @@ export interface components {
        * @default train
        */
       input_datasets: string;
-      /** Name */
-      name: string;
       /** Existing Feature */
       existing_feature?: string | null;
+      /** Name */
+      name: string;
       /** Scheme */
       scheme: string;
     };
@@ -2709,10 +2867,11 @@ export interface components {
       filename: string;
       /** Csv */
       csv: string;
-      /** Col Label */
-      col_label?: string | null;
-      /** Scheme */
-      scheme?: string | null;
+      /**
+       * Cols Label
+       * @default []
+       */
+      cols_label: string[];
     };
     /**
      * EvalSetImageModel
@@ -2880,6 +3039,11 @@ export interface components {
        * @default 1
        */
       n_batch: number;
+      /**
+       * N Workers
+       * @default 1
+       */
+      n_workers: number;
       /** Scheme */
       scheme: string;
       /**
@@ -3326,6 +3490,53 @@ export interface components {
       std: number;
     };
     /**
+     * NerModelModel
+     * @description Request to fine-tune a token-classification (NER) model for a span scheme.
+     *     Drops classification-only fields (loss, dichotomize, class_balance,
+     *     class_min_freq, exclude_labels) — BIO tagging makes them moot.
+     */
+    NerModelModel: {
+      /** Project Slug */
+      project_slug: string;
+      /** Scheme */
+      scheme: string;
+      /** Name */
+      name: string;
+      /** Base Model */
+      base_model: string;
+      params: components['schemas']['LMParametersModel'];
+      /**
+       * Test Size
+       * @default 0.2
+       */
+      test_size: number;
+      /**
+       * Max Length
+       * @default 512
+       */
+      max_length: number;
+    };
+    /** NerModelsProjectStateModel */
+    NerModelsProjectStateModel: {
+      /** Options */
+      options: {
+        [key: string]: unknown;
+      }[];
+      /** Available */
+      available: {
+        [key: string]:
+          | {
+              [key: string]: components['schemas']['LMStatusModel'] | undefined;
+            }
+          | undefined;
+      };
+      /** Training */
+      training: {
+        [key: string]: components['schemas']['LMComputingOutModel'] | undefined;
+      };
+      base_parameters: components['schemas']['LMParametersModel'];
+    };
+    /**
      * NewUserModel
      * @description New user definition
      */
@@ -3364,6 +3575,8 @@ export interface components {
       label_prob?: string | null;
       /** Frame */
       frame?: unknown[] | null;
+      /** Projection Name */
+      projection_name?: string | null;
       /**
        * History
        * @default []
@@ -3715,6 +3928,7 @@ export interface components {
       quickmodel: components['schemas']['QuickModelsProjectStateModel'];
       languagemodels: components['schemas']['LanguageModelsProjectStateModel'];
       imagemodels?: components['schemas']['ImageModelsProjectStateModel'] | null;
+      nermodels?: components['schemas']['NerModelsProjectStateModel'] | null;
       projections: components['schemas']['ProjectionsProjectStateModel'];
       generations: components['schemas']['GenerationsProjectStateModel'];
       bertopic: components['schemas']['BertopicProjectStateModel'];
@@ -3785,6 +3999,8 @@ export interface components {
      * @description Request projection
      */
     ProjectionParametersModel: {
+      /** Name */
+      name: string;
       /** Method */
       method: string;
       /** Features */
@@ -5125,6 +5341,7 @@ export interface operations {
     parameters: {
       query: {
         scheme: string;
+        projection_name: string;
         model_name?: string | null;
         model_type?: string | null;
         project_slug: string;
@@ -5169,6 +5386,38 @@ export interface operations {
         'application/json': components['schemas']['ProjectionParametersModel'];
       };
     };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WaitingModel'];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
+  delete_projection_elements_projection_delete_post: {
+    parameters: {
+      query: {
+        projection_name: string;
+        project_slug: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
     responses: {
       /** @description Successful Response */
       200: {
@@ -5805,6 +6054,41 @@ export interface operations {
       };
     };
   };
+  import_feature_features_import_post: {
+    parameters: {
+      query: {
+        project_slug: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'multipart/form-data': components['schemas']['Body_import_feature_features_import_post'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
   get_feature_info_features_available_get: {
     parameters: {
       query: {
@@ -6043,6 +6327,7 @@ export interface operations {
     parameters: {
       query: {
         format: string;
+        projection_name: string;
         project_slug: string;
       };
       header?: never;
@@ -6077,6 +6362,7 @@ export interface operations {
         format: string;
         name: string;
         dataset?: string;
+        kind?: string;
         project_slug: string;
       };
       header?: never;
@@ -6736,6 +7022,106 @@ export interface operations {
       };
     };
   };
+  post_ner_models_ner_train_post: {
+    parameters: {
+      query: {
+        project_slug: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['NerModelModel'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
+  delete_ner_models_ner_delete_post: {
+    parameters: {
+      query: {
+        ner_name: string;
+        project_slug: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
+  rename_ner_models_ner_rename_post: {
+    parameters: {
+      query: {
+        former_name: string;
+        new_name: string;
+        project_slug: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
   rename_image_models_image_rename_post: {
     parameters: {
       query: {
@@ -6793,6 +7179,40 @@ export interface operations {
     parameters: {
       query: {
         endpoint: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            [key: string]: string | undefined;
+          }[];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
+  list_openai_compatible_models_generate_openai_models_get: {
+    parameters: {
+      query: {
+        endpoint: string;
+        credentials?: string | null;
       };
       header?: never;
       path?: never;

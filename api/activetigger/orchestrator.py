@@ -171,7 +171,7 @@ class Orchestrator:
         Start the project creation
         """
         project_slug = self.check_project_name(project.project_name)
-        if project_slug in ["new", "demo", "logs"]:
+        if project_slug in ["new", "logs"]:
             raise Exception("This project name is not valid - reserved word")
         self.project_creation_ongoing[project_slug] = Project(
             project_slug,
@@ -504,11 +504,16 @@ class Orchestrator:
                 "generation",
                 "feature",
                 "bertopic",
+                "train_quickmodel",
+                "predict_quickmodel",
+                "predict_with_features",
             ]
         if kind == "bert":
             kind = ["train_bert", "predict_bert"]
         if kind == "image":
             kind = ["train_image", "predict_image"]
+        if kind in ("quick", "quickmodel"):
+            kind = ["train_quickmodel", "predict_quickmodel", "predict_with_features"]
         if kind is None:
             kind = "all"
         if isinstance(kind, str) and kind != "all":

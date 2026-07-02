@@ -339,7 +339,12 @@ class Project:
                 getattr(config, "file_bert_models", None),
             )
         self.quickmodels = QuickModels(
-            project_slug, self.params.dir, self.queue, self.computing, self.db_manager
+            project_slug,
+            self.params.dir,
+            self.queue,
+            self.computing,
+            self.db_manager,
+            features=self.features,
         )
         self.generations = Generations(
             self.db_manager, cast(list[GenerationComputing], self.computing)
@@ -632,8 +637,14 @@ class Project:
         if isinstance(evalset, EvalSetDataModel):
             if not evalset.cols_text:
                 raise Exception("No text column selected for the evalset")
-            if evalset.col_label == "":
-                evalset.col_label = None
+            # each selected label column must match an existing scheme name
+            available_schemes = self.schemes.available()
+            unknown = [c for c in evalset.cols_label if c not in available_schemes]
+            if unknown:
+                raise Exception(
+                    "Selected label column(s) do not match any existing scheme: "
+                    + ", ".join(unknown)
+                )
         else:
             if evalset.col_label == "":
                 evalset.col_label = None
@@ -655,8 +666,10 @@ class Project:
             if add_eval_task:
                 raise Exception("this set is already being added")
 
-        scheme_labels = self.schemes.available()[evalset.scheme].labels if evalset.scheme else None
         if isinstance(evalset, EvalSetImageModel):
+            scheme_labels = (
+                self.schemes.available()[evalset.scheme].labels if evalset.scheme else None
+            )
             task = AddEvalSetImage(
                 dataset=dataset,
                 evalset=evalset,
@@ -667,6 +680,8 @@ class Project:
                 scheme=scheme_labels,
             )
         else:
+            available_schemes = self.schemes.available()
+            schemes_labels = {name: available_schemes[name].labels for name in evalset.cols_label}
             task = AddEvalSet(
                 dataset=dataset,
                 evalset=evalset,
@@ -674,7 +689,7 @@ class Project:
                 username=username,
                 index=self.data.get_full_id().index,
                 project_slug=project_slug,
-                scheme=scheme_labels,
+                schemes=schemes_labels,
             )
 
         unique_id = self.queue.add_task(
@@ -966,20 +981,20 @@ class Project:
 
         # filter with a frame (projection coordinates)
         if next.frame and len(next.frame) == 4:
-            if username in self.projections.available:
-                if self.projections.available[username].data is not None:
-                    projection = self.projections.available[username].data
-                    f_frame = (
-                        (projection[0] > next.frame[0])
-                        & (projection[0] < next.frame[1])
-                        & (projection[1] > next.frame[2])
-                        & (projection[1] < next.frame[3])
-                    )
-                    f = f & f_frame
-                else:
-                    raise ValueError("No vizualisation data available")
-            else:
-                raise ValueError("No vizualisation available")
+            if not next.projection_name:
+                raise ValueError("No active projection selected for frame selection")
+            if next.projection_name not in self.projections.available:
+                raise ValueError(f"Projection '{next.projection_name}' does not exist")
+            projection_data = self.projections.available[next.projection_name].data
+            if projection_data is None:
+                raise ValueError("No vizualisation data available")
+            f_frame = (
+                (projection_data[0] > next.frame[0])
+                & (projection_data[0] < next.frame[1])
+                & (projection_data[1] > next.frame[2])
+                & (projection_data[1] < next.frame[3])
+            )
+            f = f & f_frame
 
         # test if there is at least one element available
         if f.sum() == 0:
@@ -1310,14 +1325,14 @@ class Project:
 
     def get_projection(
         self,
-        username: str,
+        projection_name: str,
         scheme: str,
         active_model: ActiveModel | None = None,
     ) -> ProjectionOutModel | None:
         """
-        Get projection if computed
+        Get a projection by name if computed
         """
-        projection = self.projections.get(username)
+        projection = self.projections.get(projection_name)
         if projection is None:
             return None
         # get annotations - use copy to avoid mutating stored projection data
@@ -2576,6 +2591,9 @@ class Project:
                         self.monitoring.close_process(sm.unique_id, events)
                     case "predict_quickmodel":
                         sm = cast(QuickModelComputing, e)
+                    case "predict_with_features":
+                        pf = cast(QuickModelComputing, e)
+                        self.quickmodels.mark_prediction_done(pf.name, pf.dataset)
                     case "feature":
                         feature_computation = cast(FeatureComputing, e)
                         self.features.add(
@@ -2621,10 +2639,22 @@ class Project:
                     case kind if kind.startswith("add_evalset_"):
                         e = cast(ProcessComputing, e)
                         if results is not None and len(results) > 0:
-                            if results[0][4]:  # elements list is non-empty
-                                self.db_manager.projects_service.add_annotations(*results[0])
+                            (
+                                eval_dataset,
+                                user_name,
+                                proj_slug,
+                                schemes_elements,
+                            ) = results[0]
+                            for scheme_name, elements in schemes_elements:
+                                if elements:
+                                    self.db_manager.projects_service.add_annotations(
+                                        eval_dataset,
+                                        user_name,
+                                        proj_slug,
+                                        scheme_name,
+                                        elements,
+                                    )
                             # update params with the new evalset
-                            eval_dataset = results[0][0]
                             setattr(self.params, eval_dataset, getattr(results[1], eval_dataset))
                             setattr(
                                 self.params,

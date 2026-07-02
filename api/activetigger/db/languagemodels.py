@@ -45,6 +45,8 @@ class ModelsService:
                 path=m.path,
                 parameters=m.parameters,
                 time=str(m.time),
+                predicted_all=bool((m.parameters or {}).get("predicted_all", False)),
+                predicted_external=bool((m.parameters or {}).get("predicted_external", False)),
             )
             for m in models
         ]

@@ -10,6 +10,7 @@ import { ModelEvaluation } from '../components/ModelEvaluation';
 import { ModelManagement } from '../components/ModelManagement';
 import { ModelPredict } from '../components/ModelPredict';
 import { ModelsPillDisplay } from '../components/ModelsPillDisplay';
+import { QuickModelPredict } from '../components/QuickModelPredict';
 import { useAppContext } from '../core/useAppContext';
 
 /**
@@ -26,6 +27,7 @@ export const ProjectModelPage: FC = () => {
 
   const [activeKey, setActiveKey] = useState<string>('models');
   const [predictionModel, setPredictionModel] = useState<string | null>(null);
+  const [quickPredictionModel, setQuickPredictionModel] = useState<string | null>(null);
   const isImage = currentProject?.params?.kind === 'image';
 
   // For span schemes the Prediction tab targets the trained NER models;
@@ -43,6 +45,11 @@ export const ProjectModelPage: FC = () => {
       : []
     : currentScheme && currentProject?.languagemodels.available[currentScheme]
       ? Object.keys(currentProject.languagemodels.available[currentScheme])
+      : [];
+
+  const availableQuickModels =
+    !isNer && currentScheme && currentProject?.quickmodel?.available?.[currentScheme]
+      ? currentProject.quickmodel.available[currentScheme].map((m) => m.name)
       : [];
 
   return (
@@ -80,11 +87,37 @@ export const ProjectModelPage: FC = () => {
               {!isImage && (
                 <Tab eventKey="prediction" title="Prediction">
                   <div className="explanations ms-3">
-                    Run a trained {isNer ? 'NER' : 'BERT'} model on the full dataset or on an
-                    external dataset. Once a prediction is computed, you can download it from the
-                    Export page.
+                    Run a trained model on the full dataset or on an external dataset. Once a
+                    prediction is computed, you can download it from the Export page.
                   </div>
-                  <div className="ms-3 mt-3">
+                  {!isNer && (
+                    <div className="ms-3 mt-3">
+                      <h5 className="subsection">Quickmodels</h5>
+                      <div className="explanations">
+                        Run a quickmodel on the whole dataset (features are recomputed on the fly).
+                      </div>
+                      {availableQuickModels.length === 0 ? (
+                        <div className="text-muted small">
+                          No quickmodel available for the current scheme. Train one in the Training
+                          tab first.
+                        </div>
+                      ) : (
+                        <>
+                          <div className="text-muted small mb-2">Select a quickmodel</div>
+                          <ModelsPillDisplay
+                            modelNames={availableQuickModels}
+                            currentModelName={quickPredictionModel}
+                            setCurrentModelName={setQuickPredictionModel}
+                          />
+                          {quickPredictionModel && (
+                            <QuickModelPredict currentModel={quickPredictionModel} />
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
+                  <div className="ms-3 mt-4">
+                    <h5 className="subsection">{isNer ? 'NER models' : 'BERT models'}</h5>
                     {availableBertModels.length === 0 ? (
                       <div className="text-muted small">
                         No {isNer ? 'NER' : 'BERT'} model available for the current scheme. Train

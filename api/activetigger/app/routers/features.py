@@ -1,11 +1,15 @@
+import io
 from typing import Annotated
 
 import pandas as pd
 from fastapi import (
     APIRouter,
     Depends,
+    File,
+    Form,
     HTTPException,
     Query,
+    UploadFile,
 )
 
 from activetigger.app.dependencies import (
@@ -23,6 +27,8 @@ from activetigger.orchestrator import get_orchestrator
 from activetigger.project import Project
 
 router = APIRouter(tags=["features"])
+
+_ALLOWED_IMPORT_EXTENSIONS = (".csv", ".parquet", ".xlsx")
 
 
 @router.post("/features/add", dependencies=[Depends(verified_user)])
@@ -99,6 +105,69 @@ def reset_features(
         get_orchestrator().log_action(current_user.username, "RESET FEATURES", project.name)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/features/import", dependencies=[Depends(verified_user)])
+def import_feature(
+    project: Annotated[Project, Depends(get_project)],
+    current_user: Annotated[UserInDBModel, Depends(verified_user)],
+    name: str = Form(...),
+    id_column: str = Form(...),
+    file: UploadFile = File(...),
+    columns: str | None = Form(None),
+) -> None:
+    """
+    Import a pre-computed feature from an uploaded file.
+
+    All target columns must be numeric. The stored feature is named
+    `imported-<name>`.
+    """
+    test_rights(ProjectAction.ADD, current_user.username, project.name)
+
+    filename = file.filename or ""
+    lower = filename.lower()
+    if not lower.endswith(_ALLOWED_IMPORT_EXTENSIONS):
+        allowed = ", ".join(ext.lstrip(".") for ext in _ALLOWED_IMPORT_EXTENSIONS)
+        raise HTTPException(status_code=400, detail=f"Only {allowed} files are allowed")
+
+    try:
+        raw = file.file.read()
+        buf = io.BytesIO(raw)
+        if lower.endswith(".csv"):
+            df = pd.read_csv(buf, sep=None, engine="python")
+        elif lower.endswith(".parquet"):
+            df = pd.read_parquet(buf)
+        else:
+            df = pd.read_excel(buf)
+
+        selected = (
+            [c.strip() for c in columns.split(",") if c.strip()]
+            if columns is not None and columns.strip() != ""
+            else None
+        )
+
+        full_name = project.features.import_from_dataframe(
+            name=name,
+            id_column=id_column,
+            df=df,
+            columns=selected,
+            username=current_user.username,
+            source_file=filename,
+        )
+        get_orchestrator().log_action(
+            current_user.username, f"IMPORT FEATURE: {full_name}", project.name
+        )
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        try:
+            file.file.close()
+        except Exception:
+            pass
 
 
 @router.get("/features/available", dependencies=[Depends(verified_user)])

@@ -35,18 +35,16 @@ class AddEvalSet(BaseTask):
         username: str,
         project_slug: str,
         index: pd.Index,
-        scheme=None,
+        schemes: dict[str, list[str]] | None = None,
     ):
-
         super().__init__()
         self.evalset = evalset
         self.project_model = project
         self.dataset = dataset
         self.username = username
         self.index_all = index
-        self.scheme = scheme
+        self.schemes = schemes or {}
         self.project_slug = project_slug
-        self.elements = []
         # self.Kind = f"{self.Kind}_{dataset}"
 
     def __stop_process_opportunity(self):
@@ -56,7 +54,9 @@ class AddEvalSet(BaseTask):
                 self.project_model.dir.joinpath(file_name).unlink(missing_ok=True)
             raise Exception("Adding evaluation set process interrupted by user")
 
-    def __call__(self) -> Tuple[Tuple[str, str, str, str | None, list], ProjectBaseModel]:
+    def __call__(
+        self,
+    ) -> Tuple[Tuple[str, str, str, list[Tuple[str, list]]], ProjectBaseModel]:
         try:
             self.__stop_process_opportunity()
             csv_buffer = io.StringIO(self.evalset.csv)
@@ -75,30 +75,26 @@ class AddEvalSet(BaseTask):
             # added a check if DF is empty to avoid errors
             if len(df) == 0:
                 raise Exception("Your valid set is empty")
-            # print("df cols", df.columns, flush=True)
             # stop Process
             self.__stop_process_opportunity()
+
+            # capture per-scheme label series before we mutate df (aligned by row position)
+            scheme_label_series: dict[str, pd.Series] = {}
+            for scheme_col in self.evalset.cols_label:
+                if scheme_col not in df.columns:
+                    raise Exception(
+                        f"Label column '{scheme_col}' is not present in the uploaded file"
+                    )
+                scheme_label_series[scheme_col] = df[scheme_col].apply(
+                    lambda x: None if pd.isna(x) else str(x)
+                )
+
             # create text column
             df["text"] = concat_text_columns(df, self.evalset.cols_text)
             if self.evalset.col_id == "row_number":
                 df["id"] = [str(i) for i in range(len(df))]
-                if self.evalset.col_label:
-                    if "label" in df.columns and self.evalset.col_label != "label":
-                        df = df.rename(columns={"label": "_label_"})
-                    df = df.rename(columns={self.evalset.col_label: "label"})
-                    df["label"] = df["label"].apply(lambda x: None if pd.isna(x) else str(x))
-            elif not self.evalset.col_label:
-                df = df.rename(columns={self.evalset.col_id: "id"})
             else:
-                if "label" in df.columns and self.evalset.col_label != "label":
-                    df = df.rename(columns={"label": "_label_"})
-                df = df.rename(
-                    columns={
-                        self.evalset.col_id: "id",
-                        self.evalset.col_label: "label",
-                    }
-                )
-                df["label"] = df["label"].apply(lambda x: None if pd.isna(x) else str(x))
+                df = df.rename(columns={self.evalset.col_id: "id"})
             # deal with non-unique id
             df["id_external"] = df["id"].apply(str)
             if not ((df["id"].astype(str).apply(slugify)).nunique() == len(df)):
@@ -118,12 +114,14 @@ class AddEvalSet(BaseTask):
                 )
             df["id"] = df["id"].apply(lambda x: f"imported-{str(x)}")
             df = df.set_index("id")
-            # verify label columns be fore writing to parquet
-            if self.evalset.col_label and self.evalset.scheme:
-                # Check the label columns if they match the scheme or raise error
-                for label in df["label"].dropna().unique():
-                    if self.scheme and label not in self.scheme:
-                        raise Exception(f"Label {label} not in the scheme {self.evalset.scheme}")
+            # verify label columns before writing to parquet: each label must exist in its scheme
+            for scheme_name, labels_series in scheme_label_series.items():
+                allowed = self.schemes.get(scheme_name)
+                if not allowed:
+                    continue
+                for label in labels_series.dropna().unique():
+                    if label not in allowed:
+                        raise Exception(f"Label {label} not in the scheme {scheme_name}")
             # stop Process
             self.__stop_process_opportunity()
 
@@ -141,20 +139,22 @@ class AddEvalSet(BaseTask):
             # stop Process
             self.__stop_process_opportunity()
 
-            # once written to parquet→import labels if specified + scheme // check if the labels are in the scheme
-            current_dataset = getattr(self.project_model, self.dataset)
-            if current_dataset:
-                if self.evalset.col_label and self.evalset.scheme:
-                    self.elements = [
-                        {"element_id": element_id, "annotation": label, "comment": ""}
-                        for element_id, label in df["label"].dropna().items()
-                    ]
+            # build per-scheme annotation elements, aligned row-by-row with the new ids
+            schemes_elements: list[Tuple[str, list]] = []
+            new_ids = list(df.index)
+            for scheme_name, labels_series in scheme_label_series.items():
+                elements = [
+                    {"element_id": element_id, "annotation": str(label), "comment": ""}
+                    for element_id, label in zip(new_ids, labels_series.tolist())
+                    if label is not None and pd.notna(label)
+                ]
+                schemes_elements.append((scheme_name, elements))
+
             args = (
                 self.dataset,
                 self.username,
                 self.project_slug,
-                self.evalset.scheme,
-                self.elements,
+                schemes_elements,
             )
             return args, self.project_model
         except Exception as e:
@@ -194,7 +194,6 @@ class AddEvalSetImage(BaseTask):
         self.index_all = index
         self.scheme = scheme
         self.project_slug = project_slug
-        self.elements: list[dict] = []
 
     def __stop_process_opportunity(self, images_dir: Path | None = None) -> None:
         if self.event is not None and self.event.is_set():
@@ -205,7 +204,9 @@ class AddEvalSetImage(BaseTask):
                 self.project_model.dir.joinpath(file_name).unlink(missing_ok=True)
             raise Exception("Adding evaluation set process interrupted by user")
 
-    def __call__(self) -> Tuple[Tuple[str, str, str, str | None, list], ProjectBaseModel]:
+    def __call__(
+        self,
+    ) -> Tuple[Tuple[str, str, str, list[Tuple[str, list]]], ProjectBaseModel]:
         try:
             if self.dataset not in ("test", "valid"):
                 raise Exception("Dataset should be test or valid")
@@ -366,11 +367,13 @@ class AddEvalSetImage(BaseTask):
             setattr(self.project_model, self.dataset, True)
             setattr(self.project_model, f"n_{self.dataset}", len(df))
 
-            if "label" in df.columns:
-                self.elements = [
+            schemes_elements: list[Tuple[str, list]] = []
+            if "label" in df.columns and self.evalset.scheme:
+                elements = [
                     {"element_id": element_id, "annotation": label, "comment": ""}
                     for element_id, label in df["label"].dropna().items()
                 ]
+                schemes_elements.append((self.evalset.scheme, elements))
 
             # cleanup: uploaded inputs are not needed after extraction
             try:
@@ -387,8 +390,7 @@ class AddEvalSetImage(BaseTask):
                 self.dataset,
                 self.username,
                 self.project_slug,
-                self.evalset.scheme,
-                self.elements,
+                schemes_elements,
             )
             return args, self.project_model
         except Exception as e:

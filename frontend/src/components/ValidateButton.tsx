@@ -17,6 +17,7 @@ interface validateButtonsProps {
   style?: CSSProperties;
   batchInput?: boolean;
   existingPrediction?: boolean;
+  dataset?: string;
 }
 
 export const ValidateButtons: FC<validateButtonsProps> = ({
@@ -28,6 +29,7 @@ export const ValidateButtons: FC<validateButtonsProps> = ({
   style,
   batchInput = true,
   existingPrediction = false,
+  dataset = 'annotable',
 }) => {
   const {
     appContext: { currentScheme, isComputing },
@@ -40,7 +42,7 @@ export const ValidateButtons: FC<validateButtonsProps> = ({
 
   const launchPrediction = () => {
     setAppContext((prev) => ({ ...prev, isComputing: true }));
-    computeModelPrediction(modelName || '', 'annotable', currentScheme || '', kind);
+    computeModelPrediction(modelName || '', dataset, currentScheme || '', kind);
   };
 
   return (

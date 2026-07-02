@@ -65,6 +65,21 @@ class Features:
     - add a column dataset to separate train, valid, test
     """
 
+    # Feature kinds whose values can be reproduced from their stored parameters
+    # (as opposed to `imported` / `prediction`, which come from external data
+    # and cannot be recomputed by this project).
+    COMPUTABLE_KINDS: frozenset[str] = frozenset(
+        {
+            "sentence-embeddings",
+            "bert-embeddings",
+            "fasttext",
+            "dfm",
+            "regex",
+            "image-embeddings",
+            "multimodal-embeddings",
+        }
+    )
+
     project_slug: str
     data: Data
     path_model: Path
@@ -278,6 +293,92 @@ class Features:
             except Exception as ex:
                 errors.append(f"Error in adding prediction : {str(ex)}")
         return errors
+
+    def import_from_dataframe(
+        self,
+        *,
+        name: str,
+        id_column: str,
+        df: DataFrame,
+        columns: list[str] | None,
+        username: str,
+        source_file: str = "",
+    ) -> str:
+        """
+        Import a pre-computed feature from a user-provided DataFrame.
+
+        Matches rows on `id_external`. All target columns must be numeric.
+        If `columns` is None or empty, every non-id column is imported as one
+        multi-column embedding; otherwise only the selected columns are used.
+
+        The stored feature is named `imported-<name>`. Returns that name.
+
+        Raises ValueError on any validation issue.
+        """
+        clean_name = (name or "").strip()
+        if not clean_name:
+            raise ValueError("Feature name is required")
+        if not id_column:
+            raise ValueError("ID column is required")
+        if id_column not in df.columns:
+            raise ValueError(f"ID column '{id_column}' not found in file")
+
+        if columns:
+            mode = "select"
+            target = [c for c in columns if c and c != id_column]
+            missing_cols = [c for c in target if c not in df.columns]
+            if missing_cols:
+                raise ValueError(f"Columns not found in file: {missing_cols}")
+        else:
+            mode = "embedding"
+            target = [c for c in df.columns if c != id_column]
+
+        if not target:
+            raise ValueError("No feature columns to import")
+
+        non_numeric = [c for c in target if not pd.api.types.is_numeric_dtype(df[c])]
+        if non_numeric:
+            raise ValueError(f"Non-numeric columns cannot be imported as features: {non_numeric}")
+
+        ids = df[id_column].astype(str)
+        if ids.duplicated().any():
+            dups = ids[ids.duplicated()].unique().tolist()
+            raise ValueError(f"Duplicate values in ID column (e.g. {dups[:5]})")
+
+        uploaded = df[target].copy()
+        uploaded.index = ids
+        uploaded.index.name = None
+
+        project_ids = self.data.index["id_external"].astype(str)
+        uploaded_ids = set(uploaded.index)
+        missing = [i for i in project_ids if i not in uploaded_ids]
+        if missing:
+            raise ValueError(
+                f"{len(missing)} project rows are missing from the file (e.g. {missing[:5]})"
+            )
+
+        aligned = uploaded.loc[pd.Index(project_ids)]
+        aligned.index = self.data.index.index
+
+        full_name = f"imported-{clean_name}"
+        parameters: dict[str, Any] = {
+            "id_column": id_column,
+            "source_file": source_file,
+            "mode": mode,
+        }
+        if mode == "embedding":
+            parameters["embedding_size"] = len(target)
+        else:
+            parameters["columns"] = target
+
+        self.add(
+            name=full_name,
+            kind="imported",
+            username=username,
+            parameters=parameters,
+            new_content=aligned,
+        )
+        return full_name
 
     def add(
         self,
@@ -801,6 +902,80 @@ class Features:
             )
             return None
         raise ValueError("Error in the process")
+
+    def build_compute_specs(
+        self, names: list[str], data: Series
+    ) -> list[dict[str, Any]]:
+        """
+        Assemble the `specs` list consumed by `PredictWithFeatures` for a
+        set of existing feature names.
+
+        For each name:
+          - checks it exists in the project,
+          - checks its `kind` is in `COMPUTABLE_KINDS` (imported /
+            prediction features can't be recomputed → `ValueError`),
+          - retrieves the stored parameters from the DB,
+          - attaches the shared `data` series (texts or image paths),
+          - resolves the trained-model path for `bert-embeddings` so
+            the task stays independent of `LanguageModels`.
+        """
+        if not names:
+            raise ValueError("No features to compute")
+
+        specs: list[dict[str, Any]] = []
+        for name in names:
+            if not self.exists(name):
+                raise ValueError(f"Feature '{name}' does not exist")
+            feature = self.projects_service.get_feature(self.project_slug, name)
+            if feature is None:
+                raise ValueError(f"Feature '{name}' has no DB record")
+            kind = feature.kind
+            if kind not in self.COMPUTABLE_KINDS:
+                raise ValueError(f"Feature '{name}' has kind '{kind}' which is not computable")
+
+            spec: dict[str, Any] = {
+                "name": name,
+                "kind": kind,
+                "parameters": feature.parameters,
+                "data": data,
+            }
+            if kind == "bert-embeddings":
+                if self.languagemodels is None:
+                    raise ValueError(
+                        f"Feature '{name}' needs a LanguageModels manager to resolve its model path"
+                    )
+                spec["model_path"] = self.languagemodels.path.joinpath(
+                    feature.parameters["model"]
+                )
+            specs.append(spec)
+        return specs
+
+    def concat_split_column(self, column: str, dataset: str = "all") -> Series:
+        """
+        Concatenate `column` across the requested split(s).
+
+        `dataset` ∈ {"train", "valid", "test", "all"}. "all" returns
+        train + (valid) + (test) in the natural order — the same layout
+        used by the features parquet file.
+        """
+        if dataset == "train":
+            return self.data.train[column]
+        if dataset == "valid":
+            if self.data.valid is None:
+                raise ValueError("No valid dataset available")
+            return self.data.valid[column]
+        if dataset == "test":
+            if self.data.test is None:
+                raise ValueError("No test dataset available")
+            return self.data.test[column]
+        if dataset != "all":
+            raise ValueError(f"Unknown dataset '{dataset}'")
+        parts: list[Series] = [self.data.train[column]]
+        if self.data.valid is not None:
+            parts.append(self.data.valid[column])
+        if self.data.test is not None:
+            parts.append(self.data.test[column])
+        return pd.concat(parts)
 
     def computing_progress(self, unique_id: str) -> str | None:
         """

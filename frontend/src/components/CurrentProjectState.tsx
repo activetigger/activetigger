@@ -62,8 +62,8 @@ export const CurrentProjectState: FC = () => {
           Object.values(project.features.training).length > 0
         : false;
     setAppContext((prev) => {
-      if (!isEqual(prev.currentProject, project)) {
-        return { ...prev, currentProject: project, isComputing };
+      if (!isEqual(prev.currentProject, projectExt)) {
+        return { ...prev, currentProject: projectExt, isComputing };
       }
       if (prev.isComputing !== isComputing) return { ...prev, isComputing };
       return prev;

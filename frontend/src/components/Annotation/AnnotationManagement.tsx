@@ -45,6 +45,7 @@ export const AnnotationManagement: FC = () => {
     history,
     selectionHistory,
     phase,
+    currentProjectionName,
   } = appContext;
 
   const navigate = useNavigate();
@@ -105,6 +106,7 @@ export const AnnotationManagement: FC = () => {
   const { getNextElementId } = useGetNextElementId(
     projectName || null,
     currentScheme || null,
+    currentProjectionName || null,
     selectionConfig,
     historyIds,
     effectivePhase,

@@ -4,18 +4,25 @@ import { Controller, SubmitHandler, useForm } from 'react-hook-form';
 import Select from 'react-select';
 
 import chroma from 'chroma-js';
+import cx from 'classnames';
 import { Modal } from 'react-bootstrap';
 import { FaPlusCircle } from 'react-icons/fa';
 import { FaGear } from 'react-icons/fa6';
 import { ModelParametersTab } from '../components/ModelParametersTab';
-import { useAddAnnotation, useGetProjectionData, useUpdateProjection } from '../core/api';
+import {
+  useAddAnnotation,
+  useDeleteProjection,
+  useGetProjectionData,
+  useUpdateProjection,
+} from '../core/api';
 import { useNotifications } from '../core/notifications';
 import { useAppContext } from '../core/useAppContext';
-import { useAuth } from '../core/useAuth';
+import { getRandomName } from '../core/utils';
 import { ProjectionParametersModel } from '../types';
 import { MulticlassInput } from './Annotation/MulticlassInput';
 import { MultilabelInput } from './Annotation/MultilabelInput';
 import { ButtonNewFeature } from './ButtonNewFeature';
+import { ModelsPillDisplay } from './ModelsPillDisplay';
 import { ProjectionExplorer } from './ProjectionExplorer';
 import { StopProcessButton } from './StopProcessButton';
 
@@ -39,6 +46,7 @@ export const ProjectionManagement: FC<ProjectionManagementProps> = ({
     appContext: {
       currentProject: project,
       currentProjection,
+      currentProjectionName,
       isComputing,
       labelColorMapping,
       activeModel,
@@ -47,14 +55,54 @@ export const ProjectionManagement: FC<ProjectionManagementProps> = ({
   } = useAppContext();
   const { notify } = useNotifications();
 
-  const { authenticatedUser } = useAuth();
+  // available projections state from server (name -> id)
+  const availableProjections = useMemo(() => project?.projections, [project?.projections]);
+  const availableNames = useMemo(
+    () => Object.keys(availableProjections?.available || {}),
+    [availableProjections?.available],
+  );
+
+  // sync currentProjectionName with what actually exists on the server
+  useEffect(() => {
+    // pick a default if none selected
+    if (!currentProjectionName && availableNames.length > 0) {
+      setAppContext((prev) => ({ ...prev, currentProjectionName: availableNames[0] }));
+      return;
+    }
+    // drop selection if the projection no longer exists
+    if (currentProjectionName && !availableNames.includes(currentProjectionName)) {
+      setAppContext((prev) => ({
+        ...prev,
+        currentProjectionName: availableNames[0] || null,
+        currentProjection: undefined,
+      }));
+    }
+  }, [availableNames, currentProjectionName, setAppContext]);
 
   // fetch projection data with the API (null if no model)
   const { projectionData, reFetchProjectionData } = useGetProjectionData(
     projectName,
     currentScheme,
+    currentProjectionName || null,
     activeModel || null,
   );
+
+  const setCurrentProjectionName = useCallback(
+    (nameOrUpdater: React.SetStateAction<string | null>) => {
+      setAppContext((prev) => {
+        const next =
+          typeof nameOrUpdater === 'function'
+            ? (nameOrUpdater as (v: string | null) => string | null)(
+                prev.currentProjectionName || null,
+              )
+            : nameOrUpdater;
+        return { ...prev, currentProjectionName: next, currentProjection: undefined };
+      });
+    },
+    [setAppContext],
+  );
+
+  const deleteProjection = useDeleteProjection(projectName);
 
   // states for dynamic interactions
   const [forceRefresh, setForceRefresh] = useState<boolean>(false);
@@ -72,28 +120,27 @@ export const ProjectionManagement: FC<ProjectionManagementProps> = ({
     return uniqueLabels.map((_, i) => baseColors[i % baseColors.length]);
   }, [uniqueLabels, baseColors]);
 
-  // form management
-  const availableProjections = useMemo(() => project?.projections, [project?.projections]);
-
-  const { register, handleSubmit, watch, control, reset } = useForm<ProjectionParametersModel>({
-    defaultValues: {
-      method: 'umap',
-      parameters: {
-        //common
-        n_components: 2,
-        // T-SNE
-        perplexity: 30,
-        learning_rate: 'auto',
-        init: 'random',
-        // UMAP
-        metric: 'cosine',
-        n_neighbors: 15,
-        min_dist: 0.1,
+  const { register, handleSubmit, watch, control, reset, setValue } =
+    useForm<ProjectionParametersModel>({
+      defaultValues: {
+        name: getRandomName('projection'),
+        method: 'umap',
+        parameters: {
+          //common
+          n_components: 2,
+          // T-SNE
+          perplexity: 30,
+          learning_rate: 'auto',
+          init: 'random',
+          // UMAP
+          metric: 'cosine',
+          n_neighbors: 15,
+          min_dist: 0.1,
+        },
+        // Normalize
+        normalize_features: false,
       },
-      // Normalize
-      normalize_features: false,
-    },
-  });
+    });
   const selectedMethod = watch('method'); // state for the model selected to modify parameters
 
   // available features
@@ -106,6 +153,17 @@ export const ProjectionManagement: FC<ProjectionManagementProps> = ({
   const onSubmit: SubmitHandler<ProjectionParametersModel> = async (formData) => {
     // fromData has all fields whatever the selected method
 
+    // validate the name
+    const name = formData.name?.trim();
+    if (!name) {
+      notify({ type: 'error', message: 'Please provide a name for the projection' });
+      return;
+    }
+    if (availableNames.includes(name)) {
+      notify({ type: 'error', message: `A projection named "${name}" already exists` });
+      return;
+    }
+
     // discard unrelevant fields depending on selected method
     const relevantParams =
       selectedMethod === 'tsne'
@@ -114,13 +172,15 @@ export const ProjectionManagement: FC<ProjectionManagementProps> = ({
           ? ['n_neighbors', 'min_dist', 'n_components']
           : [];
     const params = pick(formData.parameters, relevantParams);
-    const data = { ...formData, params };
+    const data = { ...formData, name, parameters: params };
     const watchedFeatures = watch('features');
     if (watchedFeatures.length == 0) {
       notify({ type: 'error', message: 'Select at least one feature' });
       return;
     }
     await updateProjection(data);
+    // pre-select the new projection so it becomes active as soon as computed
+    setCurrentProjectionName(name);
     reset();
     setShowComputeNewProjection(false);
   };
@@ -138,38 +198,37 @@ export const ProjectionManagement: FC<ProjectionManagementProps> = ({
     }
   }, [colormap, projectionData, setAppContext, uniqueLabels]);
 
-  // manage projection refresh (could be AMELIORATED)
+  // sync current projection in context with the fetched data
   useEffect(() => {
-    // case a first projection is added
-    if (
-      authenticatedUser &&
-      !currentProjection &&
-      availableProjections?.available[authenticatedUser?.username]
-    ) {
-      reFetchProjectionData();
-      setAppContext((prev) => ({ ...prev, currentProjection: projectionData || undefined }));
+    if (!currentProjectionName) return;
+
+    // no projection currently in context — pick up the fetched data
+    if (!currentProjection && projectionData) {
+      setAppContext((prev) => ({ ...prev, currentProjection: projectionData }));
+      return;
     }
 
-    // case if the projection changed (the available projection in the server is different from the one in the app state)
-    if (
-      authenticatedUser &&
-      currentProjection &&
-      currentProjection.status != availableProjections?.available[authenticatedUser?.username]
-    ) {
+    // switch: server reports a different id for the selected name
+    const expectedId = availableProjections?.available[currentProjectionName];
+    if (currentProjection && expectedId !== undefined && currentProjection.status !== expectedId) {
       reFetchProjectionData();
-      setAppContext((prev) => ({ ...prev, currentProjection: projectionData || undefined }));
+      if (projectionData) {
+        setAppContext((prev) => ({ ...prev, currentProjection: projectionData }));
+      }
     }
 
-    // After annotating on the fly, force refresh so that the visualisation matches the most recent
-    if (authenticatedUser && currentProjection && forceRefresh) {
+    // after annotating, force refresh so the viz stays in sync
+    if (currentProjection && forceRefresh) {
       reFetchProjectionData();
-      setAppContext((prev) => ({ ...prev, currentProjection: projectionData || undefined }));
+      if (projectionData) {
+        setAppContext((prev) => ({ ...prev, currentProjection: projectionData }));
+      }
       setForceRefresh(false);
     }
   }, [
     availableProjections?.available,
-    authenticatedUser,
     currentProjection,
+    currentProjectionName,
     reFetchProjectionData,
     projectionData,
     setAppContext,
@@ -214,28 +273,48 @@ export const ProjectionManagement: FC<ProjectionManagementProps> = ({
     [addAnnotation, notify],
   );
 
+  const trainingEntries = Object.entries(availableProjections?.training || {});
+
   return (
     <div className="explore-container">
-      <div>
-        {!isComputing ? (
-          <div>
+      <div className="d-flex my-2 flex-wrap align-items-center" style={{ gap: 8 }}>
+        <ModelsPillDisplay
+          modelNames={availableNames}
+          currentModelName={currentProjectionName || null}
+          setCurrentModelName={setCurrentProjectionName}
+          deleteModelFunction={deleteProjection}
+        >
+          {!isComputing ? (
             <button
-              onClick={() => setShowComputeNewProjection(true)}
-              className="btn-primary-action mb-4"
+              onClick={() => {
+                setValue('name', getRandomName('projection'));
+                setShowComputeNewProjection(true);
+              }}
+              className="model-pill"
+              id="create-new-projection"
             >
-              <FaPlusCircle size={20} className="me-1" /> Compute new projection
+              <FaPlusCircle size={20} /> Compute new projection
             </button>
-          </div>
-        ) : (
-          <StopProcessButton projectSlug={projectName} />
-        )}
+          ) : (
+            <StopProcessButton projectSlug={projectName} />
+          )}
+        </ModelsPillDisplay>
         {projectionData && labelColorMapping && (
           <button className="btn-secondary-action" onClick={() => setShowParameters(true)}>
-            <FaGear size={18} />
-            Parameters
+            <FaGear size={18} /> Parameters
           </button>
         )}
       </div>
+      {trainingEntries.length > 0 && (
+        <div className="small text-muted mb-2">
+          Computing:{' '}
+          {trainingEntries.map(([name, method]) => (
+            <span key={name} className={cx('badge', 'bg-warning', 'text-dark', 'me-1')}>
+              {name} ({method})
+            </span>
+          ))}
+        </div>
+      )}
       {projectionData && labelColorMapping && (
         <ProjectionExplorer
           projectName={projectName}
@@ -291,7 +370,14 @@ export const ProjectionManagement: FC<ProjectionManagementProps> = ({
         </Modal.Header>
         <Modal.Body>
           <form onSubmit={handleSubmit(onSubmit)}>
-            {' '}
+            <label htmlFor="projection-name">Name</label>
+            <input
+              id="projection-name"
+              type="text"
+              placeholder="e.g. umap-sbert"
+              {...register('name', { required: true })}
+              className="form-control mb-2"
+            />
             <label htmlFor="features">Select features</label>
             <div style={{ flex: '1 1 auto' }}>
               <Controller

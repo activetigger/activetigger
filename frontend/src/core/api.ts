@@ -772,6 +772,52 @@ export function useResetFeatures(projectSlug: string | null) {
 }
 
 /**
+ * Import a pre-computed feature from a file.
+ * Uploads the file with column-mapping form fields as multipart/form-data.
+ */
+export function useImportFeature() {
+  const { notify } = useNotifications();
+  const { authenticatedUser } = useAuth();
+  const [progression, setProgression] = useState<{ loaded?: number; total?: number }>({});
+
+  const importFeature = useCallback(
+    async (
+      projectSlug: string,
+      params: { file: File; name: string; idColumn: string; columns?: string[] | null },
+    ) => {
+      const URL = config.api.url.replace(/\/$/, '');
+      const headers = getAuthHeaders(authenticatedUser)?.headers;
+      try {
+        await axios.postForm(
+          `${URL}/features/import`,
+          {
+            file: params.file,
+            name: params.name,
+            id_column: params.idColumn,
+            columns: params.columns && params.columns.length ? params.columns.join(',') : '',
+          },
+          {
+            params: { project_slug: projectSlug },
+            headers,
+            onUploadProgress: ({ loaded, total }) => setProgression({ loaded, total }),
+          },
+        );
+        notify({ type: 'success', message: 'Feature imported.' });
+        return true;
+      } catch (error: unknown) {
+        notify({ type: 'error', message: formatApiError(error) });
+        return false;
+      } finally {
+        setProgression({});
+      }
+    },
+    [notify, authenticatedUser],
+  );
+
+  return { importFeature, progression };
+}
+
+/**
  * Get feature info
  */
 export function useGetFeatureInfo(project_slug: string | null, project: unknown) {
@@ -806,6 +852,7 @@ export function useGetFeatureInfo(project_slug: string | null, project: unknown)
 export function useGetNextElementId(
   projectSlug: string | null,
   currentScheme: string | null,
+  projectionName: string | null | undefined,
   selectionConfig: SelectionConfig,
   history: string[],
   phase: string,
@@ -825,6 +872,7 @@ export function useGetNextElementId(
         filter: selectionConfig.filter,
         history: history,
         frame: selectionConfig.frameSelection ? selectionConfig.frame : null, // only if frame option selected
+        projection_name: selectionConfig.frameSelection ? projectionName : null,
         dataset: phase,
         label_prob: selectionConfig.label_prob,
         on_users: selectionConfig.users,
@@ -850,7 +898,16 @@ export function useGetNextElementId(
       notify({ type: 'error', message: 'Select a project and scheme.' });
       return null;
     }
-  }, [projectSlug, currentScheme, notify, history, selectionConfig, phase, activeModel]);
+  }, [
+    projectSlug,
+    currentScheme,
+    projectionName,
+    notify,
+    history,
+    selectionConfig,
+    phase,
+    activeModel,
+  ]);
 
   return { getNextElementId };
 }
@@ -1512,7 +1569,6 @@ export function useTrainNerModel(projectSlug: string | null, scheme: string | nu
   const trainNerModel = useCallback(
     async (dataForm: newNerModel) => {
       if (projectSlug && scheme && dataForm) {
-        // @ts-expect-error openapi client not yet regenerated for /models/ner/*
         const res = await api.POST('/models/ner/train', {
           params: { query: { project_slug: projectSlug } },
           body: {
@@ -1540,7 +1596,6 @@ export function useDeleteNerModel(projectSlug: string | null) {
   const deleteNerModel = useCallback(
     async (model_name: string) => {
       if (projectSlug) {
-        // @ts-expect-error openapi client not yet regenerated for /models/ner/*
         const res = await api.POST('/models/ner/delete', {
           params: { query: { project_slug: projectSlug, ner_name: model_name } },
         });
@@ -1562,7 +1617,6 @@ export function useRenameNerModel(projectSlug: string | null) {
   const renameNerModel = useCallback(
     async (former_model_name: string, new_model_name: string) => {
       if (projectSlug) {
-        // @ts-expect-error openapi client not yet regenerated for /models/ner/*
         const res = await api.POST('/models/ner/rename', {
           params: {
             query: {
@@ -1776,12 +1830,13 @@ export function useGetFeaturesFile(projectSlug: string | null) {
 export function useGetProjectionFile(projectSlug: string | null) {
   const { notify } = useNotifications();
   const getProjectionFile = useCallback(
-    async (format: string) => {
-      if (projectSlug) {
+    async (format: string, projectionName: string) => {
+      if (projectSlug && projectionName) {
         const res = await api.GET('/export/projection', {
           params: {
             query: {
               project_slug: projectSlug,
+              projection_name: projectionName,
               format: format,
             },
           },
@@ -1790,7 +1845,7 @@ export function useGetProjectionFile(projectSlug: string | null) {
 
         if (!res.error) {
           notify({ type: 'success', message: 'Exporting the vizualisation.' });
-          saveAs(res.data, `projection_${projectSlug}.${format}`);
+          saveAs(res.data, `projection_${projectionName}.${format}`);
         }
         return true;
       }
@@ -2110,6 +2165,7 @@ export function useUpdateProjection(
             },
           },
           body: {
+            name: formData.name,
             method: formData.method,
             features: formData.features,
             parameters: formData.parameters,
@@ -2117,6 +2173,7 @@ export function useUpdateProjection(
           },
         });
         if (!res.error) notify({ type: 'warning', message: 'Computing visualization.' });
+        else notify({ type: 'error', message: 'Error computing visualization.' });
       }
       return true;
     },
@@ -2127,22 +2184,45 @@ export function useUpdateProjection(
 }
 
 /**
- * Get projection data
+ * Delete a named projection
+ */
+export function useDeleteProjection(projectSlug: string | null | undefined) {
+  const { notify } = useNotifications();
+  const deleteProjection = useCallback(
+    async (projectionName: string | null) => {
+      if (projectSlug && projectionName) {
+        const res = await api.POST('/elements/projection/delete', {
+          params: {
+            query: { project_slug: projectSlug, projection_name: projectionName },
+          },
+        });
+        if (!res.error) notify({ type: 'success', message: 'Projection deleted.' });
+      }
+    },
+    [projectSlug, notify],
+  );
+  return deleteProjection;
+}
+
+/**
+ * Get projection data for a named projection
  */
 export function useGetProjectionData(
   projectSlug: string | undefined | null,
   scheme: string | undefined | null,
+  projectionName: string | undefined | null,
   activeModel: ActiveModel | null,
 ) {
   const [fetchTrigger, setFetchTrigger] = useState<boolean>(false);
 
   const getProjectionData = useAsyncMemo(async () => {
-    if (scheme && projectSlug) {
+    if (scheme && projectSlug && projectionName) {
       const res = await api.GET('/elements/projection', {
         params: {
           query: {
             project_slug: projectSlug,
             scheme: scheme,
+            projection_name: projectionName,
             model_name: activeModel ? activeModel.value : null,
             model_type: activeModel ? activeModel.type : null,
           },
@@ -2154,7 +2234,7 @@ export function useGetProjectionData(
       }
     }
     return null;
-  }, [fetchTrigger, scheme]);
+  }, [fetchTrigger, scheme, projectionName]);
 
   const reFetch = useCallback(() => setFetchTrigger((f) => !f), []);
 
