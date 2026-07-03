@@ -60,7 +60,7 @@ export const FeaturesManagement: FC = () => {
       >
         <ButtonNewFeature
           projectSlug={projectName || ''}
-          className={cx('model-pill ', isComputing ? 'disabled' : '')}
+          className={cx('model-pill create-pill', isComputing && 'disabled')}
         />
       </ModelsPillDisplay>
       {/* Display computing features */}

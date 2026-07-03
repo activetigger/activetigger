@@ -170,16 +170,19 @@
     color: white;
   }
 
-  .model-pill#create-new,
-  .model-pill#create-new-image,
+  // "Create new …" pills across the app: quick model, BERT model, NER
+  // model, image model, projection, generation model, etc. All share the
+  // primary-action orange look; opt in by adding the `create-pill` class.
+  // `#compute-validate` is the (non-create) validate action pill which
+  // reuses the same style, kept as-is for backward compat.
+  .model-pill.create-pill,
   .model-pill#compute-validate {
     font-size: normal;
     background-color: $primary;
     color: white;
     font-weight: bold;
   }
-  .model-pill.disabled#create-new,
-  .model-pill.disabled#create-new-image,
+  .model-pill.disabled.create-pill,
   .model-pill.disabled#compute-validate {
     pointer-events: none;
     opacity: 0.8;

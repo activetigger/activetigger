@@ -218,9 +218,7 @@ class QuickModels:
             "exclude_labels": exclude_labels,
             "test_size": test_size,
         }
-        unique_id = self.queue.add_task(
-            "train_quickmodel", project_slug, TrainMLMultiClass(**args)
-        )
+        unique_id = self.queue.add_task("train_quickmodel", project_slug, TrainMLMultiClass(**args))
         del args
 
         req = QuickModelComputing(
@@ -443,15 +441,16 @@ class QuickModels:
         out_path = self.path.joinpath(name).joinpath(out_name)
         if not out_path.exists() or out_path.stat().st_mtime < path.stat().st_mtime:
             df = pd.read_parquet(path)
-            if col_id is not None:
-                target_col = col_id.removeprefix("dataset_")
-                if "id_external" in df.columns:
-                    df.rename(columns={"id_external": target_col}, inplace=True)
-                    df = df[[target_col] + [c for c in df.columns if c != target_col]]
+            target_col = col_id.removeprefix("dataset_") if col_id else "id_external"
+            df = df.reset_index()
+            first_col = df.columns[0]
+            if first_col != target_col:
+                df.rename(columns={first_col: target_col}, inplace=True)
+            df = df[[target_col] + [c for c in df.columns if c != target_col]]
             if format == "csv":
-                df.to_csv(out_path, index=True)
+                df.to_csv(out_path, index=False)
             else:
-                df.to_excel(out_path, index=True)
+                df.to_excel(out_path, index=False)
 
         return FileResponse(path=out_path, filename=out_name)
 
@@ -686,12 +685,21 @@ class QuickModels:
     def _dataset_texts(self, dataset: str) -> pd.Series:
         """
         Assemble the input series consumed by feature computation for
-        the requested dataset. "all" reads from the source parquet
-        (path_data_all) so it covers rows outside train / valid / test.
+        the requested dataset.
+
+        For "all" we read `path_data_all` directly and index the series
+        by `id_external` so the saved prediction parquet carries a
+        meaningful row id (the CSV/xlsx exporter then promotes it to a
+        first-position column named after `col_id`, matching the shape
+        of the BERT prediction export).
         """
         assert self.features is not None
         if dataset == "all":
-            return self.features.get_column_raw("text", index="all")
+            df = pd.read_parquet(self.features.path_all, columns=["id_external", "text"])
+            series = df["text"]
+            series.index = df["id_external"].astype(str)
+            series.index.name = "id_external"
+            return series
         if dataset == "annotable":
             return self.features.concat_split_column("text", dataset="all")
         return self.features.concat_split_column("text", dataset=dataset)
