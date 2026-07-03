@@ -9,12 +9,12 @@ import { MdDriveFileRenameOutline } from 'react-icons/md';
 import { useParams } from 'react-router-dom';
 import { Tooltip } from 'react-tooltip';
 import {
-  useDeleteQuickModel,
   useDeleteImageModel,
+  useDeleteQuickModel,
   useGetQuickModel,
   useModelInformations,
-  useRenameQuickModel,
   useRenameImageModel,
+  useRenameQuickModel,
   useRetrainQuickModel,
 } from '../core/api';
 import { useNotifications } from '../core/notifications';
@@ -27,8 +27,8 @@ import { DisplayTrainingProcesses } from './DisplayTrainingProcesses';
 import { ModelParametersTab } from './ModelParametersTab';
 import { ModelsPillDisplay } from './ModelsPillDisplay';
 import { ValidateButtons } from './ValidateButton';
-import { QuickModelForm } from './forms/QuickModelForm';
 import { ImageModelCreationForm } from './forms/ImageModelCreationForm';
+import { QuickModelForm } from './forms/QuickModelForm';
 import { LossChart } from './vizualisation/lossChart';
 
 interface renameModel {
@@ -234,7 +234,7 @@ export const ImageModelManagement: FC = () => {
             setDisplayNewModel(true);
             setCurrentQuickModelName(null);
           }}
-          className={cx('model-pill ', isComputing ? 'disabled' : '')}
+          className={cx('model-pill create-pill', isComputing && 'disabled')}
           disabled={kindScheme === 'span'}
           id="create-new"
           style={kindScheme === 'span' ? { cursor: 'not-allowed' } : {}}
@@ -257,7 +257,7 @@ export const ImageModelManagement: FC = () => {
             setDisplayNewImageModel(true);
             setCurrentImageModel(null);
           }}
-          className={cx('model-pill ', isComputing ? 'disabled' : '')}
+          className={cx('model-pill create-pill', isComputing && 'disabled')}
           disabled={kindScheme === 'span'}
           id="create-new-image"
           style={kindScheme === 'span' ? { cursor: 'not-allowed' } : {}}

@@ -290,7 +290,7 @@ export const ProjectionManagement: FC<ProjectionManagementProps> = ({
                 setValue('name', getRandomName('projection'));
                 setShowComputeNewProjection(true);
               }}
-              className="model-pill"
+              className="model-pill create-pill"
               id="create-new-projection"
             >
               <FaPlusCircle size={20} /> Compute new projection

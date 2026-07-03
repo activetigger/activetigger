@@ -293,7 +293,11 @@ export const GenPage: FC = () => {
           setCurrentModelName={setCurrentModel}
           deleteModelFunction={deleteModel}
         >
-          <button onClick={() => setShowFormAddModel(true)} className="model-pill" id="create-new">
+          <button
+            onClick={() => setShowFormAddModel(true)}
+            className="model-pill create-pill"
+            id="create-new"
+          >
             <FaPlusCircle size={20} /> Add new model
           </button>
         </ModelsPillDisplay>

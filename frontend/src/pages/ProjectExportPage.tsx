@@ -16,6 +16,7 @@ import {
 } from '../core/api';
 import { downloadSummaryJson, downloadSummaryMd, ProjectSummary } from '../core/projectSummary';
 import { useAppContext } from '../core/useAppContext';
+import { sortDatesAsStrings } from '../core/utils';
 
 /**
  * Component to display the export page
@@ -79,14 +80,28 @@ export const ProjectExportPage: FC = () => {
       ? Object.keys(modelAvailabilityMap[currentScheme])
       : [];
 
-  const availableQuickModels =
+  // Keep the full model rows so we can read the `predicted_all` /
+  // `predicted_external` flags for the currently selected quickmodel
+  // (mirrors what the BERT/NER section does via LMStatusModel below).
+  const availableQuickModelRows =
     !isNer && currentScheme && project?.quickmodel?.available?.[currentScheme]
-      ? project.quickmodel.available[currentScheme].map((m) => m.name)
+      ? project.quickmodel.available[currentScheme]
+          .slice()
+          .sort((a, b) => sortDatesAsStrings(a?.time, b?.time, true))
       : [];
+  const availableQuickModels = availableQuickModelRows.map((m) => m.name);
   const [quickModel, setQuickModel] = useState<string | null>(null);
   const [quickPredictionLoading, setQuickPredictionLoading] = useState<'all' | 'external' | null>(
     null,
   );
+  // OpenAPI-generated ModelDescriptionModel hasn't been regenerated with
+  // the new predicted_all / predicted_external mirror fields yet; local
+  // widened type keeps TS happy without a full client regen.
+  const selectedQuickModelRow = availableQuickModelRows.find((m) => m.name === quickModel) as
+    | { predicted_all?: boolean; predicted_external?: boolean }
+    | undefined;
+  const availableQuickPredictionAll = Boolean(selectedQuickModelRow?.predicted_all);
+  const availableQuickPredictionExternal = Boolean(selectedQuickModelRow?.predicted_external);
 
   const downloadQuickPrediction = async (dataset: 'all' | 'external') => {
     if (!quickModel) return;
@@ -225,33 +240,38 @@ export const ProjectExportPage: FC = () => {
                 >
                   Export selected features
                 </button>
-                {availableProjectionNames.length > 0 && (
-                  <div className="d-flex align-items-center gap-2">
-                    <select
-                      className="form-select form-select-sm"
-                      style={{ maxWidth: 220 }}
-                      value={selectedProjectionForExport || ''}
-                      onChange={(e) => setSelectedProjectionForExport(e.target.value)}
-                    >
-                      {availableProjectionNames.map((name) => (
-                        <option key={name} value={name}>
-                          {name}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      className="btn-secondary-action"
-                      disabled={!selectedProjectionForExport}
-                      onClick={() => {
-                        if (selectedProjectionForExport)
-                          getProjectionFile(format, selectedProjectionForExport);
-                      }}
-                    >
-                      Export projection
-                    </button>
-                  </div>
-                )}
               </div>
+            </section>
+
+            <section className="mt-4">
+              <h5 className="fw-semibold">Visualization</h5>
+              <hr className="mt-1" />
+              {availableProjectionNames.length === 0 ? (
+                <div className="text-muted small">
+                  No projection available. Create one from the{' '}
+                  <Link to={`/projects/${projectName}/explore`}>Visualization tab</Link> in Explore
+                  first.
+                </div>
+              ) : (
+                <>
+                  <div className="text-muted small mb-2">Select a projection</div>
+                  <ModelsPillDisplay
+                    modelNames={availableProjectionNames}
+                    currentModelName={selectedProjectionForExport}
+                    setCurrentModelName={setSelectedProjectionForExport}
+                  />
+                  {selectedProjectionForExport && (
+                    <div className="d-flex flex-wrap gap-2 mt-3">
+                      <button
+                        className="btn-secondary-action"
+                        onClick={() => getProjectionFile(format, selectedProjectionForExport)}
+                      >
+                        Export projection
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
             </section>
 
             {!isNer && (
@@ -273,35 +293,43 @@ export const ProjectExportPage: FC = () => {
                   </>
                 )}
                 {quickModel && (
-                  <div className="d-flex flex-wrap gap-2 mt-3">
-                    <button
-                      className="btn-secondary-action"
-                      disabled={quickPredictionLoading !== null}
-                      onClick={() => downloadQuickPrediction('all')}
-                    >
-                      Export prediction complete dataset
-                      {quickPredictionLoading === 'all' && (
-                        <PulseLoader color="white" size={6} className="ms-2" />
-                      )}
-                    </button>
-                    <button
-                      className="btn-secondary-action"
-                      disabled={quickPredictionLoading !== null}
-                      onClick={() => downloadQuickPrediction('external')}
-                    >
-                      Export prediction external dataset
-                      {quickPredictionLoading === 'external' && (
-                        <PulseLoader color="white" size={6} className="ms-2" />
-                      )}
-                    </button>
-                  </div>
-                )}
-                {quickModel && (
-                  <div className="text-muted small mt-2">
-                    Run the prediction from the{' '}
-                    <Link to={`/projects/${projectName}/model/`}>Prediction tab</Link> first if the
-                    file is not available yet.
-                  </div>
+                  <>
+                    {!availableQuickPredictionAll && !availableQuickPredictionExternal && (
+                      <div className="alert alert-info mt-3 py-2 small mb-0" role="alert">
+                        No prediction available for this quickmodel. Run one from the{' '}
+                        <Link to={`/projects/${projectName}/model/`}>Prediction tab</Link> first to
+                        enable the export.
+                      </div>
+                    )}
+                    {(availableQuickPredictionAll || availableQuickPredictionExternal) && (
+                      <div className="d-flex flex-wrap gap-2 mt-3">
+                        {availableQuickPredictionAll && (
+                          <button
+                            className="btn-secondary-action"
+                            disabled={quickPredictionLoading !== null}
+                            onClick={() => downloadQuickPrediction('all')}
+                          >
+                            Export prediction complete dataset
+                            {quickPredictionLoading === 'all' && (
+                              <PulseLoader color="white" size={6} className="ms-2" />
+                            )}
+                          </button>
+                        )}
+                        {availableQuickPredictionExternal && (
+                          <button
+                            className="btn-secondary-action"
+                            disabled={quickPredictionLoading !== null}
+                            onClick={() => downloadQuickPrediction('external')}
+                          >
+                            Export prediction external dataset
+                            {quickPredictionLoading === 'external' && (
+                              <PulseLoader color="white" size={6} className="ms-2" />
+                            )}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </>
                 )}
               </section>
             )}

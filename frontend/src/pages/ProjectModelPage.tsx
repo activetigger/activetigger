@@ -12,6 +12,7 @@ import { ModelPredict } from '../components/ModelPredict';
 import { ModelsPillDisplay } from '../components/ModelsPillDisplay';
 import { QuickModelPredict } from '../components/QuickModelPredict';
 import { useAppContext } from '../core/useAppContext';
+import { sortDatesAsStrings } from '../core/utils';
 
 /**
  * Component to manage model training. Dispatches on project kind:
@@ -39,17 +40,25 @@ export const ProjectModelPage: FC = () => {
   const isNer = kindScheme === 'span';
   const predictKind = isNer ? 'ner' : 'bert';
 
-  const availableBertModels = isNer
-    ? currentScheme && currentProject?.nermodels?.available?.[currentScheme]
-      ? Object.keys(currentProject.nermodels.available[currentScheme])
-      : []
-    : currentScheme && currentProject?.languagemodels.available[currentScheme]
-      ? Object.keys(currentProject.languagemodels.available[currentScheme])
-      : [];
+  // Sort model names most-recent-first, matching the ordering used in the
+  // Training and Evaluation tabs (`sortDatesAsStrings(..., ..., true)`).
+  const bertModelsMap = isNer
+    ? currentScheme
+      ? currentProject?.nermodels?.available?.[currentScheme]
+      : undefined
+    : currentScheme
+      ? currentProject?.languagemodels?.available?.[currentScheme]
+      : undefined;
+  const availableBertModels = Object.values(bertModelsMap || {})
+    .sort((a, b) => sortDatesAsStrings(a?.time, b?.time, true))
+    .map((m) => (m ? m.name : ''));
 
   const availableQuickModels =
     !isNer && currentScheme && currentProject?.quickmodel?.available?.[currentScheme]
-      ? currentProject.quickmodel.available[currentScheme].map((m) => m.name)
+      ? currentProject.quickmodel.available[currentScheme]
+          .slice()
+          .sort((a, b) => sortDatesAsStrings(a?.time, b?.time, true))
+          .map((m) => m.name)
       : [];
 
   return (
@@ -92,18 +101,14 @@ export const ProjectModelPage: FC = () => {
                   </div>
                   {!isNer && (
                     <div className="ms-3 mt-3">
-                      <h5 className="subsection">Quickmodels</h5>
-                      <div className="explanations">
-                        Run a quickmodel on the whole dataset (features are recomputed on the fly).
-                      </div>
+                      <span className="fw-semibold text-muted small">Quick Models</span>
                       {availableQuickModels.length === 0 ? (
                         <div className="text-muted small">
-                          No quickmodel available for the current scheme. Train one in the Training
+                          No quick model available for the current scheme. Train one in the Training
                           tab first.
                         </div>
                       ) : (
                         <>
-                          <div className="text-muted small mb-2">Select a quickmodel</div>
                           <ModelsPillDisplay
                             modelNames={availableQuickModels}
                             currentModelName={quickPredictionModel}
@@ -117,7 +122,9 @@ export const ProjectModelPage: FC = () => {
                     </div>
                   )}
                   <div className="ms-3 mt-4">
-                    <h5 className="subsection">{isNer ? 'NER models' : 'BERT models'}</h5>
+                    <span className="fw-semibold text-muted small">
+                      {isNer ? 'NER Models' : 'BERT Models'}
+                    </span>
                     {availableBertModels.length === 0 ? (
                       <div className="text-muted small">
                         No {isNer ? 'NER' : 'BERT'} model available for the current scheme. Train
@@ -125,7 +132,6 @@ export const ProjectModelPage: FC = () => {
                       </div>
                     ) : (
                       <>
-                        <div className="text-muted small mb-2">Select a model</div>
                         <ModelsPillDisplay
                           modelNames={availableBertModels}
                           currentModelName={predictionModel}

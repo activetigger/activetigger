@@ -260,7 +260,7 @@ export const ModelManagement: FC = () => {
                 setDisplayNewModel(true);
                 setCurrentQuickModelName(null);
               }}
-              className={cx('model-pill ', isComputing ? 'disabled' : '')}
+              className={cx('model-pill create-pill', isComputing && 'disabled')}
               id="create-new"
             >
               <FaPlusCircle size={20} /> Create new quick model
@@ -287,7 +287,7 @@ export const ModelManagement: FC = () => {
                 setDisplayNewBertModel(true);
                 setCurrentBertModel(null);
               }}
-              className={cx('model-pill ', isComputing ? 'disabled' : '')}
+              className={cx('model-pill create-pill', isComputing && 'disabled')}
               id="create-new"
             >
               <FaPlusCircle size={20} /> Create new BERT model
@@ -316,7 +316,7 @@ export const ModelManagement: FC = () => {
                 setDisplayNewNerModel(true);
                 setCurrentBertModel(null);
               }}
-              className={cx('model-pill ', isComputing || !showNer ? 'disabled' : '')}
+              className={cx('model-pill create-pill', (isComputing || !showNer) && 'disabled')}
               disabled={!showNer || isComputing}
               id="create-new-ner"
               style={!showNer || isComputing ? { cursor: 'not-allowed' } : {}}
