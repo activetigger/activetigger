@@ -19,7 +19,12 @@ from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
 
 from activetigger import __version__
-from activetigger.app.dependencies import ProjectAction, ServerAction, test_rights, verified_user
+from activetigger.app.dependencies import (
+    ProjectAction,
+    ServerAction,
+    test_rights,
+    verified_user,
+)
 from activetigger.app.routers import (
     annotations,
     bertopic,
@@ -33,6 +38,7 @@ from activetigger.app.routers import (
     projects,
     prompts,
     schemes,
+    tasks,
     toolbox,
     upload,
     users,
@@ -149,7 +155,7 @@ app.include_router(messages.router)
 app.include_router(monitoring.router)
 app.include_router(toolbox.router)
 app.include_router(upload.router)
-
+app.include_router(tasks.router)
 
 # allow multiple servers (avoir CORS error)
 # TODO : Read allowed origins from config: `allow_origins=config.cors_origins`
