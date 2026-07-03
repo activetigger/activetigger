@@ -253,6 +253,20 @@ class Features:
         """
         return name in self.map
 
+    def extension_running(self) -> bool:
+        """
+        True while an ExtendFeatures task (triggered by an eval set
+        import) is rewriting the features file.
+        """
+        return any(getattr(c, "kind", None) == "extend_features" for c in self.computing)
+
+    def _raise_if_extending(self) -> None:
+        if self.extension_running():
+            raise ValueError(
+                "Features are being recomputed for a newly imported eval set; "
+                "retry when this process is finished"
+            )
+
     def add_predictions(self, predictions: dict) -> list:
         """
         Add BERT predictions to features
@@ -392,6 +406,8 @@ class Features:
         Add feature(s) after computing
         TODO : add in data
         """
+        self._raise_if_extending()
+
         # test name
         if name in self.map:
             raise Exception("Feature already exists")
@@ -438,6 +454,8 @@ class Features:
         """
         Delete feature
         """
+        self._raise_if_extending()
+
         if not self.exists(name):
             raise Exception("Feature doesn't exist")
 
@@ -553,11 +571,22 @@ class Features:
         return [e for e in self.computing if getattr(e, "user", None) == user]
 
     def current_computing(self) -> dict[str, dict[str, str | None]]:
-        return {
+        computing = {
             e.name: {"progress": self.computing_progress(e.unique_id), "name": e.name}
             for e in self.computing
             if e.kind == "feature"
         }
+        # eval set import/drop in progress: existing features are being
+        # recomputed/rewritten for the new dataset shape. The `kind` key
+        # lets the frontend render this entry differently.
+        for e in self.computing:
+            if e.kind == "extend_features":
+                computing["extending features"] = {
+                    "progress": self.computing_progress(e.unique_id),
+                    "name": "extending features",
+                    "kind": "extend_features",
+                }
+        return computing
 
     def __sbert_choose_model(self, parameters: dict):
         if (
@@ -903,9 +932,7 @@ class Features:
             return None
         raise ValueError("Error in the process")
 
-    def build_compute_specs(
-        self, names: list[str], data: Series
-    ) -> list[dict[str, Any]]:
+    def build_compute_specs(self, names: list[str], data: Series) -> list[dict[str, Any]]:
         """
         Assemble the `specs` list consumed by `PredictWithFeatures` for a
         set of existing feature names.
@@ -944,9 +971,7 @@ class Features:
                     raise ValueError(
                         f"Feature '{name}' needs a LanguageModels manager to resolve its model path"
                     )
-                spec["model_path"] = self.languagemodels.path.joinpath(
-                    feature.parameters["model"]
-                )
+                spec["model_path"] = self.languagemodels.path.joinpath(feature.parameters["model"])
             specs.append(spec)
         return specs
 

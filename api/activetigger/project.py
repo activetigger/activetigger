@@ -79,6 +79,7 @@ from activetigger.quickmodels import QuickModels
 from activetigger.schemes import Schemes
 from activetigger.tasks.add_evalset import AddEvalSet, AddEvalSetImage
 from activetigger.tasks.create_project import CreateProject, CreateProjectImagexp
+from activetigger.tasks.extend_features import ExtendFeatures
 from activetigger.tasks.generate_call import GenerateCall
 from activetigger.tasks.update_datasets import UpdateDatasets
 from activetigger.users import Users
@@ -604,9 +605,7 @@ class Project:
         )
         # add reload
         self.data.load_dataset("all")
-        # reset the features file
-        self.features.reset_features_file()
-        self.quickmodels.drop_models(which="all")
+        self._shrink_features_after_evalset_drop(dataset)
 
     def add_evalset(
         self,
@@ -710,6 +709,89 @@ class Project:
             return unique_id
         else:
             return None
+
+    def _refresh_features_after_evalset(self, eval_dataset: str, username: str) -> None:
+        """
+        Bring the features file to the new train+valid+test shape after a
+        new eval set has been loaded. If every existing feature can be
+        recomputed from its stored parameters, only compute them for the
+        new rows in a background ExtendFeatures task — train features and
+        quickmodels stay valid. Otherwise (imported/prediction/dataset
+        features, image projects, or spec-building failure) fall back to
+        a full reset.
+        """
+        if self._kill_running_feature_extensions():
+            self.features.reset_features_file()
+            self.quickmodels.drop_models(which="all")
+            return
+
+        features_meta = self.db_manager.projects_service.get_project_features(self.name)
+        if (
+            getattr(self.params, "kind", "text") != "image"
+            and features_meta
+            and all(f.kind in Features.COMPUTABLE_KINDS for f in features_meta.values())
+        ):
+            try:
+                data = self.features.concat_split_column("text", eval_dataset)
+                specs = self.features.build_compute_specs(list(features_meta), data)
+                self._enqueue_extend_features(specs, eval_dataset, username)
+                return
+            except Exception as ex:
+                print(f"Cannot extend features for the new {eval_dataset} set: {ex}")
+        self.features.reset_features_file()
+        self.quickmodels.drop_models(which="all")
+
+    def _shrink_features_after_evalset_drop(self, eval_dataset: str) -> None:
+        """
+        Remove the dropped eval set's rows from the features file in a
+        background task. Row removal needs no recomputation, so every
+        feature kind survives (imported and prediction ones included)
+        and the quickmodels stay valid.
+        """
+        if self._kill_running_feature_extensions():
+            self.features.reset_features_file()
+            self.quickmodels.drop_models(which="all")
+            return
+        self._enqueue_extend_features([], eval_dataset, "system")
+
+    def _kill_running_feature_extensions(self) -> bool:
+        running = [c for c in self.computing if getattr(c, "kind", None) == "extend_features"]
+        for c in running:
+            self.queue.kill(c.unique_id)
+        return bool(running)
+
+    def _enqueue_extend_features(self, specs: list[dict], eval_dataset: str, username: str) -> None:
+        eval_data = getattr(self.data, eval_dataset)
+        new_index = eval_data.index if eval_data is not None else pd.Index([])
+        task = ExtendFeatures(
+            specs=specs,
+            path_process=self.features.path_all.parent,
+            path_models=self.features.path_models,
+            language=self.features.lang,
+            path_features=self.features.path_features,
+            eval_dataset=eval_dataset,
+            new_index=new_index,
+            full_index=self.data.index.index,
+        )
+        unique_id = self.queue.add_task("extend_features", self.name, task, queue="cpu")
+        self.computing.append(
+            ProcessComputing(
+                user=username,
+                unique_id=unique_id,
+                time=datetime.now(timezone.utc),
+                kind="extend_features",
+            )
+        )
+
+    def _recover_features_after_failed_extension(self) -> None:
+        """
+        A failed or cancelled ExtendFeatures task leaves the features
+        file with a shape that no longer matches the datasets (the eval
+        set change is already applied) — reset to the safe empty state,
+        matching what a non-extendable change does.
+        """
+        self.features.reset_features_file()
+        self.quickmodels.drop_models(which="all")
 
     def train_quickmodel(
         self,
@@ -2465,6 +2547,8 @@ class Project:
                 # User-initiated cancellations are not errors; clean up silently.
                 if process.state == "cancelled":
                     print(f"Process {e.kind} cancelled by user")
+                    if e.kind == "extend_features":
+                        self._recover_features_after_failed_extension()
                     self.clean_process(e)
                     continue
                 print(f"Error in {e.kind} : {exception}")
@@ -2498,6 +2582,11 @@ class Project:
                 if e.kind == "create_project":
                     print("Error in project creation")
                     self.status = "error"
+
+                # a failed extension leaves a features file with the
+                # pre-eval-set shape; reset to the safe empty state
+                if e.kind == "extend_features":
+                    self._recover_features_after_failed_extension()
 
                 self.clean_process(e)
                 continue
@@ -2636,6 +2725,10 @@ class Project:
                         events = cast(EventsModel, results)
                         self.bertopic.add(bertopic_model)
                         self.monitoring.close_process(bertopic_model.unique_id, events)
+                    case "extend_features":
+                        self.features.map, self.features.n = self.features.get_map()
+                        if self.features.n != len(self.data.index):
+                            self._recover_features_after_failed_extension()
                     case kind if kind.startswith("add_evalset_"):
                         e = cast(ProcessComputing, e)
                         if results is not None and len(results) > 0:
@@ -2664,11 +2757,10 @@ class Project:
                             self.db_manager.projects_service.update_project(
                                 self.params.project_slug, jsonable_encoder(self.params)
                             )
-                            # load the new eval set before resetting features so the
-                            # features file is rebuilt with the full train+valid+test index
+                            # load the new eval set before refreshing features so the
+                            # features file covers the full train+valid+test index
                             self.data.load_dataset(eval_dataset)
-                            self.features.reset_features_file()
-                            self.quickmodels.drop_models(which="all")
+                            self._refresh_features_after_evalset(eval_dataset, user_name)
             except Exception as ex:
                 print(f"Error in {e.kind} : {ex}")
                 self.errors.add(f"Error in {e.kind} : {str(ex)}")

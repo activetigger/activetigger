@@ -250,9 +250,28 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
   const capFirstLetter = (word: string) => {
     return word.charAt(0).toUpperCase() + word.slice(1);
   };
+
+  // features being recomputed after an eval set import/drop (backend task)
+  const extendingFeatures = Object.values(currentProject?.features.training || {}).filter(
+    (e) => e && e.kind === 'extend_features',
+  );
+
   return (
     <div>
       <h4 className="subsection">{capFirstLetter(dataset)} set</h4>
+      {extendingFeatures.map((e, i) => (
+        <div className="alert alert-info col-lg-6" key={i}>
+          The existing features are being recomputed for the modified datasets
+          {e?.progress != null ? ` (${Math.round(Number(e.progress))}%)` : ''}
+          <div className="progress mt-2">
+            <div
+              className="progress-bar progress-bar-striped progress-bar-animated"
+              role="progressbar"
+              style={{ width: `${Number(e?.progress ?? 0)}%` }}
+            />
+          </div>
+        </div>
+      ))}
       {exist && (
         <button
           className="btn-drop-dataset"
@@ -269,9 +288,10 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
           <div className="col-lg-6">
             <div className="explanations">
               No {datasetCleanForPrinting} data set has been created. You can upload a{' '}
-              {datasetCleanForPrinting} set. Careful : all features will be dropped and need to be
-              computed again, and id will be modified with "imported-". You are responsible to check
-              that the elements are not already in the train set.
+              {datasetCleanForPrinting} set. If possible, existing features will be automatically
+              computed for the new elements (otherwise they will be dropped and need to be computed
+              again). Ids will be modified with "imported-". You are responsible to check that the
+              elements are not already in the train set.
             </div>
             <label htmlFor="csvFile">File to upload</label>
             <input id="csvFile" className="form-control" type="file" {...register('files')} />
@@ -417,8 +437,8 @@ export const EvalSetsManagement: FC<EvalSetsManagementModel> = ({
           <Modal.Title>Drop the validation set</Modal.Title>
         </Modal.Header>
         <Modal.Body>
-          Do you really want to drop the {dataset == 'test' ? 'Test' : 'Validation'} set? All
-          features and quick models will be dropped and need to be recomputed.
+          Do you really want to drop the {dataset == 'test' ? 'Test' : 'Validation'} set? Its rows
+          will be removed from the computed features (features and quick models are kept).
           <div className="horizontal">
             <button onClick={() => setAlertDrop(false)} style={{ flex: '1 1 auto' }}>
               Cancel
