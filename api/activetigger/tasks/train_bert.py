@@ -442,6 +442,12 @@ class TrainBert(BaseTask):
             # and dataset shuffling. config.random_seed defaults to 42.
             seed=seed,
             data_seed=seed,
+            # No auto-attached reporting integrations: with codecarbon installed,
+            # transformers would otherwise add its own CodeCarbonCallback, whose
+            # NVML power query crashes Trainer init on GPUs where energy counters
+            # are restricted (e.g. containers). Emissions are tracked by our
+            # failure-safe EmissionsMonitor instead.
+            report_to=[],
         )
 
         callback = CustomLoggingCallback(self.event, current_path=current_path, logger=self.logger)
