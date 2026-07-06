@@ -65,6 +65,7 @@ from activetigger.functions import (
     regex_contains,
     remove_labels_without_enough_annotations,
     sanitize_query_expression,
+    sanitize_uploaded_filename,
 )
 from activetigger.generation.generations import Generations
 from activetigger.imagemodels import ImageModels
@@ -649,6 +650,11 @@ class Project:
                 evalset.col_label = None
             if evalset.col_id == "":
                 evalset.col_id = None
+            # /files/add/dataset sanitized these names on disk; resolve the
+            # client-provided names to the same form
+            evalset.filename = sanitize_uploaded_filename(evalset.filename)
+            if evalset.labels_filename:
+                evalset.labels_filename = sanitize_uploaded_filename(evalset.labels_filename)
 
         # check existing task in the queue → if there is already an add_evalset task for this project and this dataset, we return the status of the task without adding a new one
         if self.queue.current:

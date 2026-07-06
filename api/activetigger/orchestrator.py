@@ -26,7 +26,12 @@ from activetigger.config import config
 from activetigger.datamodels import DatasetModel, LMComputing, ProjectBaseModel, ServerStateModel
 from activetigger.db import DBException
 from activetigger.db.manager import DatabaseManager
-from activetigger.functions import get_dir_size, get_gpu_memory_info, slugify
+from activetigger.functions import (
+    get_dir_size,
+    get_gpu_memory_info,
+    sanitize_uploaded_filename,
+    slugify,
+)
 from activetigger.messages import Messages
 from activetigger.monitoring import Monitoring
 from activetigger.project import Project
@@ -173,6 +178,10 @@ class Orchestrator:
         project_slug = self.check_project_name(project.project_name)
         if project_slug in ["new", "logs"]:
             raise Exception("This project name is not valid - reserved word")
+        # the upload endpoint sanitized the filename on disk; resolve the
+        # client-provided name to the same form or the task won't find the file
+        if project.filename is not None:
+            project.filename = sanitize_uploaded_filename(project.filename)
         self.project_creation_ongoing[project_slug] = Project(
             project_slug,
             self.queue,

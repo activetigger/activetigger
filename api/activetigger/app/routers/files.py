@@ -1,6 +1,5 @@
 import os
 import random
-import re
 import shutil
 import time
 from pathlib import Path
@@ -25,6 +24,7 @@ from activetigger.config import config
 from activetigger.datamodels import (
     UserInDBModel,
 )
+from activetigger.functions import sanitize_uploaded_filename
 from activetigger.orchestrator import get_orchestrator
 from activetigger.project import Project
 
@@ -50,8 +50,7 @@ def _safe_upload_path(
     if not filename:
         raise HTTPException(status_code=400, detail="Missing filename")
 
-    base = Path(filename).name
-    safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", base).lstrip(".")
+    safe_name = sanitize_uploaded_filename(filename)
     if not safe_name:
         raise HTTPException(status_code=400, detail="Invalid filename")
 
