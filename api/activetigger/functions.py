@@ -45,6 +45,30 @@ def slugify(text: str, way: str = "file") -> str:
         raise ValueError("Invalid way parameter. Use 'file' or 'url'.")
 
 
+def sanitize_uploaded_filename(filename: str) -> str:
+    """
+    Reduce an uploaded filename to the safe name used on disk.
+
+    The upload endpoints (which write the file) and the tasks that later read
+    it back must both go through this function, otherwise a filename with
+    accents or special characters is stored under a different name than the
+    one the task looks up.
+    """
+
+    def to_ascii(text: str) -> str:
+        # transliterate accents (é -> e) instead of losing them to underscores
+        text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+        return regex.sub(r"[^A-Za-z0-9._-]", "_", text)
+
+    base = Path(filename).name
+    stem = to_ascii(Path(base).stem).lstrip(".")
+    suffix = to_ascii(Path(base).suffix)
+    # a fully non-ascii stem (e.g. "中文.csv") transliterates to nothing
+    if not stem:
+        stem = "file"
+    return stem + suffix
+
+
 def remove_punctuation(text) -> str:
     return text.translate(str.maketrans("", "", string.punctuation))
 

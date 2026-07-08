@@ -24,6 +24,7 @@ from activetigger.datamodels import (
     TextDatasetModel,
     UserInDBModel,
 )
+from activetigger.functions import sanitize_uploaded_filename
 from activetigger.orchestrator import get_orchestrator
 from activetigger.project import Project
 
@@ -208,6 +209,11 @@ def predict(
 
         if dataset_type not in ["annotable", "external", "all"]:
             raise Exception(f"Dataset {dataset_type} not recognized")
+
+        # /files/add/dataset sanitized the name on disk; resolve the
+        # client-provided name to the same form
+        if external_dataset is not None:
+            external_dataset.filename = sanitize_uploaded_filename(external_dataset.filename)
 
         # managing the perimeter of the prediction
         datasets = None

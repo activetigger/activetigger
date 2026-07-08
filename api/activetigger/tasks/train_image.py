@@ -377,6 +377,9 @@ class TrainImage(BaseTask):
             # Reproducibility: same run inputs → same model weights and metrics.
             seed=seed,
             data_seed=seed,
+            # No auto-attached reporting integrations (see train_bert.py): the
+            # auto CodeCarbonCallback crashes Trainer init on restricted GPUs.
+            report_to=[],
         )
 
         callback = ImageLoggingCallback(self.event, current_path=current_path, logger=self.logger)

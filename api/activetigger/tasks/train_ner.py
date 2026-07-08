@@ -470,6 +470,9 @@ class TrainNer(BaseTask):
             use_cpu=config.cpu_only or not bool(params.gpu),
             seed=seed,
             data_seed=seed,
+            # No auto-attached reporting integrations (see train_bert.py): the
+            # auto CodeCarbonCallback crashes Trainer init on restricted GPUs.
+            report_to=[],
         )
 
         collator = DataCollatorForTokenClassification(tokenizer=tokenizer)
