@@ -231,17 +231,6 @@ export const ImageModelCreationForm: FC<ImageModelCreationFormProps> = ({
         <input type="number" step="0.1" min="0" max="0.9" {...registerNewModel('test_size')} />
 
         <label>
-          Label threshold{' '}
-          <a className="class_min_freq-image">
-            <HiOutlineQuestionMarkCircle />
-          </a>
-          <Tooltip anchorSelect=".class_min_freq-image" place="top">
-            Drop classes with fewer than this many annotated images.
-          </Tooltip>
-        </label>
-        <input type="number" step="1" {...registerNewModel('class_min_freq')} />
-
-        <label>
           <input type="checkbox" {...registerNewModel('class_balance')} />
           Balance labels{' '}
           <a className="class_balance-image">
@@ -280,6 +269,17 @@ export const ImageModelCreationForm: FC<ImageModelCreationFormProps> = ({
 
       <details className="custom-details">
         <summary>Advanced parameters for the data</summary>
+
+        <label>
+          Label threshold{' '}
+          <a className="class_min_freq-image">
+            <HiOutlineQuestionMarkCircle />
+          </a>
+          <Tooltip anchorSelect=".class_min_freq-image" place="top">
+            Drop classes with fewer than this many annotated images.
+          </Tooltip>
+        </label>
+        <input type="number" step="1" {...registerNewModel('class_min_freq')} />
         <label>
           Labels to ignore{' '}
           <a className="ignore-image">

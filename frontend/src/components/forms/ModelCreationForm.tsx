@@ -278,17 +278,6 @@ export const ModelCreationForm: FC<ModelCreationFormProps> = ({
         <input type="number" step="0.1" min="0" max="0.9" {...registerNewModel('test_size')} />
 
         <label>
-          Label threshold{' '}
-          <a className="class_min_freq">
-            <HiOutlineQuestionMarkCircle />
-          </a>
-          <Tooltip anchorSelect=".class_min_freq" place="top">
-            Drop classses with less than this number of elements
-          </Tooltip>
-        </label>
-        <input type="number" step="1" {...registerNewModel('class_min_freq')} />
-
-        <label>
           <input type="checkbox" {...registerNewModel('class_balance')} />
           Balance labels
           <a className="class_balance">
@@ -326,6 +315,17 @@ export const ModelCreationForm: FC<ModelCreationFormProps> = ({
       </details>
       <details className="custom-details">
         <summary>Advanced parameters for the data</summary>
+
+        <label>
+          Label threshold{' '}
+          <a className="class_min_freq">
+            <HiOutlineQuestionMarkCircle />
+          </a>
+          <Tooltip anchorSelect=".class_min_freq" place="top">
+            Drop classses with less than this number of elements
+          </Tooltip>
+        </label>
+        <input type="number" step="1" {...registerNewModel('class_min_freq')} />
 
         {kindScheme == 'multilabel' && (
           <div>
