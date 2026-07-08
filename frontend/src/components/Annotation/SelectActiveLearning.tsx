@@ -202,8 +202,10 @@ export const SelectActiveLearning: FC<SelectActiveLearningProps> = ({
         },
         selectionConfig: { ...prev.selectionConfig, mode: 'active' },
       }));
+      // one-shot: reset so later quick-model retrains don't re-assert 'active' mode
+      if (setSelectFirstModelTrained) setSelectFirstModelTrained(false);
     }
-  }, [availableQuickModels, selectFirstModelTrained, setAppContext]);
+  }, [availableQuickModels, selectFirstModelTrained, setSelectFirstModelTrained, setAppContext]);
 
   // retrain quick model
   const { retrainQuickModel } = useRetrainQuickModel(projectSlug || null, currentScheme || null);
