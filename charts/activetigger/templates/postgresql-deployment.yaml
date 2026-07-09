@@ -1,0 +1,85 @@
+{{- if .Values.postgresql.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "activetigger.fullname" . }}-postgresql
+  labels:
+    {{- include "activetigger.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgresql
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "activetigger.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: postgresql
+  template:
+    metadata:
+      labels:
+        {{- include "activetigger.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: postgresql
+    spec:
+      {{- with .Values.postgresql.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: postgresql
+          image: "{{ .Values.postgresql.image.repository }}:{{ .Values.postgresql.image.tag }}"
+          imagePullPolicy: {{ .Values.postgresql.image.pullPolicy }}
+          ports:
+            - name: postgresql
+              containerPort: {{ .Values.postgresql.port }}
+              protocol: TCP
+          env:
+            - name: POSTGRES_DB
+              value: {{ .Values.postgresql.database | quote }}
+            - name: POSTGRES_USER
+              value: {{ .Values.postgresql.username | quote }}
+            {{- if .Values.postgresql.trustAuth }}
+            - name: POSTGRES_HOST_AUTH_METHOD
+              value: trust
+            {{- else }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "activetigger.secretName" . }}
+                  key: postgresql-password
+            {{- end }}
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            {{- toYaml .Values.postgresql.resources | nindent 12 }}
+      volumes:
+        - name: data
+          {{- if .Values.postgresql.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "activetigger.fullname" . }}-postgresql-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+{{- end }}

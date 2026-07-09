@@ -1,0 +1,18 @@
+{{- if .Values.api.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "activetigger.fullname" . }}-api-data
+  labels:
+    {{- include "activetigger.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  accessModes:
+    {{- toYaml .Values.api.persistence.accessModes | nindent 4 }}
+  resources:
+    requests:
+      storage: {{ .Values.api.persistence.size | quote }}
+  {{- if .Values.api.persistence.storageClassName }}
+  storageClassName: {{ .Values.api.persistence.storageClassName | quote }}
+  {{- end }}
+{{- end }}

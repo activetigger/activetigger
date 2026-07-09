@@ -1,0 +1,19 @@
+{{- if .Values.postgresql.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "activetigger.postgresqlServiceName" . }}
+  labels:
+    {{- include "activetigger.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgresql
+spec:
+  type: ClusterIP
+  ports:
+    - name: postgresql
+      port: {{ .Values.postgresql.port }}
+      targetPort: postgresql
+      protocol: TCP
+  selector:
+    {{- include "activetigger.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: postgresql
+{{- end }}
