@@ -7,6 +7,7 @@ import { BertopicPage } from '../pages/BertopicPage';
 import { DataTabular } from '../components/DataTabular';
 import { ProjectPageLayout } from '../components/layout/ProjectPageLayout';
 import { ProjectionManagement } from '../components/ProjectionManagement';
+import { TextometricsManagement } from '../components/TextometricsManagement';
 import { useAppContext } from '../core/useAppContext';
 
 /**
@@ -15,7 +16,7 @@ import { useAppContext } from '../core/useAppContext';
 export const ProjectExplorePage: FC = () => {
   const { projectName } = useParams();
   const {
-    appContext: { currentScheme, currentProject: project, phase },
+    appContext: { currentScheme, currentProject: project, phase, developmentMode },
     setAppContext,
   } = useAppContext();
   const availableLabels =
@@ -50,6 +51,15 @@ export const ProjectExplorePage: FC = () => {
                   setAppContext={setAppContext}
                 />
               </Tab>
+              {project?.params.kind !== 'image' && developmentMode && (
+                <Tab eventKey="textometrics" title="Textometrics">
+                  <div className="explanations">
+                    Textometry statistics of your train data (word and token counts, most frequent
+                    words)
+                  </div>
+                  <TextometricsManagement projectSlug={projectName || null} />
+                </Tab>
+              )}
               <Tab eventKey="visualization" title="Visualization" unmountOnExit={true}>
                 <div className="explanations">Explore your annotable data as a projection</div>
                 <ProjectionManagement
