@@ -6,7 +6,7 @@ imagePullSecrets: []
 api:
   replicaCount: 1
   image:
-    repository: dzngo/activetigger-api
+    repository: activetigger/activetigger-api
     tag: prototype
     pullPolicy: Always
   port: 4000
@@ -52,7 +52,7 @@ api:
 frontend:
   replicaCount: 1
   image:
-    repository: dzngo/activetigger-frontend
+    repository: activetigger/activetigger-frontend
     tag: prototype
     pullPolicy: Always
   port: 80

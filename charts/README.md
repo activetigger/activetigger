@@ -47,11 +47,11 @@ These values should be changed before using the chart in another namespace, doma
 
 ## Docker images
 
-The prototype currently uses images published on a personal Docker Hub account:
+The prototype currently uses images published on the dedicated Docker Hub account for the project:
 
 ```text
-dzngo/activetigger-api
-dzngo/activetigger-frontend
+activetigger/activetigger-api
+activetigger/activetigger-frontend
 ```
 
 Additional Dockerfiles were created for Kubernetes/Helm testing because the existing Docker Compose setup does not map directly to Kubernetes deployment conventions:
@@ -61,12 +61,7 @@ Additional Dockerfiles were created for Kubernetes/Helm testing because the exis
 - `docker/frontend/Dockerfile.prototype`: frontend image used by the chart;
 - `docker/frontend/nginx.prototype.conf.template`: nginx template used by the frontend image to route `/api` to the API service.
 
-This registry choice is temporary. Before broader use, the project should decide where official images are published, for example:
-
-- a project-owned Docker Hub organization;
-- GitHub Container Registry;
-- an institutional registry;
-- another registry supported by the target Onyxia instance.
+The chart defaults to these repositories in `charts/activetigger/values.yaml`. The CPU prototype uses the `prototype` API tag, and the GPU prototype uses the `gpu-prototype` API tag.
 
 ## Install examples
 
@@ -106,21 +101,62 @@ helm upgrade --install activetigger ./charts/activetigger \
   --set api.gpu.enabled=true \
   --set api.env.CPU_ONLY=false \
   --set api.env.GPU=true \
-  --set api.env.N_WORKERS_GPU=1
+  --set api.env.N_WORKERS_GPU=1 \
   --set api.env.HF_HOME=/data/models/huggingface \
   --set api.env.TRANSFORMERS_CACHE=/data/models/huggingface/transformers \
   --set api.env.SENTENCE_TRANSFORMERS_HOME=/data/models/sentence-transformers
 ```
+
 On the ENSAE cluster, `--server-side=false` was needed because server-side apply requests for some workloads were blocked by the gateway/WAF.
 
 The HuggingFace/SentenceTransformers cache variables are not required for startup, but they are recommended. They store downloaded embedding models under `/data/models`, which is backed by the API PVC, so models do not need to be downloaded again after every pod restart.
+
+## Useful kubectl commands
+
+Check deployed resources:
+
+```bash
+kubectl get pods,svc,ingress,pvc -n "$NAMESPACE"
+```
+
+Follow the API rollout and inspect pod events:
+
+```bash
+kubectl rollout status deployment/activetigger-api -n "$NAMESPACE"
+kubectl describe pod -n "$NAMESPACE" -l app.kubernetes.io/component=api
+```
+
+Read logs:
+
+```bash
+kubectl logs -n "$NAMESPACE" deploy/activetigger-api --tail=200
+kubectl logs -n "$NAMESPACE" deploy/activetigger-api -f
+kubectl logs -n "$NAMESPACE" deploy/activetigger-frontend --tail=100
+```
+
+Check the internal service and public endpoint:
+
+```bash
+kubectl get endpoints activetigger-api -n "$NAMESPACE"
+curl https://activetigger.lab.groupe-genes.fr/api/version
+curl https://activetigger.lab.groupe-genes.fr/api/server
+```
+
+
+Uninstall the release:
+
+```bash
+helm uninstall activetigger -n "$NAMESPACE"
+```
+
+PVCs may remain after uninstall, depending on the storage reclaim policy. Delete them only when the project data can be safely removed.
+
 
 
 
 
 ## Known limitations
 
-- Docker images currently point to a personal Docker Hub namespace.
 - Some secrets are still configurable directly through `values.yaml`.
 - The API image currently installs Python dependencies dynamically at container startup.
 - GPU support is prototype-level and should be validated with explicit CUDA/PyTorch diagnostics.
@@ -130,9 +166,8 @@ The HuggingFace/SentenceTransformers cache variables are not required for startu
 
 ## Next steps
 
-- Decide the official container registry and image naming convention.
 - Move secrets to an external Secret or Onyxia-compatible secret mechanism.
 - Build production images with dependencies preinstalled.
 - Add a clean external PostgreSQL configuration path.
 - Confirm GPU runtime requirements on the target Kubernetes cluster.
-- Package the chart for the Onyxia service catalog once the chart values and image registry are validated.
+- Package the chart for the Onyxia service catalog once the chart values and image publication workflow are validated.
