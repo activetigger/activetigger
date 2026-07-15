@@ -13,6 +13,7 @@ from transformers import AutoTokenizer  # ty: ignore[possibly-missing-import]
 
 from activetigger.config import config
 from activetigger.tasks.base_task import BaseTask
+from activetigger.tasks.compute_dfm import ComputeDfm
 
 
 def distribution_statistics(values: Series, bins: int = 30) -> dict:
@@ -63,6 +64,11 @@ class ComputeTextometrics(BaseTask):
         language: str = "en",
         tokenizer_name: str = "bert-base-multilingual-cased",
         n_most_frequent: int = 100,
+        tfidf_n_words: int = 300,
+        tfidf_n_docs_per_word: int = 25,
+        tfidf_n_words_per_doc: int = 10,
+        tfidf_min_term_freq: int = 5,
+        tfidf_max_documents: int = 10000,
         **kwargs,
     ):
         super().__init__()
@@ -71,6 +77,11 @@ class ComputeTextometrics(BaseTask):
         self.language = language
         self.tokenizer_name = tokenizer_name
         self.n_most_frequent = n_most_frequent
+        self.tfidf_n_words = tfidf_n_words
+        self.tfidf_n_docs_per_word = tfidf_n_docs_per_word
+        self.tfidf_n_words_per_doc = tfidf_n_words_per_doc
+        self.tfidf_min_term_freq = tfidf_min_term_freq
+        self.tfidf_max_documents = tfidf_max_documents
 
     def __stop_process_opportunity(self):
         if self.event is not None and self.event.is_set():
@@ -86,11 +97,16 @@ class ComputeTextometrics(BaseTask):
         self.__stop_process_opportunity()
 
         most_frequent_words = self.most_frequent_words(texts)
+        self.__stop_process_opportunity()
+
+        tfidf_words, tfidf_documents = self.tfidf_statistics(texts)
 
         return {
             "words_per_doc": distribution_statistics(words_per_doc),
             "tokens_per_doc": distribution_statistics(tokens_per_doc),
             "most_frequent_words": most_frequent_words,
+            "tfidf_words": tfidf_words,
+            "tfidf_documents": tfidf_documents,
         }
 
     def load_texts(self) -> Series:
@@ -115,9 +131,67 @@ class ComputeTextometrics(BaseTask):
             self.__stop_process_opportunity()
         return Series(counts, index=texts.index)
 
+    def tfidf_statistics(self, texts: Series) -> tuple[list[dict] | None, list[dict] | None]:
+        """
+        TF-IDF slices, kept small on purpose (the full matrix is n_docs x vocab):
+        - per word (vocabulary capped to tfidf_n_words), the documents with the
+          highest scores
+        - per document, its most distinctive words — only stored when the train
+          set has at most tfidf_max_documents documents
+        """
+        try:
+            dtm = ComputeDfm(
+                texts=texts,
+                tfidf=True,
+                norm="l2",
+                min_term_freq=self.tfidf_min_term_freq,
+                max_features=self.tfidf_n_words,
+                language=self.language,
+            )()
+        except ValueError as e:
+            # corpus too small for the vocabulary constraints
+            print("TF-IDF statistics skipped:", e)
+            return None, None
+        self.__stop_process_opportunity()
+
+        tfidf_words = []
+        for word in dtm.columns:
+            col = dtm[word]
+            top = col.nlargest(self.tfidf_n_docs_per_word)
+            top = top[top > 0]
+            tfidf_words.append(
+                {
+                    "word": str(word),
+                    "n_documents": int((col > 0).sum()),
+                    "top_documents": [
+                        {"element_id": str(element_id), "score": round(float(score), 3)}
+                        for element_id, score in top.items()
+                    ],
+                }
+            )
+        tfidf_words.sort(key=lambda w: w["n_documents"], reverse=True)
+        self.__stop_process_opportunity()
+
+        if len(dtm) > self.tfidf_max_documents:
+            return tfidf_words, None
+
+        tfidf_documents = []
+        words = dtm.columns.to_numpy()
+        matrix = dtm.to_numpy()
+        order = np.argsort(matrix, axis=1)[:, ::-1][:, : self.tfidf_n_words_per_doc]
+        for row, element_id in enumerate(dtm.index):
+            top_words = [
+                {"word": str(words[j]), "score": round(float(matrix[row, j]), 3)}
+                for j in order[row]
+                if matrix[row, j] > 0
+            ]
+            tfidf_documents.append({"element_id": str(element_id), "top_words": top_words})
+        return tfidf_words, tfidf_documents
+
     def most_frequent_words(self, texts: Series) -> list[dict]:
         """
         Top words by corpus frequency, stopwords excluded.
+        Based on Countvectorizer
         """
         # load stopwords
         if self.language == "fr":

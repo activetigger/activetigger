@@ -29,6 +29,8 @@ export type ElementOutModel = components['schemas']['ElementOutModel'];
 
 export type TextometricsModel = components['schemas']['TextometricsModel'];
 export type DistributionModel = components['schemas']['DistributionModel'];
+export type TfidfWordTopDocumentsModel = components['schemas']['TfidfWordTopDocumentsModel'];
+export type TfidfDocumentTopWordsModel = components['schemas']['TfidfDocumentTopWordsModel'];
 
 export type AvailableProjectsModel = {
   created_by: string;

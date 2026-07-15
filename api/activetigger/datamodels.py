@@ -715,6 +715,11 @@ class TextometricsParametersModel(BaseModel):
     tokenizer: str = "bert-base-multilingual-cased"
     n_most_frequent: int = 100
     language: str = "en"
+    tfidf_n_words: int = 300
+    tfidf_n_docs_per_word: int = 25
+    tfidf_n_words_per_doc: int = 5
+    tfidf_min_term_freq: int = 5
+    tfidf_max_documents: int = 10000
 
 
 class TextometricsComputing(ProcessComputing):
@@ -1026,6 +1031,27 @@ class WordFrequencyModel(BaseModel):
     count: int
 
 
+class TfidfDocumentScoreModel(BaseModel):
+    element_id: str
+    score: float
+
+
+class TfidfWordTopDocumentsModel(BaseModel):
+    word: str
+    n_documents: int
+    top_documents: list[TfidfDocumentScoreModel]
+
+
+class TfidfWordScoreModel(BaseModel):
+    word: str
+    score: float
+
+
+class TfidfDocumentTopWordsModel(BaseModel):
+    element_id: str
+    top_words: list[TfidfWordScoreModel]
+
+
 class TextometricsStatisticsModel(BaseModel):
     """
     Statistics computed by the textometrics task. Future statistics are new
@@ -1035,6 +1061,10 @@ class TextometricsStatisticsModel(BaseModel):
     words_per_doc: DistributionModel
     tokens_per_doc: DistributionModel
     most_frequent_words: list[WordFrequencyModel]
+    # tfidf_documents is None when the train set exceeds
+    # TextometricsParametersModel.tfidf_max_documents (size trade-off)
+    tfidf_words: list[TfidfWordTopDocumentsModel] | None = None
+    tfidf_documents: list[TfidfDocumentTopWordsModel] | None = None
 
 
 class TextometricsModel(BaseModel):

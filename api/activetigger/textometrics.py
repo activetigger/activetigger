@@ -77,6 +77,11 @@ class Textometrics:
                 language=parameters.language,
                 tokenizer_name=parameters.tokenizer,
                 n_most_frequent=parameters.n_most_frequent,
+                tfidf_n_words=parameters.tfidf_n_words,
+                tfidf_n_docs_per_word=parameters.tfidf_n_docs_per_word,
+                tfidf_n_words_per_doc=parameters.tfidf_n_words_per_doc,
+                tfidf_min_term_freq=parameters.tfidf_min_term_freq,
+                tfidf_max_documents=parameters.tfidf_max_documents,
             ),
         )
         self.computing.append(
