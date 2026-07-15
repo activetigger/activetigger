@@ -24,6 +24,7 @@ class ComputeDfm(BaseTask):
         ngrams: int = 1,
         min_term_freq: int = 5,
         max_term_freq: int | float = 1.0,
+        max_features: int | None = None,
         log: bool = False,
         language: str = "en",
         norm=None,
@@ -35,6 +36,7 @@ class ComputeDfm(BaseTask):
         self.ngrams = ngrams
         self.min_term_freq = min_term_freq
         self.max_term_freq = max_term_freq
+        self.max_features = max_features
         self.log = log
         self.language = language
         self.norm = norm
@@ -72,6 +74,7 @@ class ComputeDfm(BaseTask):
                 sublinear_tf=self.log,
                 norm=self.norm,
                 max_df=self.max_term_freq,
+                max_features=self.max_features,
                 stop_words=stop_words,
             )
         else:
@@ -79,6 +82,7 @@ class ComputeDfm(BaseTask):
                 ngram_range=(1, self.ngrams),
                 min_df=self.min_term_freq,
                 max_df=self.max_term_freq,
+                max_features=self.max_features,
                 stop_words=stop_words,
             )
 

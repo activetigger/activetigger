@@ -27,7 +27,9 @@ from activetigger.datamodels import (
     ProjectDescriptionModel,
     ProjectStateModel,
     ProjectUpdateModel,
+    TextometricsModel,
     UserInDBModel,
+    WaitingModel,
 )
 from activetigger.functions import slugify
 from activetigger.orchestrator import get_orchestrator
@@ -63,6 +65,44 @@ def get_project_statistics(
     test_rights(ProjectAction.GET, current_user.username, project.project_slug)
     try:
         return project.get_statistics(scheme=scheme)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/projects/{project_slug}/textometrics", dependencies=[Depends(verified_user)])
+def get_textometrics(
+    project: Annotated[Project, Depends(get_project)],
+    current_user: Annotated[UserInDBModel, Depends(verified_user)],
+) -> TextometricsModel | None:
+    """
+    Textometry statistics of the train dataset (None if not computed yet)
+    """
+    test_rights(ProjectAction.GET, current_user.username, project.project_slug)
+    try:
+        return project.textometrics.get()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/projects/{project_slug}/textometrics/compute", dependencies=[Depends(verified_user)])
+def compute_textometrics(
+    project: Annotated[Project, Depends(get_project)],
+    current_user: Annotated[UserInDBModel, Depends(verified_user)],
+) -> WaitingModel:
+    """
+    Launch the computation of textometry statistics on the train dataset
+    """
+    test_rights(ProjectAction.ADD, current_user.username, project.project_slug)
+    try:
+        project.textometrics.compute(
+            project_slug=project.name,
+            username=current_user.username,
+            language=project.params.language,
+        )
+        get_orchestrator().log_action(
+            current_user.username, "COMPUTE TEXTOMETRICS", project.project_slug
+        )
+        return WaitingModel(detail="Textometrics are computing")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

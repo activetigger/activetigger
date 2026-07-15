@@ -541,6 +541,55 @@ export function useStatistics(projectSlug: string | null, currentScheme: string 
 }
 
 /**
+ * useGetTextometrics
+ * GET the textometry statistics of the project (null if not computed yet)
+ * @param projectSlug
+ */
+export function useGetTextometrics(projectSlug: string | null) {
+  const [fetchTrigger, setFetchTrigger] = useState<boolean>(false);
+
+  const getTextometrics = useAsyncMemo(async () => {
+    if (projectSlug) {
+      const res = await api.GET('/projects/{project_slug}/textometrics', {
+        params: {
+          path: { project_slug: projectSlug },
+        },
+      });
+      return res.data;
+    }
+    return null;
+  }, [projectSlug, fetchTrigger]);
+
+  const reFetch = useCallback(() => setFetchTrigger((f) => !f), []);
+
+  return { textometrics: getAsyncMemoData(getTextometrics), reFetchTextometrics: reFetch };
+}
+
+/**
+ * useComputeTextometrics
+ * POST to launch the computation of textometry statistics on the train dataset
+ * @param projectSlug
+ */
+export function useComputeTextometrics(projectSlug: string | null) {
+  const { notify } = useNotifications();
+
+  const computeTextometrics = useCallback(async () => {
+    if (projectSlug) {
+      const res = await api.POST('/projects/{project_slug}/textometrics/compute', {
+        params: {
+          path: { project_slug: projectSlug },
+        },
+      });
+      if (!res.error) notify({ type: 'info', message: 'Textometrics are computing.' });
+      return true;
+    }
+    return false;
+  }, [projectSlug, notify]);
+
+  return computeTextometrics;
+}
+
+/**
  * useProject
  * GET project by projectSlug
  * @param projectSlug

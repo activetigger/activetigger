@@ -711,6 +711,22 @@ class FeatureComputing(ProcessComputing):
     parameters: dict
 
 
+class TextometricsParametersModel(BaseModel):
+    tokenizer: str = "bert-base-multilingual-cased"
+    n_most_frequent: int = 100
+    language: str = "en"
+    tfidf_n_words: int = 300
+    tfidf_n_docs_per_word: int = 25
+    tfidf_n_words_per_doc: int = 5
+    tfidf_min_term_freq: int = 5
+    tfidf_max_documents: int = 10000
+
+
+class TextometricsComputing(ProcessComputing):
+    kind: Literal["textometrics"]
+    parameters: TextometricsParametersModel
+
+
 class PromptComputing(ProcessComputing):
     kind: Literal["prompt"]
     prompt_id: str
@@ -989,6 +1005,85 @@ class ProjectionsProjectStateModel(BaseModel):
     training: dict[str, str]
 
 
+class HistogramModel(BaseModel):
+    bin_edges: list[float]
+    counts: list[int]
+
+
+class DistributionSummaryModel(BaseModel):
+    count: int
+    mean: float | None = None
+    std: float | None = None
+    min: float | None = None
+    q25: float | None = None
+    median: float | None = None
+    q75: float | None = None
+    max: float | None = None
+
+
+class DistributionModel(BaseModel):
+    summary: DistributionSummaryModel
+    histogram: HistogramModel
+
+
+class WordFrequencyModel(BaseModel):
+    word: str
+    count: int
+
+
+class TfidfDocumentScoreModel(BaseModel):
+    element_id: str
+    score: float
+
+
+class TfidfWordTopDocumentsModel(BaseModel):
+    word: str
+    n_documents: int
+    top_documents: list[TfidfDocumentScoreModel]
+
+
+class TfidfWordScoreModel(BaseModel):
+    word: str
+    score: float
+
+
+class TfidfDocumentTopWordsModel(BaseModel):
+    element_id: str
+    top_words: list[TfidfWordScoreModel]
+
+
+class TextometricsStatisticsModel(BaseModel):
+    """
+    Statistics computed by the textometrics task. Future statistics are new
+    optional fields, so older textometrics.json files still load.
+    """
+
+    words_per_doc: DistributionModel
+    tokens_per_doc: DistributionModel
+    most_frequent_words: list[WordFrequencyModel]
+    # tfidf_documents is None when the train set exceeds
+    # TextometricsParametersModel.tfidf_max_documents (size trade-off)
+    tfidf_words: list[TfidfWordTopDocumentsModel] | None = None
+    tfidf_documents: list[TfidfDocumentTopWordsModel] | None = None
+
+
+class TextometricsModel(BaseModel):
+    """
+    Textometry statistics of the annotable dataset.
+    """
+
+    version: int = 1
+    computed_at: str
+    user: str
+    parameters: TextometricsParametersModel
+    statistics: TextometricsStatisticsModel
+
+
+class TextometricsProjectStateModel(BaseModel):
+    available: bool
+    training: dict[str, str]
+
+
 class BERTopicDescriptionModel(BaseModel):
     name: str
     time: str
@@ -1028,6 +1123,7 @@ class ProjectStateModel(BaseModel):
     imagemodels: ImageModelsProjectStateModel | None = None
     nermodels: NerModelsProjectStateModel | None = None
     projections: ProjectionsProjectStateModel
+    textometrics: TextometricsProjectStateModel
     generations: GenerationsProjectStateModel
     bertopic: BertopicProjectStateModel
     users: UsersStateModel

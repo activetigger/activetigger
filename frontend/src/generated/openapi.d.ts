@@ -292,6 +292,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/projects/{project_slug}/textometrics': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Textometrics
+     * @description Textometry statistics of the train dataset (None if not computed yet)
+     */
+    get: operations['get_textometrics_projects__project_slug__textometrics_get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/projects/{project_slug}/textometrics/compute': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Compute Textometrics
+     * @description Launch the computation of textometry statistics on the train dataset
+     */
+    post: operations['compute_textometrics_projects__project_slug__textometrics_compute_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/projects/auth': {
     parameters: {
       query?: never;
@@ -598,7 +638,7 @@ export interface paths {
     };
     /**
      * Get Projection
-     * @description Get projection if computed
+     * @description Get a named projection if computed
      */
     get: operations['get_projection_elements_projection_get'];
     put?: never;
@@ -620,9 +660,8 @@ export interface paths {
     put?: never;
     /**
      * Compute Projection
-     * @description Start projection computation using futures
-     *     Dedicated process, end with a file on the project
-     *     projection__user.parquet
+     * @description Start projection computation using futures.
+     *     Multiple named projections can coexist per project.
      */
     post: operations['compute_projection_elements_projection_compute_post'];
     delete?: never;
@@ -997,12 +1036,6 @@ export interface paths {
      * Import Feature
      * @description Import a pre-computed feature from an uploaded file.
      *
-     *     The file must contain one row per project element (matched on id_external).
-     *     Either:
-     *       - `columns` is None/empty: every non-id column becomes part of the feature
-     *         (treated as one multi-column embedding).
-     *       - `columns` is a comma-separated list: only those columns are used.
-     *
      *     All target columns must be numeric. The stored feature is named
      *     `imported-<name>`.
      */
@@ -1156,7 +1189,7 @@ export interface paths {
     };
     /**
      * Export Projection
-     * @description Export features
+     * @description Export a named projection
      */
     get: operations['export_projection_export_projection_get'];
     put?: never;
@@ -1178,7 +1211,8 @@ export interface paths {
      * Export Prediction
      * @description Export prediction file (parquet/csv/xlsx). `kind` selects which manager
      *     owns the file: BERT classifications under `languagemodels`, NER span
-     *     predictions under `nermodels`.
+     *     predictions under `nermodels`, quickmodel predictions on the whole
+     *     dataset under `quickmodels`.
      */
     get: operations['export_prediction_export_prediction_get'];
     put?: never;
@@ -2811,6 +2845,30 @@ export interface components {
       /** N Rows */
       n_rows: number;
     };
+    /** DistributionModel */
+    DistributionModel: {
+      summary: components['schemas']['DistributionSummaryModel'];
+      histogram: components['schemas']['HistogramModel'];
+    };
+    /** DistributionSummaryModel */
+    DistributionSummaryModel: {
+      /** Count */
+      count: number;
+      /** Mean */
+      mean?: number | null;
+      /** Std */
+      std?: number | null;
+      /** Min */
+      min?: number | null;
+      /** Q25 */
+      q25?: number | null;
+      /** Median */
+      median?: number | null;
+      /** Q75 */
+      q75?: number | null;
+      /** Max */
+      max?: number | null;
+    };
     /**
      * ElementInModel
      * @description Requesting element to annotate
@@ -3079,6 +3137,13 @@ export interface components {
     HTTPValidationError: {
       /** Detail */
       detail?: components['schemas']['ValidationError'][];
+    };
+    /** HistogramModel */
+    HistogramModel: {
+      /** Bin Edges */
+      bin_edges: number[];
+      /** Counts */
+      counts: number[];
     };
     /**
      * ImageModelModel
@@ -3367,6 +3432,16 @@ export interface components {
       path: string;
       /** Time */
       time: string;
+      /**
+       * Predicted All
+       * @default false
+       */
+      predicted_all: boolean;
+      /**
+       * Predicted External
+       * @default false
+       */
+      predicted_external: boolean;
     };
     /** ModelInformationsModel */
     ModelInformationsModel: {
@@ -3930,6 +4005,7 @@ export interface components {
       imagemodels?: components['schemas']['ImageModelsProjectStateModel'] | null;
       nermodels?: components['schemas']['NerModelsProjectStateModel'] | null;
       projections: components['schemas']['ProjectionsProjectStateModel'];
+      textometrics: components['schemas']['TextometricsProjectStateModel'];
       generations: components['schemas']['GenerationsProjectStateModel'];
       bertopic: components['schemas']['BertopicProjectStateModel'];
       users: components['schemas']['UsersStateModel'];
@@ -4190,7 +4266,7 @@ export interface components {
       };
       /** Training */
       training: {
-        [key: string]: string[] | undefined;
+        [key: string]: components['schemas']['LMComputingOutModel'] | undefined;
       };
     };
     /**
@@ -4396,6 +4472,120 @@ export interface components {
       path?: string | null;
     };
     /**
+     * TextometricsModel
+     * @description Textometry statistics of the annotable dataset.
+     */
+    TextometricsModel: {
+      /**
+       * Version
+       * @default 1
+       */
+      version: number;
+      /** Computed At */
+      computed_at: string;
+      /** User */
+      user: string;
+      parameters: components['schemas']['TextometricsParametersModel'];
+      statistics: components['schemas']['TextometricsStatisticsModel'];
+    };
+    /** TextometricsParametersModel */
+    TextometricsParametersModel: {
+      /**
+       * Tokenizer
+       * @default bert-base-multilingual-cased
+       */
+      tokenizer: string;
+      /**
+       * N Most Frequent
+       * @default 100
+       */
+      n_most_frequent: number;
+      /**
+       * Language
+       * @default en
+       */
+      language: string;
+      /**
+       * Tfidf N Words
+       * @default 300
+       */
+      tfidf_n_words: number;
+      /**
+       * Tfidf N Docs Per Word
+       * @default 25
+       */
+      tfidf_n_docs_per_word: number;
+      /**
+       * Tfidf N Words Per Doc
+       * @default 10
+       */
+      tfidf_n_words_per_doc: number;
+      /**
+       * Tfidf Min Term Freq
+       * @default 5
+       */
+      tfidf_min_term_freq: number;
+      /**
+       * Tfidf Max Documents
+       * @default 10000
+       */
+      tfidf_max_documents: number;
+    };
+    /** TextometricsProjectStateModel */
+    TextometricsProjectStateModel: {
+      /** Available */
+      available: boolean;
+      /** Training */
+      training: {
+        [key: string]: string | undefined;
+      };
+    };
+    /**
+     * TextometricsStatisticsModel
+     * @description Statistics computed by the textometrics task. Future statistics are new
+     *     optional fields, so older textometrics.json files still load.
+     */
+    TextometricsStatisticsModel: {
+      words_per_doc: components['schemas']['DistributionModel'];
+      tokens_per_doc: components['schemas']['DistributionModel'];
+      /** Most Frequent Words */
+      most_frequent_words: components['schemas']['WordFrequencyModel'][];
+      /** Tfidf Words */
+      tfidf_words?: components['schemas']['TfidfWordTopDocumentsModel'][] | null;
+      /** Tfidf Documents */
+      tfidf_documents?: components['schemas']['TfidfDocumentTopWordsModel'][] | null;
+    };
+    /** TfidfDocumentScoreModel */
+    TfidfDocumentScoreModel: {
+      /** Element Id */
+      element_id: string;
+      /** Score */
+      score: number;
+    };
+    /** TfidfDocumentTopWordsModel */
+    TfidfDocumentTopWordsModel: {
+      /** Element Id */
+      element_id: string;
+      /** Top Words */
+      top_words: components['schemas']['TfidfWordScoreModel'][];
+    };
+    /** TfidfWordScoreModel */
+    TfidfWordScoreModel: {
+      /** Word */
+      word: string;
+      /** Score */
+      score: number;
+    };
+    /** TfidfWordTopDocumentsModel */
+    TfidfWordTopDocumentsModel: {
+      /** Word */
+      word: string;
+      /** N Documents */
+      n_documents: number;
+      /** Top Documents */
+      top_documents: components['schemas']['TfidfDocumentScoreModel'][];
+    };
+    /**
      * TokenModel
      * @description Auth token
      */
@@ -4475,6 +4665,13 @@ export interface components {
        * @default waiting
        */
       status: string;
+    };
+    /** WordFrequencyModel */
+    WordFrequencyModel: {
+      /** Word */
+      word: string;
+      /** Count */
+      count: number;
     };
   };
   responses: never;
@@ -4878,6 +5075,68 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['ProjectDescriptionModel'];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
+  get_textometrics_projects__project_slug__textometrics_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        project_slug: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['TextometricsModel'] | null;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
+  compute_textometrics_projects__project_slug__textometrics_compute_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        project_slug: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WaitingModel'];
         };
       };
       /** @description Validation Error */
