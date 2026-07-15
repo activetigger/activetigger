@@ -194,7 +194,7 @@ The development of Active Tigger is supported by : [DRARI Île-de-France](https:
 
 ## How to cite
 
-Boelaert J., Ollion É., Schultz É. (2026). ActiveTigger (Version 0.9.9) [Computer software]. https://github.com/activetigger/activetigger
+Schultz, E., Boelaert, J., Morin, A., Bonutti D'Agostini, E., Claesson, A., & Chatelain, A., Ollion, É. (2026). ActiveTigger: An open source collaborative text annotation software for computational social sciences. In Proceedings of the 18th International Conference on Statistical Analysis of Textual Data (JADT 2026 https://jadt2026.unipa.it/), Palermo, Italy, July 8–10, 2026.
 
 
 [^1]: The current version is a refactor of [R Shiny ActiveTigger app (Julien Boelaert & Etienne Ollion)](https://gitlab.univ-lille.fr/julien.boelaert/activetigger). Active Tigger name is a pun that draws on the similarity between the words 'Tagger' and 'Tigger.'
