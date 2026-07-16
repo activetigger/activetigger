@@ -4,6 +4,9 @@ ActiveTigger is a community tool and all help and good will is welcomed.
 
 To keep the project organized and focus our efforts, we try to follow a few guidelines. We are a scientific software, so we would like to take some thoughts on what we put on our code.
 
+> [!NOTE]  
+> To develop ActiveTigger, we use generative tools such as Claude Code for some parts of the implementation. However, all code is reviewed before being merged into the repository. Likewise, you are free to use whatever tools you prefer, but we ask that you review your code and keep it readable for a human reviewer. All pull requests will be reviewed and may be discussed, so you need to be able to justify the choices you make.
+
 ## 1. Start with an issue
 
 **Let us know what you want to do !**
