@@ -27,6 +27,10 @@ export type ProjectStateModel = components['schemas']['ProjectStateModel'] & {
 };
 export type ElementOutModel = components['schemas']['ElementOutModel'];
 
+export type PrepareSessionModel = components['schemas']['PrepareSessionModel'];
+export type PrepareSplitModel = components['schemas']['PrepareSplitModel'];
+export type PrepareStatusModel = components['schemas']['PrepareStatusModel'];
+
 export type TextometricsModel = components['schemas']['TextometricsModel'];
 export type DistributionModel = components['schemas']['DistributionModel'];
 export type TfidfWordTopDocumentsModel = components['schemas']['TfidfWordTopDocumentsModel'];

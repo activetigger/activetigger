@@ -37,6 +37,7 @@ from activetigger.monitoring import Monitoring
 from activetigger.project import Project
 from activetigger.queue_manager import Queue
 from activetigger.tasks.duplicate_project import DuplicateProject
+from activetigger.toolbox import Toolbox
 from activetigger.users import Users
 
 
@@ -61,6 +62,7 @@ class Orchestrator:
     max_projects: int
     project_creation_ongoing: dict[str, Project]
     monitoring: Monitoring
+    toolbox: Toolbox
 
     def __init__(self) -> None:
         """
@@ -102,6 +104,7 @@ class Orchestrator:
         self.messages = Messages(self.db_manager)
         self.users = Users(self.db_manager, self.messages)
         self.monitoring = Monitoring(self.db_manager)
+        self.toolbox = Toolbox(self.queue)
 
         # projects in memory
         self.projects = {}

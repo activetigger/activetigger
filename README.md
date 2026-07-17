@@ -17,6 +17,10 @@ Designed primarily by researchers in social sciences, its use can extend to all 
 > [!IMPORTANT]
 > The app is now available in **v1** 🎉.
 
+## How to cite
+
+Schultz, E., Boelaert, J., Morin, A., Bonutti D'Agostini, E., Claesson, A., & Chatelain, A., Ollion, É. (2026). ActiveTigger: An open source collaborative text annotation software for computational social sciences. In Proceedings of the 18th International Conference on Statistical Analysis of Textual Data (JADT 2026 https://jadt2026.unipa.it/), Palermo, Italy, July 8–10, 2026.
+
 
 ## Run the app with Docker (recommended)
  
@@ -178,8 +182,6 @@ npm run build
 
 You can deploy the app with Github Pages for tests
 
-
-
 ## Documentation
 
 The documentation is [here](http://activetigger.com/activetigger/)
@@ -192,9 +194,9 @@ Contributions are welcome! Please read the [Contributing Guide](CONTRIBUTING.md)
 
 The development of Active Tigger is supported by : [DRARI Île-de-France](https://www.enseignementsup-recherche.gouv.fr/fr/drari-ile-de-france) [ECODEC](https://labex-ecodec.ensae.fr/) [Progedo](https://www.progedo.fr/) [ANR Pantagruel](https://anr.fr/Projet-ANR-23-IAS1-0001)
 
-## How to cite
+## AI Disclosure
 
-Boelaert J., Ollion É., Schultz É. (2026). ActiveTigger (Version 0.9.9) [Computer software]. https://github.com/activetigger/activetigger
+We use Claude Code to develop part of the code. Nevertheless, all content is reviewed at least by a human, and we try to keep the code auditable.
 
 
 [^1]: The current version is a refactor of [R Shiny ActiveTigger app (Julien Boelaert & Etienne Ollion)](https://gitlab.univ-lille.fr/julien.boelaert/activetigger). Active Tigger name is a pun that draws on the similarity between the words 'Tagger' and 'Tigger.'

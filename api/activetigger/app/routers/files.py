@@ -24,7 +24,7 @@ from activetigger.config import config
 from activetigger.datamodels import (
     UserInDBModel,
 )
-from activetigger.functions import sanitize_uploaded_filename
+from activetigger.functions import safe_upload_path
 from activetigger.orchestrator import get_orchestrator
 from activetigger.project import Project
 
@@ -32,37 +32,6 @@ router = APIRouter(tags=["files"])
 
 _ALLOWED_UPLOAD_EXTENSIONS = (".csv", ".parquet", ".xlsx")
 _ALLOWED_IMAGE_UPLOAD_EXTENSIONS = (".zip",)
-
-
-def _safe_upload_path(
-    directory: Path,
-    filename: str | None,
-    allowed_extensions: tuple[str, ...] = _ALLOWED_UPLOAD_EXTENSIONS,
-) -> Path:
-    """
-    Return a path inside `directory` that is safe to write to.
-
-    Strips any directory components from `filename`, restricts the result to a
-    conservative character set, and verifies the final path stays inside
-    `directory` so a crafted filename cannot escape via traversal or absolute
-    path tricks.
-    """
-    if not filename:
-        raise HTTPException(status_code=400, detail="Missing filename")
-
-    safe_name = sanitize_uploaded_filename(filename)
-    if not safe_name:
-        raise HTTPException(status_code=400, detail="Invalid filename")
-
-    if not safe_name.lower().endswith(allowed_extensions):
-        allowed_str = ", ".join(ext.lstrip(".") for ext in allowed_extensions)
-        raise HTTPException(status_code=400, detail=f"Only {allowed_str} files are allowed")
-
-    directory_resolved = directory.resolve()
-    target = (directory_resolved / safe_name).resolve()
-    if not target.is_relative_to(directory_resolved):
-        raise HTTPException(status_code=400, detail="Invalid filename")
-    return target
 
 
 @router.post("/files/add/project")
@@ -116,7 +85,7 @@ def upload_file_project(
         allowed = (
             _ALLOWED_IMAGE_UPLOAD_EXTENSIONS if kind == "image" else _ALLOWED_UPLOAD_EXTENSIONS
         )
-        target = _safe_upload_path(project_path, file.filename, allowed)
+        target = safe_upload_path(project_path, file.filename, allowed)
 
         # Read and write the file synchronously
         with open(target, "wb") as out_file:
@@ -150,7 +119,7 @@ def upload_file_dataset(
         allowed = _ALLOWED_IMAGE_UPLOAD_EXTENSIONS + _ALLOWED_UPLOAD_EXTENSIONS
     else:
         allowed = _ALLOWED_UPLOAD_EXTENSIONS
-    target = _safe_upload_path(project.data.path_datasets, file.filename, allowed)
+    target = safe_upload_path(project.data.path_datasets, file.filename, allowed)
 
     try:
         with open(target, "wb") as out_file:

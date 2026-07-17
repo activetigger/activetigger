@@ -1,6 +1,6 @@
 import { marked } from 'marked';
 import { FC, useMemo } from 'react';
-import { FaGithub } from 'react-icons/fa';
+import { FaCut, FaGithub } from 'react-icons/fa';
 import { IoMdLogOut } from 'react-icons/io';
 import { Link, useNavigate } from 'react-router-dom';
 import { Tooltip } from 'react-tooltip';
@@ -153,6 +153,17 @@ export const HomePage: FC = () => {
                         ))}
                       </div>
                     )}
+                    <div className="mt-3">
+                      <Link
+                        to="/toolbox"
+                        className="text-muted"
+                        style={{ fontSize: '0.85rem' }}
+                        title="Split texts into smaller units to build a dataset"
+                      >
+                        <FaCut className="me-1" />
+                        Prepare a dataset
+                      </Link>
+                    </div>
                   </div>
                 </div>
               )}

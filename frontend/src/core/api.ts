@@ -17,6 +17,8 @@ import {
   EvalSetDataModel,
   GenModel,
   LoginParams,
+  PrepareSessionModel,
+  PrepareSplitModel,
   ProjectBaseModel,
   ProjectStateModel,
   ProjectUpdateModel,
@@ -2062,6 +2064,27 @@ export function useDropGeneratedElements(projectSlug: string | null, username: s
   return dropGeneratedElements;
 }
 
+// StreamSaver relies on a service worker registered from a third-party
+// iframe, which Safari blocks (and its streaming responses are unreliable
+// in WebKit anyway), so buffer the stream into a blob there instead.
+const isSafari =
+  typeof navigator !== 'undefined' && /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+
+async function saveStreamAs(stream: ReadableStream<Uint8Array>, fileName: string) {
+  if (!isSafari && window.WritableStream && stream.pipeTo) {
+    await stream.pipeTo(streamSaver.createWriteStream(fileName));
+  } else {
+    const reader = stream.getReader();
+    const chunks: BlobPart[] = [];
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) chunks.push(value as BlobPart);
+    }
+    saveAs(new Blob(chunks), fileName);
+  }
+}
+
 /**
  * Get model file
  */
@@ -2070,7 +2093,6 @@ export function useGetModelFile(projectSlug: string | null | undefined) {
 
   const getModelFile = useCallback(
     async (model: string | null) => {
-      const fileStream = streamSaver.createWriteStream(model + '.tar.gz');
       if (model && projectSlug) {
         const res = await api.GET('/export/bert', {
           params: {
@@ -2087,11 +2109,11 @@ export function useGetModelFile(projectSlug: string | null | undefined) {
           notify({ type: 'error', message: 'Error downloading the model.' });
           return null;
         }
-        // more optimized
-        if (window.WritableStream && readableStream.pipeTo) {
-          await readableStream.pipeTo(fileStream);
+        try {
+          await saveStreamAs(readableStream, model + '.tar.gz');
           notify({ type: 'success', message: 'Model downloaded.' });
-        } else {
+        } catch (e) {
+          console.error(e);
           notify({ type: 'error', message: 'Error downloading the model.' });
         }
       }
@@ -2111,7 +2133,6 @@ export function useGetRawDataFile(projectSlug: string | null | undefined) {
 
   const getRawDataFile = useCallback(async () => {
     if (projectSlug) {
-      const fileStream = streamSaver.createWriteStream(projectSlug + '_dataset.parquet');
       const res = await api.GET('/export/raw', {
         params: {
           query: {
@@ -2123,15 +2144,15 @@ export function useGetRawDataFile(projectSlug: string | null | undefined) {
 
       const readableStream = res.data;
       if (!readableStream) {
-        notify({ type: 'error', message: 'Error downloading the model.' });
+        notify({ type: 'error', message: 'Error downloading the dataset.' });
         return null;
       }
-      // more optimized
-      if (window.WritableStream && readableStream.pipeTo) {
-        await readableStream.pipeTo(fileStream);
-        notify({ type: 'success', message: 'Model downloaded.' });
-      } else {
-        notify({ type: 'error', message: 'Error downloading the model.' });
+      try {
+        await saveStreamAs(readableStream, projectSlug + '_dataset.parquet');
+        notify({ type: 'success', message: 'Dataset downloaded.' });
+      } catch (e) {
+        console.error(e);
+        notify({ type: 'error', message: 'Error downloading the dataset.' });
       }
     }
     return true;
@@ -3708,4 +3729,116 @@ export function useAddSelfAsManager(reFetchAllProjects: () => void) {
     [authenticatedUser, notify, reFetchAllProjects],
   );
   return { addSelfAsManager };
+}
+
+/**
+ * Dataset preparation tool : upload a file and get back the session with columns + preview
+ */
+export function useUploadPrepareFile() {
+  const { authenticatedUser } = useAuth();
+  const [progression, setProgression] = useState<{ loaded?: number; total?: number }>({});
+  const [controller, setController] = useState<AbortController | undefined>(undefined);
+
+  const uploadPrepareFile = useCallback(
+    async (file: File): Promise<PrepareSessionModel> => {
+      try {
+        const controller = new AbortController();
+        setController(controller);
+        // use axios instead of openapi fetch to follow progression
+        const url = config.api.url.replace(/\/$/, '');
+        const res = await axios.postForm<PrepareSessionModel>(
+          `${url}/toolbox/upload`,
+          { file },
+          {
+            signal: controller.signal,
+            headers: getAuthHeaders(authenticatedUser)?.headers,
+            onUploadProgress: (progressEvent) => {
+              const { loaded, total } = progressEvent;
+              setProgression({ loaded, total });
+            },
+          },
+        );
+        return res.data;
+      } finally {
+        setProgression({});
+        setController(undefined);
+      }
+    },
+    [authenticatedUser],
+  );
+
+  return { uploadPrepareFile, progression, cancel: controller };
+}
+
+/**
+ * Dataset preparation tool : launch the split task
+ */
+export function usePrepareSplit() {
+  const { notify } = useNotifications();
+  const prepareSplit = useCallback(
+    async (params: PrepareSplitModel) => {
+      const res = await api.POST('/toolbox/split', { body: params });
+      if (res.error) {
+        notify({ type: 'error', message: formatApiError(res.error) });
+        return null;
+      }
+      return res.data.task_id;
+    },
+    [notify],
+  );
+  return { prepareSplit };
+}
+
+/**
+ * Dataset preparation tool : stop a running split task
+ */
+export function useStopPrepareTask() {
+  const { notify } = useNotifications();
+  const stopPrepareTask = useCallback(
+    async (taskId: string) => {
+      const res = await api.POST('/toolbox/stop', {
+        params: { query: { task_id: taskId } },
+      });
+      if (res.error) {
+        notify({ type: 'error', message: formatApiError(res.error) });
+        return null;
+      }
+      return true;
+    },
+    [notify],
+  );
+  return { stopPrepareTask };
+}
+
+/**
+ * Dataset preparation tool : status of the split task as a function
+ */
+export async function getPrepareStatus(sessionId: string, taskId: string) {
+  const res = await api.GET('/toolbox/status', {
+    params: { query: { session_id: sessionId, task_id: taskId } },
+  });
+  return res.data;
+}
+
+/**
+ * Dataset preparation tool : download the prepared dataset
+ */
+export function useGetPreparedFile() {
+  const { notify } = useNotifications();
+  const getPreparedFile = useCallback(
+    async (sessionId: string, format: string) => {
+      const res = await api.GET('/toolbox/export', {
+        params: { query: { session_id: sessionId, format } },
+        parseAs: 'blob',
+      });
+      if (res.error) {
+        notify({ type: 'error', message: 'Could not download the prepared dataset' });
+        return null;
+      }
+      saveAs(res.data, `prepared_dataset.${format}`);
+      return true;
+    },
+    [notify],
+  );
+  return { getPreparedFile };
 }

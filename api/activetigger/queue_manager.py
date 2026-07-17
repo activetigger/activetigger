@@ -30,6 +30,7 @@ class Queue:
     """
 
     max_processes: int = 20
+    worker_idle_timeout_seconds: int = 60
     nb_workers: int
     nb_workers_cpu: int
     nb_workers_gpu: int
@@ -67,8 +68,8 @@ class Queue:
 
         # create the executor
         self.executor = get_reusable_executor(
-            max_workers=self.nb_workers, timeout=600
-        )  # 4 hours timeout for hung workers
+            max_workers=self.nb_workers, timeout=self.worker_idle_timeout_seconds
+        )
 
         # launch a regular update on the queue; deferred when no loop is
         # running yet (e.g. module-import-time instantiation outside uvicorn),
@@ -139,7 +140,9 @@ class Queue:
             print(f"Executor unusable ({e}); rebuilding executor.", flush=True)
             # loky's reusable executor singleton returns a fresh executor
             # when the previous one is broken or shut down
-            self.executor = get_reusable_executor(max_workers=self.nb_workers, timeout=600)
+            self.executor = get_reusable_executor(
+                max_workers=self.nb_workers, timeout=self.worker_idle_timeout_seconds
+            )
             t.future = self.executor.submit(t.task)
         t.state = "running"
         t.running_since = now
@@ -367,4 +370,6 @@ class Queue:
 
         # loky's reusable executor is a process-global singleton; after
         # shutdown the next get_reusable_executor call returns a fresh one.
-        self.executor = get_reusable_executor(max_workers=self.nb_workers, timeout=600)
+        self.executor = get_reusable_executor(
+            max_workers=self.nb_workers, timeout=self.worker_idle_timeout_seconds
+        )

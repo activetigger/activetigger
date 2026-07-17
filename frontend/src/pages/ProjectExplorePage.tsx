@@ -52,10 +52,9 @@ export const ProjectExplorePage: FC = () => {
                 />
               </Tab>
               {project?.params.kind !== 'image' && developmentMode && (
-                <Tab eventKey="textometrics" title="Textometrics">
+                <Tab eventKey="textometry" title="Textometry">
                   <div className="explanations">
-                    Textometry statistics of your train data (word and token counts, most frequent
-                    words)
+                    Statistics on your train data (word and token count, most frequent words)
                   </div>
                   <TextometricsManagement projectSlug={projectName || null} />
                 </Tab>
