@@ -33,6 +33,7 @@ from activetigger.app.routers import (
     projects,
     prompts,
     schemes,
+    toolbox,
     users,
 )
 from activetigger.config import config
@@ -145,6 +146,7 @@ app.include_router(files.router)
 app.include_router(bertopic.router)
 app.include_router(messages.router)
 app.include_router(monitoring.router)
+app.include_router(toolbox.router)
 
 
 # allow multiple servers (avoir CORS error)

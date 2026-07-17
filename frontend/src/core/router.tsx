@@ -21,6 +21,7 @@ import { ProjectSettingsPage } from '../pages/ProjectSettingsPage';
 import { ProjectTagPage } from '../pages/ProjectTagPage';
 import { ProjectValidatePage } from '../pages/ProjectValidatePage';
 import { ProjectsPage } from '../pages/ProjectsPage';
+import { ToolboxPage } from '../pages/ToolboxPage';
 import { UsersPage } from '../pages/UsersPage';
 
 export function getRouter() {
@@ -77,6 +78,14 @@ export function getRouter() {
         </APIMiddlewares>
       ),
     },*/
+    {
+      path: '/toolbox',
+      element: (
+        <APIMiddlewares>
+          <ToolboxPage />
+        </APIMiddlewares>
+      ),
+    },
     {
       path: '/projects/',
       element: (

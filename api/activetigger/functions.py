@@ -16,6 +16,7 @@ import regex
 import spacy
 import torch
 from cryptography.fernet import Fernet
+from fastapi import HTTPException
 from pandas import Series
 from sklearn.metrics import (
     accuracy_score,
@@ -67,6 +68,37 @@ def sanitize_uploaded_filename(filename: str) -> str:
     if not stem:
         stem = "file"
     return stem + suffix
+
+
+def safe_upload_path(
+    directory: Path,
+    filename: str | None,
+    allowed_extensions: tuple[str, ...],
+) -> Path:
+    """
+    Return a path inside `directory` that is safe to write to.
+
+    Strips any directory components from `filename`, restricts the result to a
+    conservative character set, and verifies the final path stays inside
+    `directory` so a crafted filename cannot escape via traversal or absolute
+    path tricks.
+    """
+    if not filename:
+        raise HTTPException(status_code=400, detail="Missing filename")
+
+    safe_name = sanitize_uploaded_filename(filename)
+    if not safe_name:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    if not safe_name.lower().endswith(allowed_extensions):
+        allowed_str = ", ".join(ext.lstrip(".") for ext in allowed_extensions)
+        raise HTTPException(status_code=400, detail=f"Only {allowed_str} files are allowed")
+
+    directory_resolved = directory.resolve()
+    target = (directory_resolved / safe_name).resolve()
+    if not target.is_relative_to(directory_resolved):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    return target
 
 
 def remove_punctuation(text) -> str:

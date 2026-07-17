@@ -2286,6 +2286,108 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/toolbox/upload': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Upload Prepare File
+     * @description Upload a file (csv/xlsx/parquet or zip of txt/docx) for the dataset
+     *     preparation tool. Normalize it as raw.parquet in a new session
+     *     directory and return its columns and a preview.
+     */
+    post: operations['upload_prepare_file_toolbox_upload_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/toolbox/split': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Split Prepare Dataset
+     * @description Launch the split task on the queue (gpu queue for wtpsplit)
+     */
+    post: operations['split_prepare_dataset_toolbox_split_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/toolbox/stop': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Stop Prepare Task
+     * @description Stop a running split task of the current user
+     */
+    post: operations['stop_prepare_task_toolbox_stop_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/toolbox/status': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Prepare Status
+     * @description Status of a split task; when done, add the number of rows and a preview
+     */
+    get: operations['get_prepare_status_toolbox_status_get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/toolbox/export': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Export Prepared Dataset
+     * @description Download the prepared dataset in the requested format
+     */
+    get: operations['export_prepared_dataset_toolbox_export_get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/': {
     parameters: {
       query?: never;
@@ -2697,6 +2799,11 @@ export interface components {
     };
     /** Body_upload_file_project_files_add_project_post */
     Body_upload_file_project_files_add_project_post: {
+      /** File */
+      file: string;
+    };
+    /** Body_upload_prepare_file_toolbox_upload_post */
+    Body_upload_prepare_file_toolbox_upload_post: {
       /** File */
       file: string;
     };
@@ -3689,6 +3796,93 @@ export interface components {
       entropy?: number | null;
     };
     /**
+     * PrepareSessionModel
+     * @description Response after uploading a file to the dataset preparation tool
+     */
+    PrepareSessionModel: {
+      /** Session Id */
+      session_id: string;
+      /** Filename */
+      filename: string;
+      /** Columns */
+      columns: string[];
+      /** N Rows */
+      n_rows: number;
+      /** Preview */
+      preview: {
+        [key: string]: unknown;
+      }[];
+    };
+    /**
+     * PrepareSplitModel
+     * @description Request to split an uploaded dataset into text chunks
+     */
+    PrepareSplitModel: {
+      /** Session Id */
+      session_id: string;
+      /** Cols Text */
+      cols_text: string[];
+      /**
+       * Col Id
+       * @default row_number
+       */
+      col_id: string;
+      /**
+       * Cols Keep
+       * @default []
+       */
+      cols_keep: string[];
+      /**
+       * Method
+       * @enum {string}
+       */
+      method: 'chunk' | 'regex' | 'wtpsplit';
+      /** Chunk Size */
+      chunk_size?: number | null;
+      /** Regex Pattern */
+      regex_pattern?: string | null;
+      /** Granularity */
+      granularity?: ('sentence' | 'paragraph') | null;
+      /** Language */
+      language?: string | null;
+      /**
+       * Min Chars
+       * @default 10
+       */
+      min_chars: number;
+    };
+    /**
+     * PrepareStatusModel
+     * @description Status of a dataset preparation split task
+     */
+    PrepareStatusModel: {
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: 'pending' | 'running' | 'done' | 'failed' | 'not found';
+      /** Progress */
+      progress?: number | null;
+      /** Error */
+      error?: string | null;
+      /** N Rows */
+      n_rows?: number | null;
+      /** Preview */
+      preview?:
+        | {
+            [key: string]: unknown;
+          }[]
+        | null;
+    };
+    /**
+     * PrepareTaskModel
+     * @description Response after launching a dataset preparation split task
+     */
+    PrepareTaskModel: {
+      /** Task Id */
+      task_id: string;
+    };
+    /**
      * ProjectAuthsModel
      * @description Auth description for a project
      */
@@ -4517,7 +4711,7 @@ export interface components {
       tfidf_n_docs_per_word: number;
       /**
        * Tfidf N Words Per Doc
-       * @default 10
+       * @default 5
        */
       tfidf_n_words_per_doc: number;
       /**
@@ -8336,6 +8530,167 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['MonitoringActivityModel'];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
+  upload_prepare_file_toolbox_upload_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'multipart/form-data': components['schemas']['Body_upload_prepare_file_toolbox_upload_post'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['PrepareSessionModel'];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
+  split_prepare_dataset_toolbox_split_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['PrepareSplitModel'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['PrepareTaskModel'];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
+  stop_prepare_task_toolbox_stop_post: {
+    parameters: {
+      query: {
+        task_id: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
+  get_prepare_status_toolbox_status_get: {
+    parameters: {
+      query: {
+        session_id: string;
+        task_id: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['PrepareStatusModel'];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
+  export_prepared_dataset_toolbox_export_get: {
+    parameters: {
+      query: {
+        session_id: string;
+        format?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': unknown;
         };
       };
       /** @description Validation Error */

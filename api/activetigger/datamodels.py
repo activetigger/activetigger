@@ -1504,3 +1504,52 @@ class BertopicProjectionData(BaseModel):
 
     nodes: list[BertopicProjectionNode]
     cluster_id_label_mapper: dict
+
+
+class PrepareSessionModel(BaseModel):
+    """
+    Response after uploading a file to the dataset preparation tool
+    """
+
+    session_id: str
+    filename: str
+    columns: list[str]
+    n_rows: int
+    preview: list[dict]
+
+
+class PrepareSplitModel(BaseModel):
+    """
+    Request to split an uploaded dataset into text chunks
+    """
+
+    session_id: str
+    cols_text: list[str]
+    col_id: str = "row_number"
+    cols_keep: list[str] = []
+    method: Literal["chunk", "regex", "wtpsplit"]
+    chunk_size: int | None = None
+    regex_pattern: str | None = None
+    granularity: Literal["sentence", "paragraph"] | None = None
+    language: str | None = None
+    min_chars: int = 10
+
+
+class PrepareTaskModel(BaseModel):
+    """
+    Response after launching a dataset preparation split task
+    """
+
+    task_id: str
+
+
+class PrepareStatusModel(BaseModel):
+    """
+    Status of a dataset preparation split task
+    """
+
+    status: Literal["pending", "running", "done", "failed", "not found"] | str
+    progress: float | None = None
+    error: str | None = None
+    n_rows: int | None = None
+    preview: list[dict] | None = None

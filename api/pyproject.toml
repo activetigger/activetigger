@@ -72,6 +72,8 @@ dependencies = [
 		"regex>=2024.0.0",
 		"open-clip-torch>=3.3.0",
 		"codecarbon>=2.7.0",
+		"wtpsplit>=2.1.0",
+		"python-docx>=1.1.0",
 ]
 
 [dependency-groups]
