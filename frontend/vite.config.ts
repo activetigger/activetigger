@@ -11,6 +11,7 @@ export default defineConfig({
     allowedHosts: [
       'localhost',
       '127.0.0.1',
+      'app.activetigger.com',
       'css.activetigger.com',
       'demo1.activetigger.com',
       'demo2.activetigger.com',
