@@ -67,7 +67,7 @@ jobs:
 
           npm i
 
-          npm run build -- --base=/activetigger/
+          npm run build -- --base=/
 
       - name: Deploy 🚀
 
