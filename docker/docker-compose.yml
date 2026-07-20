@@ -57,7 +57,7 @@ services:
     volumes:
       - ${PROJECT_PATH}/docker/frontend/entrypoint.sh:/entrypoint.sh
       - ${PROJECT_PATH}/frontend:/frontend
-      - /frontend/node_modules
+      - frontend_node_modules:/frontend/node_modules
     environment:
       - API_PORT=${API_PORT}
       - MODE=${MODE}
@@ -66,3 +66,4 @@ volumes:
   venv_data:
   uv_cache:
   hf_cache:
+  frontend_node_modules:
