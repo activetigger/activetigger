@@ -126,6 +126,9 @@ class Queue:
                 except Exception as e:
                     print(f"Failed to signal cancel event for {t.unique_id}: {e}", flush=True)
                 t.state = "failed"
+        # To see the queue for debug
+        if len(self.current) > 0:
+            print("Active processes", self.current)
 
     def _submit_task(self, t: QueueTaskModel, now: datetime.datetime) -> None:
         """
