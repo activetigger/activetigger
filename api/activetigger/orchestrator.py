@@ -273,7 +273,9 @@ class Orchestrator:
         cpu = psutil.cpu_percent()
         cpu_count = psutil.cpu_count()
         memory_info = psutil.virtual_memory()
-        disk_info = psutil.disk_usage("/")
+        # measure the filesystem holding the data (external volume in Docker),
+        # not the container root
+        disk_info = psutil.disk_usage(config.data_path)
         at_memory = get_dir_size(config.data_path + "/projects")
         gpu = get_gpu_memory_info()
         return {
