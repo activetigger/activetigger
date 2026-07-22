@@ -50,6 +50,8 @@ docker/api/venv/
 docker/api/models/
 docker/api/postgresql/
 
+docker/api/users_parameters.yaml
+
 api/.coverage
 api/.env
 api/.mypy_cache
@@ -58,6 +60,7 @@ api/.ruff_cache
 api/.venv
 api/htmlcov
 api/test-data
+
 
 ## CLAUDE
 CLAUDE.md

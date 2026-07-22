@@ -25,7 +25,6 @@ dependencies = [
 		"numpy",
 		"pandas",
 		"pyarrow",
-		"torch>=2.6.0",
 		"transformers[torch]>=4.51.0",
 		"sentence-transformers>=5.4.0",
 		"typing-inspect",
@@ -136,10 +135,17 @@ environments = [
     "sys_platform == 'linux'",
 ]
 
+conflicts=[
+			[{extra="cpu"},
+			{extra="gpu"}],
+]
+
+
 [tool.uv.sources]
 fr-core-news-sm = { url = "https://github.com/explosion/spacy-models/releases/download/fr_core_news_sm-3.8.0/fr_core_news_sm-3.8.0.tar.gz" }
 en-core-web-sm = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0.tar.gz" }
-
+torch =[{index="pytorch-cpu",extra="cpu"}]
+torchvision =[{ index = "pytorch-cpu", extra = "cpu" }]
 
 [tool.coverage.run]
 source = ["activetigger"]
@@ -150,3 +156,12 @@ sort = "-Cover"
 
 [tool.coverage.html]
 show_contexts = true
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[project.optional-dependencies]
+cpu = ["torch>=2.6.0","torchvision>=0.21.0"]
+gpu = ["torch>=2.6.0","torchvision>=0.21.0"]
