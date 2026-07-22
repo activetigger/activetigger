@@ -3,8 +3,15 @@ install:
 	uv sync
 
 .PHONY: ci
-ci:
-	uv sync --locked --all-extras --dev
+ci: ci-cpu ci-gpu
+
+.PHONY: ci-cpu
+ci-cpu:
+	uv sync --locked --dev --extra cpu
+
+.PHONY: ci-gpu
+ci-gpu:
+	uv sync --locked --dev --extra gpu
 
 .PHONY: lint
 lint:
