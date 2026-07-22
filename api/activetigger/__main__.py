@@ -1,5 +1,6 @@
 import argparse
 from pathlib import Path
+
 import uvicorn
 
 from activetigger.config import config
