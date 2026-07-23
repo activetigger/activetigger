@@ -1,10 +1,15 @@
 #!/bin/bash
 set -e
 
-
+# The container starts as root so it can fix ownership of the named volumes
+# (venv, uv cache, HF cache), then drops privileges via gosu. The chown is
+# guarded: a recursive chown over downloaded models can take minutes, so it
+# only runs when the venv is not yet owned by the target user (first boot).
 if [ "$(id -u)" = "0" ]; then
-  chown -R "${USER_ID}:${GROUP_ID}" /home/python
-  exec gosu "${USER_ID}:${GROUP_ID}" "$0" "$@"
+  if [ "$(stat -c %u /home/python/venv 2>/dev/null)" != "${USER_ID:-1000}" ]; then
+    chown -R "${USER_ID:-1000}:${GROUP_ID:-1000}" /home/python
+  fi
+  exec gosu "${USER_ID:-1000}:${GROUP_ID:-1000}" "$0" "$@"
 fi
 
 # Fail fast if the compose overlay declared a required MODE and .env disagrees.
@@ -48,8 +53,10 @@ if [ "$CPU_ONLY" = "true" ]; then
 else
   echo "GPU mode: installing PyTorch with CUDA (~5GB extra)"
   uv sync --extra gpu
-  echo "Mode GPU activated: installing cuml-cu12"
-  uv pip install --extra-index-url https://pypi.nvidia.com cuml-cu12
+  if [ "$GPU" = "true" ]; then
+    echo "Mode GPU activated: installing cuml-cu12"
+    uv pip install --extra-index-url https://pypi.nvidia.com cuml-cu12
+  fi
 fi
 
 # Check for a config.yaml file in the api directory
