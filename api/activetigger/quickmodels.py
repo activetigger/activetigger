@@ -571,6 +571,8 @@ class QuickModels:
             raise ValueError("At least one text column must be selected")
         if not external_dataset.id:
             raise ValueError("An id column must be selected")
+        if not external_dataset.filename:
+            raise ValueError("No data file associated with the external dataset")
 
         path_data = self.features.data.get_path(external_dataset.filename)
         if not path_data.exists():

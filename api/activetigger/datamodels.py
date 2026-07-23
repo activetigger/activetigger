@@ -93,6 +93,8 @@ class ProjectBaseModel(BaseModel):
     n_valid: int = 0
     from_project: str | None = None
     from_toy_dataset: bool = False
+    # data file as a staged chunked upload (see activetigger.uploads);
+    upload_id: str | None = None
     filename: str | None = None
     dir: Path | None = None
     embeddings: list[str] = []
@@ -125,39 +127,63 @@ class ProjectModel(ProjectBaseModel):
     all_columns: list[str] | None = None
 
 
-class ProjectDataModel(ProjectBaseModel):
-    """
-    To create a new project
-    """
-
-    csv: str
-
-
 class AnnotationsDataModel(BaseModel):
+    """
+    Import annotations from a file.
+    sent beforehand through the chunked-upload protocol
+    """
+
     col_id: str
     col_label: str
     scheme: str
-    csv: str
+    upload_id: str
     filename: str | None = None
 
 
 class EvalSetDataModel(BaseModel):
+    """
+    Add an eval/test set to a text project.
+    sent beforehand through the chunked-upload protocol
+    """
+
     cols_text: list[str]
     col_id: str
     n_eval: int
-    filename: str
-    csv: str
+    upload_id: str
+    filename: str | None = None
     cols_label: list[str] = []  # each column name must match an existing scheme name
 
 
-class EvalSetImageModel(BaseModel):
-    """Eval-set payload for image projects.
-
-    The image zip and optional labels file are uploaded via /files/add/dataset
-    before this body is POSTed, so we only carry filenames here, not bytes.
+class UploadStartModel(BaseModel):
+    """
+    Open a chunked-upload staging session (see activetigger.uploads)
     """
 
     filename: str
+    total_size: int
+    total_chunks: int
+
+
+class UploadSessionModel(BaseModel):
+    upload_id: str
+    filename: str
+
+
+class UploadFinishedModel(BaseModel):
+    upload_id: str
+    filename: str
+    size: int
+
+
+class EvalSetImageModel(BaseModel):
+    """
+    Eval-set payload for image projects.
+    sent beforehand through the chunked-upload protocol
+    """
+
+    upload_id: str
+    labels_upload_id: str | None = None
+    filename: str | None = None
     n_eval: int | None = None
     labels_filename: str | None = None
     col_id: str | None = None
@@ -1346,9 +1372,15 @@ class PromptModel(BaseModel):
 
 
 class TextDatasetModel(BaseModel):
+    """
+    External dataset for prediction
+    sent beforehand through the chunked-upload protocol
+    """
+
     id: str
     cols_text: list[str]
-    filename: str
+    upload_id: str
+    filename: str | None = None
     path: Path | None = None
 
 

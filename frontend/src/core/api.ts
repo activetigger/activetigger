@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { saveAs } from 'file-saver';
-import { toPairs, values } from 'lodash';
+import { omit, toPairs, values } from 'lodash';
 import createClient, { Middleware } from 'openapi-fetch';
 import { useCallback, useEffect, useState } from 'react';
 
@@ -38,6 +38,7 @@ import { useNotifications } from './notifications';
 import { useAppContext } from './useAppContext';
 import { getAsyncMemoData, useAsyncMemo } from './useAsyncMemo';
 import { getAuthHeaders, useAuth } from './useAuth';
+import { useChunkedUpload } from './useChunkedUpload';
 
 /**
  * API methods
@@ -262,35 +263,39 @@ export function useCreateProject() {
 /**
  * Create test set
  */
+// what the eval-set form provides: the API model plus the csv content,
+// which is shipped as a chunked file upload rather than inline JSON
+export type EvalSetDataPayload = Omit<EvalSetDataModel, 'upload_id'> & { csv: string };
+
 export function useCreateValidSet() {
   const { notify } = useNotifications();
   const { authenticatedUser } = useAuth();
-  const [controller, setController] = useState<AbortController | undefined>(undefined);
-  const [progression, setProgression] = useState<{ loaded?: number; total?: number }>({});
+  const { uploadChunked, progression, cancel } = useChunkedUpload();
   const createValidSet = useCallback(
-    async (projectSlug: string, dataset: string, testset: EvalSetDataModel) => {
-      const controller = new AbortController();
-      setController(controller);
+    async (projectSlug: string, dataset: string, testset: EvalSetDataPayload) => {
       const URL = config.api.url.replace(/\/$/, '');
-      const base = {
-        headers: getAuthHeaders(authenticatedUser)?.headers,
-        params: { project_slug: projectSlug, dataset },
-      };
+      const headers = getAuthHeaders(authenticatedUser)?.headers;
       try {
-        await axios.post(`${URL}/projects/evalset/add`, testset, {
-          ...base,
-          signal: controller.signal,
-          onUploadProgress: ({ loaded, total }) => setProgression({ loaded, total }),
-        });
+        // ship the csv content as a chunked upload, referenced by upload_id
+        const csvFile = new File([testset.csv], `evalset-${dataset}.csv`, { type: 'text/csv' });
+        const { uploadId } = await uploadChunked(csvFile);
+        await axios.post(
+          `${URL}/projects/evalset/add`,
+          { ...omit(testset, 'csv'), upload_id: uploadId },
+          {
+            headers,
+            params: { project_slug: projectSlug, dataset },
+          },
+        );
         return true;
       } catch (error: unknown) {
         notify({ type: 'error', message: formatApiError(error) });
         return false;
       }
     },
-    [notify, authenticatedUser],
+    [notify, authenticatedUser, uploadChunked],
   );
-  return { createValidSet, progression, cancel: controller };
+  return { createValidSet, progression, cancel };
 }
 
 /**
@@ -299,8 +304,7 @@ export function useCreateValidSet() {
 export function useCreateValidSetImage() {
   const { notify } = useNotifications();
   const { authenticatedUser } = useAuth();
-  const [controller, setController] = useState<AbortController | undefined>(undefined);
-  const [progression, setProgression] = useState<{ loaded?: number; total?: number }>({});
+  const { uploadChunked, progression, cancel } = useChunkedUpload();
   const createValidSet = useCallback(
     async (
       projectSlug: string,
@@ -314,37 +318,18 @@ export function useCreateValidSetImage() {
         n_eval?: number | null;
       },
     ) => {
-      const ctrl = new AbortController();
-      setController(ctrl);
       const URL = config.api.url.replace(/\/$/, '');
       const headers = getAuthHeaders(authenticatedUser)?.headers;
       try {
-        await axios.postForm(
-          `${URL}/files/add/dataset`,
-          { file: params.zipFile },
-          {
-            signal: ctrl.signal,
-            params: { project_slug: projectSlug },
-            headers,
-            onUploadProgress: ({ loaded, total }) => setProgression({ loaded, total }),
-          },
-        );
-        if (params.labelsFile) {
-          await axios.postForm(
-            `${URL}/files/add/dataset`,
-            { file: params.labelsFile },
-            {
-              signal: ctrl.signal,
-              params: { project_slug: projectSlug },
-              headers,
-            },
-          );
-        }
+        // chunk-upload the zip (and optional labels file), then reference
+        // them by upload id in the evalset payload
+        const zipStaged = await uploadChunked(params.zipFile);
+        const labelsStaged = params.labelsFile ? await uploadChunked(params.labelsFile) : null;
         await axios.post(
           `${URL}/projects/evalset/add`,
           {
-            filename: params.zipFile.name,
-            labels_filename: params.labelsFile ? params.labelsFile.name : null,
+            upload_id: zipStaged.uploadId,
+            labels_upload_id: labelsStaged ? labelsStaged.uploadId : null,
             col_id: params.col_id ?? null,
             col_label: params.col_label ?? null,
             scheme: params.scheme ?? null,
@@ -353,20 +338,17 @@ export function useCreateValidSetImage() {
           {
             headers,
             params: { project_slug: projectSlug, dataset },
-            signal: ctrl.signal,
           },
         );
         return true;
       } catch (error: unknown) {
         notify({ type: 'error', message: formatApiError(error) });
         return false;
-      } finally {
-        setProgression({});
       }
     },
-    [notify, authenticatedUser],
+    [notify, authenticatedUser, uploadChunked],
   );
-  return { createValidSet, progression, cancel: controller };
+  return { createValidSet, progression, cancel };
 }
 
 /**
@@ -829,7 +811,7 @@ export function useResetFeatures(projectSlug: string | null) {
 export function useImportFeature() {
   const { notify } = useNotifications();
   const { authenticatedUser } = useAuth();
-  const [progression, setProgression] = useState<{ loaded?: number; total?: number }>({});
+  const { uploadChunked, progression } = useChunkedUpload();
 
   const importFeature = useCallback(
     async (
@@ -839,18 +821,17 @@ export function useImportFeature() {
       const URL = config.api.url.replace(/\/$/, '');
       const headers = getAuthHeaders(authenticatedUser)?.headers;
       try {
+        const { uploadId } = await uploadChunked(params.file);
         await axios.postForm(
           `${URL}/features/import`,
           {
-            file: params.file,
             name: params.name,
             id_column: params.idColumn,
             columns: params.columns && params.columns.length ? params.columns.join(',') : '',
           },
           {
-            params: { project_slug: projectSlug },
+            params: { project_slug: projectSlug, upload_id: uploadId },
             headers,
-            onUploadProgress: ({ loaded, total }) => setProgression({ loaded, total }),
           },
         );
         notify({ type: 'success', message: 'Feature imported.' });
@@ -858,11 +839,9 @@ export function useImportFeature() {
       } catch (error: unknown) {
         notify({ type: 'error', message: formatApiError(error) });
         return false;
-      } finally {
-        setProgression({});
       }
     },
-    [notify, authenticatedUser],
+    [notify, authenticatedUser, uploadChunked],
   );
 
   return { importFeature, progression };
@@ -2856,24 +2835,35 @@ export function useStopProcesses(projectSlug: string | null) {
   return { stopProcesses };
 }
 
+// what the annotations-import form provides: the API model with the csv
+// content in place of the upload_id the backend expects
+export type AnnotationsDataPayload = Omit<AnnotationsDataModel, 'upload_id'> & { csv: string };
+
 /**
  * Post annotation file
+ * The csv content is shipped as a chunked file upload, then referenced
+ * by upload_id in the (small) JSON payload.
  */
 export function usePostAnnotationsFile(projectSlug: string | null) {
   const { notify } = useNotifications();
+  const { uploadChunked } = useChunkedUpload();
   const postAnnotationsFile = useCallback(
-    async (annotationsset: AnnotationsDataModel) => {
+    async (annotationsset: AnnotationsDataPayload) => {
       if (!projectSlug) return;
+      // always a .csv name: the content is re-serialized csv even when the
+      // original file was parquet/xlsx, and the backend only accepts .csv here
+      const csvFile = new File([annotationsset.csv], 'annotations.csv', { type: 'text/csv' });
+      const { uploadId } = await uploadChunked(csvFile);
       const res = await api.POST('/annotation/file', {
         params: {
           query: { project_slug: projectSlug },
         },
-        body: annotationsset,
+        body: { ...omit(annotationsset, 'csv'), upload_id: uploadId },
       });
       if (!res.error) notify({ type: 'success', message: 'Annotations set uploaded.' });
       else throw new Error(formatApiError(res.error));
     },
-    [notify, projectSlug],
+    [notify, projectSlug, uploadChunked],
   );
   return postAnnotationsFile;
 }
@@ -3098,108 +3088,6 @@ export async function getProjectStatus(projectSlug: string) {
   });
 
   return res.data;
-}
-
-/**
- * Add file for project creation
- */
-export function useAddProjectFile() {
-  const { authenticatedUser } = useAuth();
-
-  // state to monitor progression
-  const [progression, setProgression] = useState<{ loaded?: number; total?: number }>({});
-  // state to allow user top cancel operation
-  const [controller, setController] = useState<AbortController | undefined>(undefined);
-
-  // main callback to upload to API
-  const addProjectFile = useCallback(
-    async (project_name: string, file: File, kind?: 'text' | 'image') => {
-      try {
-        // create a new controller
-        const controller = new AbortController();
-        // update state
-        setController(controller);
-        // use axios instead of openapi fetch to follow progression
-        const url = config.api.url.replace(/\/$/, '');
-        await axios.postForm(
-          `${url}/files/add/project`,
-          { file },
-          {
-            // signal to abort
-            signal: controller.signal,
-            params: {
-              project_name,
-              ...(kind ? { kind } : {}),
-            },
-            // add auth
-            headers: getAuthHeaders(authenticatedUser)?.headers,
-            // update progression state
-            onUploadProgress: (progressEvent) => {
-              const { loaded, total } = progressEvent;
-              setProgression({ loaded, total });
-            },
-          },
-        );
-      } finally {
-        // reset internal state
-        setProgression({});
-        setController(undefined);
-      }
-    },
-    [authenticatedUser, setController],
-  );
-
-  return {
-    addProjectFile,
-    progression,
-    cancel: controller,
-  };
-}
-
-/**
- * Add external dataset (TODO : merge with previous function)
- */
-export function useAddFile() {
-  const { notify } = useNotifications();
-  const { authenticatedUser } = useAuth();
-  const [progression, setProgression] = useState<{ loaded?: number; total?: number }>({});
-  const [controller, setController] = useState<AbortController | undefined>(undefined);
-  const addFile = useCallback(
-    async (project_slug: string, file: File) => {
-      try {
-        const controller = new AbortController();
-        setController(controller);
-        const url = config.api.url.replace(/\/$/, '');
-        await axios.postForm(
-          `${url}/files/add/dataset`,
-          { file },
-          {
-            signal: controller.signal,
-            params: {
-              project_slug,
-            },
-            headers: getAuthHeaders(authenticatedUser)?.headers,
-            onUploadProgress: (progressEvent) => {
-              const { loaded, total } = progressEvent;
-              setProgression({ loaded, total });
-            },
-          },
-        );
-        notify({ type: 'success', message: 'File uploaded' });
-      } finally {
-        // reset internal state
-        setProgression({});
-        setController(undefined);
-      }
-    },
-    [notify, authenticatedUser, setController],
-  );
-
-  return {
-    addFile,
-    progression,
-    cancel: controller,
-  };
 }
 
 /**
@@ -3736,38 +3624,22 @@ export function useAddSelfAsManager(reFetchAllProjects: () => void) {
  */
 export function useUploadPrepareFile() {
   const { authenticatedUser } = useAuth();
-  const [progression, setProgression] = useState<{ loaded?: number; total?: number }>({});
-  const [controller, setController] = useState<AbortController | undefined>(undefined);
+  const { uploadChunked, progression, cancel } = useChunkedUpload();
 
   const uploadPrepareFile = useCallback(
     async (file: File): Promise<PrepareSessionModel> => {
-      try {
-        const controller = new AbortController();
-        setController(controller);
-        // use axios instead of openapi fetch to follow progression
-        const url = config.api.url.replace(/\/$/, '');
-        const res = await axios.postForm<PrepareSessionModel>(
-          `${url}/toolbox/upload`,
-          { file },
-          {
-            signal: controller.signal,
-            headers: getAuthHeaders(authenticatedUser)?.headers,
-            onUploadProgress: (progressEvent) => {
-              const { loaded, total } = progressEvent;
-              setProgression({ loaded, total });
-            },
-          },
-        );
-        return res.data;
-      } finally {
-        setProgression({});
-        setController(undefined);
-      }
+      const url = config.api.url.replace(/\/$/, '');
+      const { uploadId } = await uploadChunked(file);
+      const res = await axios.post<PrepareSessionModel>(`${url}/toolbox/upload`, null, {
+        params: { upload_id: uploadId },
+        headers: getAuthHeaders(authenticatedUser)?.headers,
+      });
+      return res.data;
     },
-    [authenticatedUser],
+    [authenticatedUser, uploadChunked],
   );
 
-  return { uploadPrepareFile, progression, cancel: controller };
+  return { uploadPrepareFile, progression, cancel };
 }
 
 /**

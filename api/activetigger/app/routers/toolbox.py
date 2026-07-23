@@ -3,8 +3,6 @@ from typing import Annotated
 from fastapi import (
     APIRouter,
     Depends,
-    File,
-    UploadFile,
 )
 from fastapi.responses import FileResponse
 
@@ -17,6 +15,7 @@ from activetigger.datamodels import (
     UserInDBModel,
 )
 from activetigger.orchestrator import get_orchestrator
+from activetigger.uploads import get_upload_staging
 
 router = APIRouter(prefix="/toolbox", tags=["toolbox"])
 
@@ -24,15 +23,22 @@ router = APIRouter(prefix="/toolbox", tags=["toolbox"])
 @router.post("/upload")
 def upload_prepare_file(
     current_user: Annotated[UserInDBModel, Depends(verified_user)],
-    file: UploadFile = File(...),
+    upload_id: str,
 ) -> PrepareSessionModel:
     """
-    Upload a file (csv/xlsx/parquet or zip of txt/docx) for the dataset
-    preparation tool. Normalize it as raw.parquet in a new session
+    Ingest a staged upload (chunked-upload protocol) into the dataset
+    preparation tool: normalize it as raw.parquet in a new session
     directory and return its columns and a preview.
     """
     test_rights(ServerAction.CREATE_PROJECT, current_user.username)
-    return get_orchestrator().toolbox.upload(current_user.username, file)
+    toolbox = get_orchestrator().toolbox
+    staging = get_upload_staging()
+    staged_path, filename = staging.claim(
+        current_user.username, upload_id, toolbox.ALLOWED_EXTENSIONS
+    )
+    session = toolbox.upload(current_user.username, staged_path, filename)
+    staging.discard(current_user.username, upload_id)
+    return session
 
 
 @router.post("/split")

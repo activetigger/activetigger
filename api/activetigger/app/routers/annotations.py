@@ -23,6 +23,7 @@ from activetigger.datamodels import (
 )
 from activetigger.orchestrator import get_orchestrator
 from activetigger.project import Project
+from activetigger.uploads import get_upload_staging
 
 router = APIRouter(tags=["annotations"])
 
@@ -174,19 +175,28 @@ def post_annotation_file(
     annotationsdata: AnnotationsDataModel,
 ) -> None:
     """
-    Load annotations file
+    Load annotations from a staged upload (chunked-upload protocol,
+    see activetigger.uploads) referenced by annotationsdata.upload_id.
     """
     test_rights(ProjectAction.UPDATE, current_user.username, project.name)
+    staging = get_upload_staging()
+    staged_path, _ = staging.claim(current_user.username, annotationsdata.upload_id, (".csv",))
     try:
         project.schemes.add_file_annotations(
-            annotationsdata=annotationsdata, user=current_user.username
+            annotationsdata=annotationsdata,
+            file_path=staged_path,
+            user=current_user.username,
         )
         get_orchestrator().log_action(
             current_user.username,
             f"LOAD ANNOTATION FROM FILE: scheme {annotationsdata.scheme}",
             project.name,
         )
+        # consumed only on success so a failed import can be retried
+        staging.discard(current_user.username, annotationsdata.upload_id)
         return None
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 

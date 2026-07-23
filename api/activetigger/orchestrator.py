@@ -38,6 +38,7 @@ from activetigger.project import Project
 from activetigger.queue_manager import Queue
 from activetigger.tasks.duplicate_project import DuplicateProject
 from activetigger.toolbox import Toolbox
+from activetigger.uploads import get_upload_staging
 from activetigger.users import Users
 
 
@@ -264,6 +265,12 @@ class Orchestrator:
 
         # Reap terminal/stuck tasks last, after results have been consumed.
         self.queue.clean_old_processes(timeout=4)
+
+        # drop abandoned chunked-upload staging sessions
+        try:
+            get_upload_staging().clean_old()
+        except Exception as e:
+            print(f"Error while cleaning staged uploads: {e}")
 
     def _collect_heavy_stats(self) -> dict:
         """

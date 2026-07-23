@@ -12,7 +12,6 @@ import { Tooltip } from 'react-tooltip';
 import {
   getProjectStatus,
   useAddFeature,
-  useAddProjectFile,
   useCopyExistingData,
   useCreateProject,
   useGetAvailableDatasets,
@@ -21,6 +20,7 @@ import {
 import { formatUploadError } from '../../core/HTTPError';
 import { useNotifications } from '../../core/notifications';
 import { useAppContext } from '../../core/useAppContext';
+import { useChunkedUpload } from '../../core/useChunkedUpload';
 import { getRandomName, loadFile } from '../../core/utils';
 import { ProjectModel } from '../../types';
 import { ProjectCreationFormImagexp } from './ProjectCreationFormImagexp';
@@ -87,7 +87,7 @@ export const ProjectCreationForm: FC = () => {
   const availableProjectName = useProjectNameAvailable(); // check if the project name is available
   const addFeature = useAddFeature();
 
-  const { addProjectFile, progression, cancel } = useAddProjectFile(); // API call
+  const { uploadChunked, progression, cancel } = useChunkedUpload(); // API call
   const copyExistingData = useCopyExistingData();
   const files = useWatch({ control, name: 'files' }); // watch the files entry
   const force_label = useWatch({ control, name: 'force_label' }); // watch the force label entry
@@ -232,9 +232,12 @@ export const ProjectCreationForm: FC = () => {
         setCreatingProject(true);
 
         // manage the files
-        // case there is data to send
+        // case there is data to send: chunk-upload it, then reference it
+        // by upload_id in the creation call
+        let uploadId: string | null = null;
         if (dataset === 'load' && files && files.length > 0) {
-          await addProjectFile(formData.project_name, files[0]);
+          const staged = await uploadChunked(files[0]);
+          uploadId = staged.uploadId;
         }
         // case to use a project existing
         else if (dataset !== 'load' && dataset) {
@@ -249,7 +252,7 @@ export const ProjectCreationForm: FC = () => {
         // launch the project creation (which can take a while)
         const slug = await createProject({
           ...omit(formData, 'files'),
-          filename: data ? data.filename : null,
+          upload_id: uploadId,
           from_project: dataset == 'load' ? null : dataset,
           from_toy_dataset: dataset.startsWith('-toy-dataset-'),
         });
