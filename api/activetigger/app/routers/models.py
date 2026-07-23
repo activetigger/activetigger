@@ -24,9 +24,9 @@ from activetigger.datamodels import (
     TextDatasetModel,
     UserInDBModel,
 )
-from activetigger.functions import sanitize_uploaded_filename
 from activetigger.orchestrator import get_orchestrator
 from activetigger.project import Project
+from activetigger.uploads import get_upload_staging
 
 router = APIRouter(tags=["models"])
 
@@ -210,10 +210,17 @@ def predict(
         if dataset_type not in ["annotable", "external", "all"]:
             raise Exception(f"Dataset {dataset_type} not recognized")
 
-        # /files/add/dataset sanitized the name on disk; resolve the
-        # client-provided name to the same form
+        # the external dataset arrives as a staged chunked upload (see
+        # activetigger.uploads): move it into the project data folder where
+        # the prediction task reads it back by filename
         if external_dataset is not None:
-            external_dataset.filename = sanitize_uploaded_filename(external_dataset.filename)
+            target = get_upload_staging().move_to(
+                current_user.username,
+                external_dataset.upload_id,
+                project.data.path_datasets,
+                (".csv", ".parquet", ".xlsx"),
+            )
+            external_dataset.filename = target.name
 
         # managing the perimeter of the prediction
         datasets = None
@@ -232,15 +239,6 @@ def predict(
         if kind == "bert":
             if dataset_type == "external" and external_dataset is None:
                 raise Exception("External dataset must be provided for external prediction")
-            if (
-                dataset_type == "external"
-                and external_dataset is not None
-                and not project.data.get_path(external_dataset.filename).exists()
-            ):
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"External dataset file {external_dataset.filename} not found",
-                )
             project.start_language_model_prediction(
                 username=current_user.username,
                 dataset_type=dataset_type,
@@ -264,11 +262,6 @@ def predict(
             elif dataset_type == "external":
                 if external_dataset is None:
                     raise Exception("External dataset must be provided for external prediction")
-                if not project.data.get_path(external_dataset.filename).exists():
-                    raise HTTPException(
-                        status_code=404,
-                        detail=f"External dataset file {external_dataset.filename} not found",
-                    )
                 project.quickmodels.predict_on_external_dataset(
                     name=model_name,
                     username=current_user.username,

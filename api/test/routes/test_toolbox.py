@@ -6,7 +6,17 @@ import docx
 import pandas as pd
 from fastapi.testclient import TestClient
 
+from test.utils import upload_staged
+
 TIMEOUT = 180
+
+
+def _toolbox_upload(client: TestClient, headers: dict[str, str], content: bytes, filename: str):
+    """
+    Upload a file to the preparation tool through the chunked-upload protocol.
+    """
+    upload_id = upload_staged(client, headers, content, filename)
+    return client.post(f"/api/toolbox/upload?upload_id={upload_id}", headers=headers)
 
 
 def _wait_for_task(
@@ -36,11 +46,7 @@ def test_prepare_csv_chunk_and_export(client: TestClient, superuser_headers: dic
     csv_content = (
         "doc,content,source\na,one two three four five six,press\nb,seven eight,web\n"
     ).encode()
-    r = client.post(
-        "/api/toolbox/upload",
-        headers=superuser_headers,
-        files={"file": ("test.csv", io.BytesIO(csv_content), "text/csv")},
-    )
+    r = _toolbox_upload(client, superuser_headers, csv_content, "test.csv")
     assert r.status_code == 200, r.text
     session = r.json()
     assert session["columns"] == ["doc", "content", "source"]
@@ -95,11 +101,7 @@ def test_prepare_zip_wtpsplit(client: TestClient, superuser_headers: dict[str, s
         zf.writestr("doc3.docx", docx_buffer.getvalue())
     zip_buffer.seek(0)
 
-    r = client.post(
-        "/api/toolbox/upload",
-        headers=superuser_headers,
-        files={"file": ("corpus.zip", zip_buffer, "application/zip")},
-    )
+    r = _toolbox_upload(client, superuser_headers, zip_buffer.getvalue(), "corpus.zip")
     assert r.status_code == 200, r.text
     session = r.json()
     assert session["columns"] == ["id", "text"]
@@ -135,11 +137,7 @@ def test_prepare_split_invalid_params(client: TestClient, superuser_headers: dic
     """
     Invalid regex or unknown session are rejected
     """
-    r = client.post(
-        "/api/toolbox/upload",
-        headers=superuser_headers,
-        files={"file": ("test.csv", io.BytesIO(b"a,b\n1,2\n"), "text/csv")},
-    )
+    r = _toolbox_upload(client, superuser_headers, b"a,b\n1,2\n", "test.csv")
     assert r.status_code == 200, r.text
     session_id = r.json()["session_id"]
 
@@ -201,11 +199,7 @@ def test_prepare_stop_task(client: TestClient, superuser_headers: dict[str, str]
     """
     A running split task can be stopped by its owner
     """
-    r = client.post(
-        "/api/toolbox/upload",
-        headers=superuser_headers,
-        files={"file": ("test.csv", io.BytesIO(b"a,b\n1,some text to split\n"), "text/csv")},
-    )
+    r = _toolbox_upload(client, superuser_headers, b"a,b\n1,some text to split\n", "test.csv")
     assert r.status_code == 200, r.text
     session = r.json()
 

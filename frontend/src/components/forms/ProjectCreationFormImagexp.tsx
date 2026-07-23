@@ -2,14 +2,10 @@
 import { FC, useState } from 'react';
 import { SubmitHandler, useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
-import {
-  getProjectStatus,
-  useAddFeature,
-  useAddProjectFile,
-  useCreateProject,
-} from '../../core/api';
+import { getProjectStatus, useAddFeature, useCreateProject } from '../../core/api';
 import { useNotifications } from '../../core/notifications';
 import { useAppContext } from '../../core/useAppContext';
+import { useChunkedUpload } from '../../core/useChunkedUpload';
 import { getRandomName } from '../../core/utils';
 import { UploadProgressBar } from '../UploadProgressBar';
 
@@ -29,7 +25,7 @@ export const ProjectCreationFormImagexp: FC = () => {
   const { notify } = useNotifications();
   const { resetContext } = useAppContext();
   const createProject = useCreateProject();
-  const { addProjectFile, progression, cancel } = useAddProjectFile();
+  const { uploadChunked, progression, cancel } = useChunkedUpload();
   const addFeature = useAddFeature();
   const [submitting, setSubmitting] = useState(false);
   const [creationProgress, setCreationProgress] = useState<number | null>(null);
@@ -48,14 +44,14 @@ export const ProjectCreationFormImagexp: FC = () => {
     }
     setSubmitting(true);
     try {
-      // upload the zip (kind=image switches the backend validation)
-      await addProjectFile(data.project_name, file, 'image');
+      // chunk-upload the zip; kind=image switches the backend validation
+      const staged = await uploadChunked(file);
       const slug = await createProject({
         // the kind field is persisted in parameters JSON
         // (see ProjectBaseModel in api/activetigger/datamodels.py)
         kind: 'image',
         project_name: data.project_name,
-        filename: file.name,
+        upload_id: staged.uploadId,
         n_train: Number(data.n_train),
         n_test: Number(data.n_test),
         n_valid: Number(data.n_valid),

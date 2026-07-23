@@ -363,7 +363,12 @@ export interface paths {
     put?: never;
     /**
      * New Project
-     * @description Start the creation of a new project
+     * @description Start the creation of a new project.
+     *
+     *     The data file is referenced by `project.upload_id` (chunked-upload
+     *     protocol, see activetigger.uploads) and moved here into the new project
+     *     folder — unless the data comes from another project or a toy dataset
+     *     (`from_project` / `from_toy_dataset`), placed by /files/copy/project.
      */
     post: operations['new_project_projects_new_post'];
     delete?: never;
@@ -494,8 +499,11 @@ export interface paths {
     put?: never;
     /**
      * Add Testdata
-     * @description Delete existing eval/test dataset or
-     *     Add a dataset for eval/test when there is none available
+     * @description Add a dataset for eval/test when there is none available.
+     *
+     *     The data file(s) are referenced by upload id (chunked-upload protocol,
+     *     see activetigger.uploads) and moved here into the project data folder,
+     *     where the async task reads them back by filename.
      */
     post: operations['add_testdata_projects_evalset_add_post'];
     delete?: never;
@@ -741,7 +749,8 @@ export interface paths {
     put?: never;
     /**
      * Post Annotation File
-     * @description Load annotations file
+     * @description Load annotations from a staged upload (chunked-upload protocol,
+     *     see activetigger.uploads) referenced by annotationsdata.upload_id.
      */
     post: operations['post_annotation_file_annotation_file_post'];
     delete?: never;
@@ -1034,10 +1043,9 @@ export interface paths {
     put?: never;
     /**
      * Import Feature
-     * @description Import a pre-computed feature from an uploaded file.
-     *
-     *     All target columns must be numeric. The stored feature is named
-     *     `imported-<name>`.
+     * @description Import a pre-computed feature from a staged upload (chunked-upload
+     *     protocol, see activetigger.uploads). All target columns must be numeric.
+     *     The stored feature is named `imported-<name>`.
      */
     post: operations['import_feature_features_import_post'];
     delete?: never;
@@ -1927,47 +1935,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/files/add/project': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /**
-     * Upload File Project
-     * @description Upload a file on the server to create a new project
-     *     use: type de file
-     */
-    post: operations['upload_file_project_files_add_project_post'];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/files/add/dataset': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /**
-     * Upload File Dataset
-     * @description Upload a file on the server for a project in the data folder
-     */
-    post: operations['upload_file_dataset_files_add_dataset_post'];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   '/files/copy/project': {
     parameters: {
       query?: never;
@@ -2297,8 +2264,8 @@ export interface paths {
     put?: never;
     /**
      * Upload Prepare File
-     * @description Upload a file (csv/xlsx/parquet or zip of txt/docx) for the dataset
-     *     preparation tool. Normalize it as raw.parquet in a new session
+     * @description Ingest a staged upload (chunked-upload protocol) into the dataset
+     *     preparation tool: normalize it as raw.parquet in a new session
      *     directory and return its columns and a preview.
      */
     post: operations['upload_prepare_file_toolbox_upload_post'];
@@ -2383,6 +2350,87 @@ export interface paths {
     put?: never;
     post?: never;
     delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/upload/start': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Start Upload
+     * @description Open a chunked-upload session. Large files are sent as a sequence of
+     *     small requests so no single request outlives reverse-proxy timeouts.
+     */
+    post: operations['start_upload_upload_start_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/upload/chunk': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Upload Chunk
+     * @description Store one chunk of a staged upload (idempotent per index, retryable).
+     */
+    post: operations['upload_chunk_upload_chunk_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/upload/finish': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Finish Upload
+     * @description Assemble the chunks into the final staged file.
+     */
+    post: operations['finish_upload_upload_finish_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/upload/{upload_id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Cancel Upload
+     * @description Cancel a staged upload and remove its data.
+     */
+    delete: operations['cancel_upload_upload__upload_id__delete'];
     options?: never;
     head?: never;
     patch?: never;
@@ -2586,7 +2634,13 @@ export interface components {
       /** Selection */
       selection?: string | null;
     };
-    /** AnnotationsDataModel */
+    /**
+     * AnnotationsDataModel
+     * @description Import annotations from a file.
+     *
+     *     The file itself is sent beforehand through the chunked-upload protocol
+     *     (see activetigger.uploads); `upload_id` references the staged csv.
+     */
     AnnotationsDataModel: {
       /** Col Id */
       col_id: string;
@@ -2594,8 +2648,8 @@ export interface components {
       col_label: string;
       /** Scheme */
       scheme: string;
-      /** Csv */
-      csv: string;
+      /** Upload Id */
+      upload_id: string;
       /** Filename */
       filename?: string | null;
     };
@@ -2763,8 +2817,6 @@ export interface components {
       name: string;
       /** Id Column */
       id_column: string;
-      /** File */
-      file: string;
       /** Columns */
       columns?: string | null;
     };
@@ -2792,18 +2844,8 @@ export interface components {
        */
       client_secret?: string | null;
     };
-    /** Body_upload_file_dataset_files_add_dataset_post */
-    Body_upload_file_dataset_files_add_dataset_post: {
-      /** File */
-      file: string;
-    };
-    /** Body_upload_file_project_files_add_project_post */
-    Body_upload_file_project_files_add_project_post: {
-      /** File */
-      file: string;
-    };
-    /** Body_upload_prepare_file_toolbox_upload_post */
-    Body_upload_prepare_file_toolbox_upload_post: {
+    /** Body_upload_chunk_upload_chunk_post */
+    Body_upload_chunk_upload_chunk_post: {
       /** File */
       file: string;
     };
@@ -3020,7 +3062,14 @@ export interface components {
       /** Rank */
       rank?: number | null;
     };
-    /** EvalSetDataModel */
+    /**
+     * EvalSetDataModel
+     * @description Add an eval/test set to a text project.
+     *
+     *     The data file is sent beforehand through the chunked-upload protocol
+     *     (see activetigger.uploads); `upload_id` references it. `filename` is
+     *     filled server-side from the staged file's sanitized name.
+     */
     EvalSetDataModel: {
       /** Cols Text */
       cols_text: string[];
@@ -3028,10 +3077,10 @@ export interface components {
       col_id: string;
       /** N Eval */
       n_eval: number;
+      /** Upload Id */
+      upload_id: string;
       /** Filename */
-      filename: string;
-      /** Csv */
-      csv: string;
+      filename?: string | null;
       /**
        * Cols Label
        * @default []
@@ -3042,12 +3091,17 @@ export interface components {
      * EvalSetImageModel
      * @description Eval-set payload for image projects.
      *
-     *     The image zip and optional labels file are uploaded via /files/add/dataset
-     *     before this body is POSTed, so we only carry filenames here, not bytes.
+     *     The image zip and optional labels file are sent beforehand through the
+     *     chunked-upload protocol (see activetigger.uploads) and referenced by
+     *     upload id. The filenames are filled server-side.
      */
     EvalSetImageModel: {
+      /** Upload Id */
+      upload_id: string;
+      /** Labels Upload Id */
+      labels_upload_id?: string | null;
       /** Filename */
-      filename: string;
+      filename?: string | null;
       /** N Eval */
       n_eval?: number | null;
       /** Labels Filename */
@@ -3856,11 +3910,8 @@ export interface components {
      * @description Status of a dataset preparation split task
      */
     PrepareStatusModel: {
-      /**
-       * Status
-       * @enum {string}
-       */
-      status: 'pending' | 'running' | 'done' | 'failed' | 'not found';
+      /** Status */
+      status: ('pending' | 'running' | 'done' | 'failed' | 'not found') | string;
       /** Progress */
       progress?: number | null;
       /** Error */
@@ -3925,6 +3976,8 @@ export interface components {
        * @default false
        */
       from_toy_dataset: boolean;
+      /** Upload Id */
+      upload_id?: string | null;
       /** Filename */
       filename?: string | null;
       /** Dir */
@@ -4086,6 +4139,8 @@ export interface components {
        * @default false
        */
       from_toy_dataset: boolean;
+      /** Upload Id */
+      upload_id?: string | null;
       /** Filename */
       filename?: string | null;
       /** Dir */
@@ -4654,14 +4709,21 @@ export interface components {
       /** Total */
       total: number;
     };
-    /** TextDatasetModel */
+    /**
+     * TextDatasetModel
+     * @description External dataset for prediction, sent beforehand through the
+     *     chunked-upload protocol (see activetigger.uploads); `upload_id`
+     *     references it. `filename` is filled server-side.
+     */
     TextDatasetModel: {
       /** Id */
       id: string;
       /** Cols Text */
       cols_text: string[];
+      /** Upload Id */
+      upload_id: string;
       /** Filename */
-      filename: string;
+      filename?: string | null;
       /** Path */
       path?: string | null;
     };
@@ -4803,6 +4865,34 @@ export interface components {
       Representation: string;
       /** Representative Docs */
       Representative_Docs: string;
+    };
+    /** UploadFinishedModel */
+    UploadFinishedModel: {
+      /** Upload Id */
+      upload_id: string;
+      /** Filename */
+      filename: string;
+      /** Size */
+      size: number;
+    };
+    /** UploadSessionModel */
+    UploadSessionModel: {
+      /** Upload Id */
+      upload_id: string;
+      /** Filename */
+      filename: string;
+    };
+    /**
+     * UploadStartModel
+     * @description Open a chunked-upload staging session (see activetigger.uploads)
+     */
+    UploadStartModel: {
+      /** Filename */
+      filename: string;
+      /** Total Size */
+      total_size: number;
+      /** Total Chunks */
+      total_chunks: number;
     };
     /**
      * UserModel
@@ -6510,6 +6600,7 @@ export interface operations {
   import_feature_features_import_post: {
     parameters: {
       query: {
+        upload_id: string;
         project_slug: string;
       };
       header?: never;
@@ -6518,7 +6609,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'multipart/form-data': components['schemas']['Body_import_feature_features_import_post'];
+        'application/x-www-form-urlencoded': components['schemas']['Body_import_feature_features_import_post'];
       };
     };
     responses: {
@@ -7993,77 +8084,6 @@ export interface operations {
       };
     };
   };
-  upload_file_project_files_add_project_post: {
-    parameters: {
-      query: {
-        project_name: string;
-        kind?: string;
-      };
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        'multipart/form-data': components['schemas']['Body_upload_file_project_files_add_project_post'];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': unknown;
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['HTTPValidationError'];
-        };
-      };
-    };
-  };
-  upload_file_dataset_files_add_dataset_post: {
-    parameters: {
-      query: {
-        project_slug: string;
-      };
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        'multipart/form-data': components['schemas']['Body_upload_file_dataset_files_add_dataset_post'];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': unknown;
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['HTTPValidationError'];
-        };
-      };
-    };
-  };
   copy_existing_data_files_copy_project_post: {
     parameters: {
       query: {
@@ -8545,16 +8565,14 @@ export interface operations {
   };
   upload_prepare_file_toolbox_upload_post: {
     parameters: {
-      query?: never;
+      query: {
+        upload_id: string;
+      };
       header?: never;
       path?: never;
       cookie?: never;
     };
-    requestBody: {
-      content: {
-        'multipart/form-data': components['schemas']['Body_upload_prepare_file_toolbox_upload_post'];
-      };
-    };
+    requestBody?: never;
     responses: {
       /** @description Successful Response */
       200: {
@@ -8680,6 +8698,137 @@ export interface operations {
       };
       header?: never;
       path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
+  start_upload_upload_start_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UploadStartModel'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UploadSessionModel'];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
+  upload_chunk_upload_chunk_post: {
+    parameters: {
+      query: {
+        upload_id: string;
+        index: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'multipart/form-data': components['schemas']['Body_upload_chunk_upload_chunk_post'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
+  finish_upload_upload_finish_post: {
+    parameters: {
+      query: {
+        upload_id: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UploadFinishedModel'];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
+  cancel_upload_upload__upload_id__delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        upload_id: string;
+      };
       cookie?: never;
     };
     requestBody?: never;

@@ -1,4 +1,3 @@
-import io
 import shutil
 import uuid
 import zipfile
@@ -54,22 +53,49 @@ class AddEvalSet(BaseTask):
                 self.project_model.dir.joinpath(file_name).unlink(missing_ok=True)
             raise Exception("Adding evaluation set process interrupted by user")
 
-    def __call__(
-        self,
-    ) -> Tuple[Tuple[str, str, str, list[Tuple[str, list]]], ProjectBaseModel]:
-        try:
-            self.__stop_process_opportunity()
-            csv_buffer = io.StringIO(self.evalset.csv)
-            dtype_map: dict[str, type] = {col: str for col in self.evalset.cols_text}
-            if self.evalset.col_id != "row_number":
-                dtype_map[self.evalset.col_id] = str
-            df = pd.read_csv(
-                csv_buffer,
+    def __read_evalset_file(self, dtype_map: dict[str, type]) -> pd.DataFrame:
+        """
+        Read the eval set from the file referenced by evalset.filename
+        (uploaded beforehand into the project data folder).
+        """
+        if not self.evalset.filename:
+            raise Exception("No evalset content provided")
+        if self.project_model.dir is None:
+            raise Exception("Cannot add eval data without a valid dir")
+        path = Path(self.project_model.dir).joinpath("data", self.evalset.filename)
+        if not path.exists():
+            raise Exception(f"Evalset file {self.evalset.filename} not found")
+        lower = str(path).lower()
+        if lower.endswith(".csv"):
+            return pd.read_csv(
+                path,
                 sep=None,
                 engine="python",
                 dtype=cast(Any, dtype_map),
                 nrows=self.evalset.n_eval,
             )
+        if lower.endswith(".parquet"):
+            df = pd.read_parquet(path).head(self.evalset.n_eval)
+        elif lower.endswith(".xlsx"):
+            df = pd.read_excel(path, nrows=self.evalset.n_eval)
+        else:
+            raise Exception("Evalset file must be .csv, .parquet, or .xlsx")
+        for col, kind in dtype_map.items():
+            if col in df.columns:
+                df[col] = df[col].astype(kind)
+        return df
+
+    def __call__(
+        self,
+    ) -> Tuple[Tuple[str, str, str, list[Tuple[str, list]]], ProjectBaseModel]:
+        try:
+            self.__stop_process_opportunity()
+            dtype_map: dict[str, type] = {col: str for col in self.evalset.cols_text}
+            if self.evalset.col_id != "row_number":
+                dtype_map[self.evalset.col_id] = str
+            # the data file was uploaded beforehand into the project data
+            # folder (chunked upload via /files/add/dataset), referenced by name
+            df = self.__read_evalset_file(dtype_map)
             if len(df) > 10000:
                 raise Exception("You valid set is too large")
             # added a check if DF is empty to avoid errors
@@ -212,6 +238,8 @@ class AddEvalSetImage(BaseTask):
                 raise Exception("Dataset should be test or valid")
             if self.project_model.dir is None:
                 raise Exception("Project directory is missing")
+            if not self.evalset.filename:
+                raise Exception("No data file associated with the evalset")
 
             project_dir = self.project_model.dir
             data_dir = project_dir.joinpath("data")

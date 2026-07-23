@@ -8,7 +8,7 @@ from pathlib import Path
 
 import docx
 import pandas as pd
-from fastapi import HTTPException, UploadFile
+from fastapi import HTTPException
 from fastapi.responses import FileResponse
 
 from activetigger.config import config
@@ -143,11 +143,12 @@ class Toolbox:
     def _preview(self, df: pd.DataFrame) -> list[dict]:
         return df.head(self.PREVIEW_ROWS).fillna("").astype(str).to_dict("records")
 
-    def upload(self, username: str, file: UploadFile) -> PrepareSessionModel:
+    def upload(self, username: str, staged_path: Path, filename: str) -> PrepareSessionModel:
         """
-        Save an uploaded file (csv/xlsx/parquet or zip of txt/docx),
-        normalize it as raw.parquet in a new session directory and return
-        its columns and a preview.
+        Ingest a staged upload (chunked-upload protocol, see
+        activetigger.uploads): move the file (same filesystem) into a new
+        session directory, normalize it as raw.parquet and return its
+        columns and a preview. Accepts csv/xlsx/parquet or zip of txt/docx.
         """
         user_dir = self._user_dir(username)
         self._clean_old_sessions(user_dir)
@@ -156,10 +157,8 @@ class Toolbox:
         session_dir = user_dir.joinpath(session_id)
         session_dir.mkdir(parents=True)
         try:
-            target = safe_upload_path(session_dir, file.filename, self.ALLOWED_EXTENSIONS)
-            with open(target, "wb") as out_file:
-                while chunk := file.file.read(1024 * 1024):
-                    out_file.write(chunk)
+            target = safe_upload_path(session_dir, filename, self.ALLOWED_EXTENSIONS)
+            shutil.move(str(staged_path), target)
 
             if str(target).lower().endswith(".zip"):
                 df = self._read_zip_documents(target)
@@ -173,7 +172,7 @@ class Toolbox:
 
             return PrepareSessionModel(
                 session_id=session_id,
-                filename=file.filename or "file",
+                filename=filename,
                 columns=list(df.columns),
                 n_rows=len(df),
                 preview=self._preview(df),

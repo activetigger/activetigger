@@ -1,15 +1,12 @@
-import io
 from typing import Annotated
 
 import pandas as pd
 from fastapi import (
     APIRouter,
     Depends,
-    File,
     Form,
     HTTPException,
     Query,
-    UploadFile,
 )
 
 from activetigger.app.dependencies import (
@@ -25,6 +22,7 @@ from activetigger.datamodels import (
 )
 from activetigger.orchestrator import get_orchestrator
 from activetigger.project import Project
+from activetigger.uploads import get_upload_staging
 
 router = APIRouter(tags=["features"])
 
@@ -111,34 +109,31 @@ def reset_features(
 def import_feature(
     project: Annotated[Project, Depends(get_project)],
     current_user: Annotated[UserInDBModel, Depends(verified_user)],
+    upload_id: str,
     name: str = Form(...),
     id_column: str = Form(...),
-    file: UploadFile = File(...),
     columns: str | None = Form(None),
 ) -> None:
     """
-    Import a pre-computed feature from an uploaded file.
-
-    All target columns must be numeric. The stored feature is named
-    `imported-<name>`.
+    Import a pre-computed feature from a staged upload (chunked-upload
+    protocol, see activetigger.uploads). All target columns must be numeric.
+    The stored feature is named `imported-<name>`.
     """
     test_rights(ProjectAction.ADD, current_user.username, project.name)
 
-    filename = file.filename or ""
-    lower = filename.lower()
-    if not lower.endswith(_ALLOWED_IMPORT_EXTENSIONS):
-        allowed = ", ".join(ext.lstrip(".") for ext in _ALLOWED_IMPORT_EXTENSIONS)
-        raise HTTPException(status_code=400, detail=f"Only {allowed} files are allowed")
+    staging = get_upload_staging()
+    staged_path, filename = staging.claim(
+        current_user.username, upload_id, _ALLOWED_IMPORT_EXTENSIONS
+    )
 
     try:
-        raw = file.file.read()
-        buf = io.BytesIO(raw)
+        lower = filename.lower()
         if lower.endswith(".csv"):
-            df = pd.read_csv(buf, sep=None, engine="python")
+            df = pd.read_csv(staged_path, sep=None, engine="python")
         elif lower.endswith(".parquet"):
-            df = pd.read_parquet(buf)
+            df = pd.read_parquet(staged_path)
         else:
-            df = pd.read_excel(buf)
+            df = pd.read_excel(staged_path)
 
         selected = (
             [c.strip() for c in columns.split(",") if c.strip()]
@@ -157,17 +152,15 @@ def import_feature(
         get_orchestrator().log_action(
             current_user.username, f"IMPORT FEATURE: {full_name}", project.name
         )
+        # the staged file is consumed only on success so a failed import
+        # can be retried without re-uploading
+        staging.discard(current_user.username, upload_id)
     except HTTPException:
         raise
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        try:
-            file.file.close()
-        except Exception:
-            pass
 
 
 @router.get("/features/available", dependencies=[Depends(verified_user)])
