@@ -3890,7 +3890,7 @@ export interface components {
        * Method
        * @enum {string}
        */
-      method: 'chunk' | 'regex' | 'wtpsplit';
+      method: 'chunk' | 'regex' | 'wtpsplit' | 'none';
       /** Chunk Size */
       chunk_size?: number | null;
       /** Regex Pattern */
@@ -3904,6 +3904,26 @@ export interface components {
        * @default 10
        */
       min_chars: number;
+      /**
+       * Drop Duplicates
+       * @default false
+       */
+      drop_duplicates: boolean;
+      /**
+       * Remove Html
+       * @default false
+       */
+      remove_html: boolean;
+      /**
+       * Remove Urls
+       * @default false
+       */
+      remove_urls: boolean;
+      /**
+       * Force Unique Id
+       * @default false
+       */
+      force_unique_id: boolean;
     };
     /**
      * PrepareStatusModel

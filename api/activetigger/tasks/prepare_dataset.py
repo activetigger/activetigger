@@ -134,6 +134,20 @@ class PrepareDataset(BaseTask):
             else:
                 ids = [str(i) for i in range(len(df))]
 
+            # suffix duplicated ids so every source row gets a distinct id
+            if self.params.force_unique_id:
+                seen_ids: set[str] = set()
+                unique_ids = []
+                for i in ids:
+                    candidate = i
+                    n = 1
+                    while candidate in seen_ids:
+                        n += 1
+                        candidate = f"{i}-{n}"
+                    seen_ids.add(candidate)
+                    unique_ids.append(candidate)
+                ids = unique_ids
+
             cols_keep = [c for c in self.params.cols_keep if c in df.columns]
             keep_records = (
                 df[cols_keep].to_dict("records") if cols_keep else [{} for _ in range(len(df))]
@@ -141,6 +155,15 @@ class PrepareDataset(BaseTask):
             # everything needed is extracted, free the dataframe before splitting
             del df
             gc.collect()
+
+            # optional cleaning before splitting
+            if self.params.remove_html:
+                texts = [re.sub(r"</?[a-zA-Z][^>]*>|<!--.*?-->", "", t, flags=re.S) for t in texts]
+            if self.params.remove_urls:
+                texts = [re.sub(r"https?://\S+|www\.\S+", "", t) for t in texts]
+            if self.params.remove_html or self.params.remove_urls:
+                # collapse spaces left behind by the removals (newlines kept)
+                texts = [re.sub(r"[ \t]{2,}", " ", t) for t in texts]
 
             if self.params.method == "chunk":
                 if not self.params.chunk_size or self.params.chunk_size <= 0:
@@ -162,6 +185,8 @@ class PrepareDataset(BaseTask):
                         self._write_progress(i, len(texts))
             elif self.params.method == "wtpsplit":
                 all_chunks = self._split_wtpsplit(texts)
+            elif self.params.method == "none":
+                all_chunks = [[c for c in [text.strip()] if c] for text in texts]
             else:
                 raise Exception(f"Unknown split method {self.params.method}")
 
@@ -169,6 +194,21 @@ class PrepareDataset(BaseTask):
             min_chars = max(self.params.min_chars, 0)
             if min_chars > 0:
                 all_chunks = [[c for c in chunks if len(c) >= min_chars] for chunks in all_chunks]
+
+            # drop units whose trimmed text already appeared (first occurrence kept)
+            if self.params.drop_duplicates:
+                seen: set[str] = set()
+                deduped = []
+                for chunks in all_chunks:
+                    kept = []
+                    for c in chunks:
+                        key = c.strip()
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        kept.append(c)
+                    deduped.append(kept)
+                all_chunks = deduped
 
             del texts
             rows = []

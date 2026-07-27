@@ -28,12 +28,16 @@ interface PrepareFormValues {
   cols_text: string[];
   col_id: string;
   cols_keep: string[];
-  method: 'chunk' | 'regex' | 'wtpsplit';
+  method: 'chunk' | 'regex' | 'wtpsplit' | 'none';
   chunk_size: number;
   regex_pattern: string;
   granularity: 'sentence' | 'paragraph';
   language: string;
   min_chars: number;
+  drop_duplicates: boolean;
+  remove_html: boolean;
+  remove_urls: boolean;
+  force_unique_id: boolean;
 }
 
 const langages = [
@@ -87,6 +91,10 @@ export const DatasetPreparationForm: FC = () => {
       granularity: 'sentence',
       language: 'en',
       min_chars: 10,
+      drop_duplicates: false,
+      remove_html: false,
+      remove_urls: false,
+      force_unique_id: false,
     },
   });
   const files = useWatch({ control, name: 'files' });
@@ -189,6 +197,10 @@ export const DatasetPreparationForm: FC = () => {
       granularity: formData.method === 'wtpsplit' ? formData.granularity : null,
       language: formData.method === 'wtpsplit' ? formData.language : null,
       min_chars: Math.max(Number(formData.min_chars) || 0, 0),
+      drop_duplicates: formData.drop_duplicates,
+      remove_html: formData.remove_html,
+      remove_urls: formData.remove_urls,
+      force_unique_id: formData.force_unique_id,
     });
     if (!newTaskId) return;
 
@@ -378,6 +390,7 @@ export const DatasetPreparationForm: FC = () => {
             <option value="chunk">Chunks of about N characters (words are not cut)</option>
             <option value="regex">Split on a regex pattern</option>
             <option value="wtpsplit">Sentences or paragraphs (wtpsplit segmentation model)</option>
+            <option value="none">Do not split (keep each text as one row)</option>
           </select>
 
           {method === 'chunk' && (
@@ -438,8 +451,52 @@ export const DatasetPreparationForm: FC = () => {
             {...register('min_chars')}
           />
 
+          <details>
+            <summary>Advanced settings</summary>
+            <div>
+              <input
+                id="drop_duplicates"
+                type="checkbox"
+                disabled={splitting}
+                {...register('drop_duplicates')}
+              />
+              <label htmlFor="drop_duplicates">
+                Drop duplicates (rows with exactly the same text once trimmed)
+              </label>
+            </div>
+            <div>
+              <input
+                id="remove_html"
+                type="checkbox"
+                disabled={splitting}
+                {...register('remove_html')}
+              />
+              <label htmlFor="remove_html">Remove HTML tags (the text content is kept)</label>
+            </div>
+            <div>
+              <input
+                id="remove_urls"
+                type="checkbox"
+                disabled={splitting}
+                {...register('remove_urls')}
+              />
+              <label htmlFor="remove_urls">Remove URLs</label>
+            </div>
+            <div>
+              <input
+                id="force_unique_id"
+                type="checkbox"
+                disabled={splitting}
+                {...register('force_unique_id')}
+              />
+              <label htmlFor="force_unique_id">
+                Force unique ids (duplicated ids get a suffix to differentiate them)
+              </label>
+            </div>
+          </details>
+
           <button type="submit" className="btn-submit" disabled={splitting}>
-            Split the dataset
+            Prepare the dataset
           </button>
           {splitting && (
             <UploadProgressBar
