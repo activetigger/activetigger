@@ -51,7 +51,7 @@ export const BertopicForm: FC<BertopicCreationFormProps> = ({
       <div>
         <div className="alert alert-warning">
           BERTopic reuses embeddings from a project feature. Compute a sentence-embeddings feature
-          first, then come back here to run BERTopic on it.
+          (or import pre-computed embeddings) first, then come back here to run BERTopic on it.
         </div>
         {projectSlug && <ButtonNewFeature projectSlug={projectSlug} />}
       </div>

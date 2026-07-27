@@ -86,8 +86,9 @@ class Bertopic:
 
         if not parameters.existing_feature:
             raise ValueError(
-                "existing_feature is required: pick a sentence-embeddings or "
-                "bert-embeddings feature from the project's Features page."
+                "existing_feature is required: pick a sentence-embeddings, "
+                "bert-embeddings or imported-embeddings feature from the "
+                "project's Features page."
             )
         self._materialize_feature_embeddings(parameters)
 
@@ -193,14 +194,17 @@ class Bertopic:
             bindable_features=self._bindable_features(),
         )
 
-    EMBEDDING_FEATURE_KINDS = {"sentence-embeddings", "bert-embeddings"}
+    # "imported" features are user-uploaded numeric matrices (validated at
+    # import time), typically pre-computed embeddings — see issue #1106.
+    EMBEDDING_FEATURE_KINDS = {"sentence-embeddings", "bert-embeddings", "imported"}
 
     def _bindable_features(self) -> list[str]:
         """
         Project features that can be reused as BERTopic embeddings.
-        Sentence-embeddings (generic SBERT/HF embedders) and bert-embeddings
-        (extracted from a project-trained BERT) both yield per-row vectors
-        compatible with BERTopic.
+        Sentence-embeddings (generic SBERT/HF embedders), bert-embeddings
+        (extracted from a project-trained BERT) and imported features
+        (pre-computed embeddings uploaded by the user) all yield per-row
+        numeric vectors compatible with BERTopic.
         """
         try:
             available = self.features.get_available()

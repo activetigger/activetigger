@@ -634,7 +634,8 @@ class ComputeBertopicModel(BertopicParamsModel):
     Parameters for computing BERTopic model.
 
     BERTopic reuses embeddings from an existing project feature
-    (existing_feature must reference a sentence-embeddings feature).
+    (existing_feature must reference an embedding feature:
+    sentence-embeddings, bert-embeddings or imported).
     Embeddings are never recomputed from this endpoint — to add a new
     embedding model, use the project's Features page.
     """
