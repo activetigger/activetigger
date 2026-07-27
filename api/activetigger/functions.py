@@ -649,19 +649,23 @@ def get_dir_size(path: str = ".") -> float:
     (e.g. a project being deleted concurrently).
     """
     total: float = 0
-    try:
-        it = os.scandir(path)
-    except FileNotFoundError:
-        return 0
-    with it:
-        for entry in it:
-            try:
-                if entry.is_file():
-                    total += entry.stat().st_size / (1024 * 1024)
-                elif entry.is_dir():
-                    total += get_dir_size(entry.path)
-            except FileNotFoundError:
-                continue
+    stack: list[str] = [str(path)]
+    while stack:
+        current_path = stack.pop()
+        try:
+            with os.scandir(current_path) as it:
+                for entry in it:
+                    try:
+                        if entry.is_file(follow_symlinks=False):
+                            total += entry.stat(follow_symlinks=False).st_size / (
+                                1024**2
+                            )  # Convert to MB
+                        elif entry.is_dir(follow_symlinks=False):
+                            stack.append(entry.path)
+                    except (FileNotFoundError, PermissionError, OSError):
+                        continue
+        except (FileNotFoundError, PermissionError, OSError):
+            continue
     return total
 
 
