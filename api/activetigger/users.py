@@ -214,7 +214,11 @@ class Users:
         if name not in self.existing_users():
             raise Exception("Username doesn't exist or is deactivated")
         user = self.db_manager.users_service.get_user(name)
-        return UserInDBModel(username=name, hashed_password=user.key, status=user.description)
+        return UserInDBModel(
+            username=name,
+            hashed_password=user.key,
+            status=(user.informations or {}).get("status"),
+        )
 
     def authenticate_user(self, username: str, password: str) -> UserInDBModel:
         """

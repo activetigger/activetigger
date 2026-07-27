@@ -77,7 +77,7 @@ class Users(Base):
         DateTime(timezone=True), server_default=func.now()
     )
     key: Mapped[str]
-    description: Mapped[str]
+    informations: Mapped[dict[str, Any]] = mapped_column(JSON)
     contact: Mapped[str] = mapped_column(Text)
     created_by: Mapped[str]
     projects: Mapped[list[Projects]] = relationship(

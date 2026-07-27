@@ -34,7 +34,7 @@ class UsersService:
             user = Users(
                 user_name=user_name,
                 key=password,
-                description=role,
+                informations={"status": role},
                 created_by=created_by,
                 contact=contact,
                 deactivated=None,
