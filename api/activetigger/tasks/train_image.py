@@ -36,6 +36,7 @@ from activetigger.functions import (
     get_metrics_multilabel,
     logits_to_probs,
     matrix_to_label,
+    release_device_memory,
     split_annotation,
 )
 from activetigger.functions_image import filter_readable_images
@@ -686,10 +687,7 @@ class TrainImage(BaseTask):
             self.event = None
             gc.collect()
             try:
-                if torch.cuda.is_available():
-                    torch.cuda.synchronize()
-                    torch.cuda.empty_cache()
-                    torch.cuda.ipc_collect()
+                release_device_memory()
             except Exception as e:
                 print("Error in cleaning GPU memory", e)
 

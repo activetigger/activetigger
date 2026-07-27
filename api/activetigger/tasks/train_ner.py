@@ -25,7 +25,7 @@ from transformers import (
 
 from activetigger.config import config
 from activetigger.datamodels import EventsModel, LMParametersModel
-from activetigger.functions import get_device
+from activetigger.functions import get_device, release_device_memory
 from activetigger.monitoring import TaskTimer
 from activetigger.ner_metrics import compute_ner_metrics
 from activetigger.tasks.base_task import BaseTask
@@ -704,10 +704,7 @@ class TrainNer(BaseTask):
         finally:
             try:
                 del trainer, model, tokenizer, self.df, device, self.event
-                if torch.cuda.is_available():
-                    torch.cuda.synchronize()
-                    torch.cuda.empty_cache()
-                    torch.cuda.ipc_collect()
+                release_device_memory()
                 gc.collect()
             except Exception as e:
                 print("Error cleaning memory", e)

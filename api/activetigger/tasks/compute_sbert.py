@@ -11,7 +11,7 @@ from pandas import DataFrame, Series
 from sentence_transformers import SentenceTransformer
 
 from activetigger.config import config
-from activetigger.functions import get_device
+from activetigger.functions import get_device, release_device_memory
 from activetigger.tasks.base_task import BaseTask
 
 
@@ -131,7 +131,4 @@ class ComputeSbert(BaseTask):
                 del sbert
             del self.texts
             gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
-                torch.cuda.empty_cache()
-                torch.cuda.ipc_collect()
+            release_device_memory()

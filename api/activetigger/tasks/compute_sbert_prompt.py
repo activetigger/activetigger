@@ -17,7 +17,7 @@ from typing import Optional
 import numpy as np
 
 from activetigger.config import config
-from activetigger.functions import get_device
+from activetigger.functions import get_device, release_device_memory
 from activetigger.tasks.base_task import BaseTask
 
 
@@ -57,7 +57,6 @@ class ComputeSbertPrompt(BaseTask):
             self.path_progress = self.path_process.joinpath(self.unique_id)
 
         try:
-            import torch  # type: ignore[import]
             from sentence_transformers import SentenceTransformer  # type: ignore[import]
         except ImportError as e:
             raise ImportError(
@@ -99,7 +98,4 @@ class ComputeSbertPrompt(BaseTask):
             if model is not None:
                 del model
             gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
-                torch.cuda.empty_cache()
-                torch.cuda.ipc_collect()
+            release_device_memory()

@@ -34,6 +34,7 @@ from activetigger.functions import (
     get_metrics_multiclass,
     get_metrics_multilabel,
     logits_to_probs,
+    release_device_memory,
 )
 from activetigger.monitoring import TaskTimer
 from activetigger.tasks.base_task import BaseTask
@@ -458,10 +459,7 @@ class PredictBertMultiClass(BaseTask):
             except Exception:
                 pass
             gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
-                torch.cuda.empty_cache()
-                torch.cuda.ipc_collect()
+            release_device_memory()
 
         return ReturnTaskPredictModel(
             path=str(self.path.joinpath(self.file_name)),

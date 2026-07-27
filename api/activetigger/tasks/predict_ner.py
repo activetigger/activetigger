@@ -27,6 +27,7 @@ from activetigger.datamodels import (
 from activetigger.functions import (
     concat_text_columns,
     get_device,
+    release_device_memory,
 )
 from activetigger.monitoring import TaskTimer
 from activetigger.ner_metrics import compute_ner_metrics
@@ -310,10 +311,7 @@ class PredictNer(BaseTask):
             except Exception:
                 pass
             gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
-                torch.cuda.empty_cache()
-                torch.cuda.ipc_collect()
+            release_device_memory()
 
         return ReturnTaskPredictModel(
             path=str(self.path.joinpath(self.file_name)),

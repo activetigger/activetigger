@@ -15,7 +15,7 @@ from transformers import (
     AutoTokenizer,  # ty: ignore[possibly-missing-import]
 )
 
-from activetigger.functions import get_device
+from activetigger.functions import get_device, release_device_memory
 from activetigger.tasks.base_task import BaseTask
 
 
@@ -151,7 +151,4 @@ class ComputeBertEmbeddings(BaseTask):
                 pass
             del self.texts
             gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
-                torch.cuda.empty_cache()
-                torch.cuda.ipc_collect()
+            release_device_memory()

@@ -1,6 +1,17 @@
 #!/bin/bash
 set -e
 
+# The container starts as root so it can fix ownership of the named volumes
+# (venv, uv cache, HF cache), then drops privileges via gosu. The chown is
+# guarded: a recursive chown over downloaded models can take minutes, so it
+# only runs when the venv is not yet owned by the target user (first boot).
+if [ "$(id -u)" = "0" ]; then
+  if [ "$(stat -c %u /home/python/venv 2>/dev/null)" != "${USER_ID:-1000}" ]; then
+    chown -R "${USER_ID:-1000}:${GROUP_ID:-1000}" /home/python
+  fi
+  exec gosu "${USER_ID:-1000}:${GROUP_ID:-1000}" "$0" "$@"
+fi
+
 # Fail fast if the compose overlay declared a required MODE and .env disagrees.
 # The prod overlay sets EXPECTED_MODE=prod; the base/dev stack leaves it unset.
 if [ -n "$EXPECTED_MODE" ] && [ "$EXPECTED_MODE" != "$MODE" ]; then
@@ -23,7 +34,7 @@ if [ ! -f "${UV_PROJECT_ENVIRONMENT}/pyvenv.cfg" ]; then
   echo " ~ Creating python venv"
   echo " ~"
   echo
-  rm -rf "${UV_PROJECT_ENVIRONMENT}"
+  rm -rf "${UV_PROJECT_ENVIRONMENT:?}"/* "${UV_PROJECT_ENVIRONMENT:?}"/.[!.]* 2>/dev/null || true
   uv venv "${UV_PROJECT_ENVIRONMENT}"
 fi
 source "${UV_PROJECT_ENVIRONMENT}/bin/activate"
@@ -35,12 +46,13 @@ echo " ~"
 echo
 # install python deps
 cd /api
+
 if [ "$CPU_ONLY" = "true" ]; then
   echo "CPU-only mode: installing PyTorch without CUDA (~5GB savings)"
-  uv pip install --index-url https://download.pytorch.org/whl/cpu torch
-  uv sync
+  uv sync --extra cpu
 else
-  uv sync
+  echo "GPU mode: installing PyTorch with CUDA (~5GB extra)"
+  uv sync --extra gpu
   if [ "$GPU" = "true" ]; then
     echo "Mode GPU activated: installing cuml-cu12"
     uv pip install --extra-index-url https://pypi.nvidia.com cuml-cu12
@@ -67,7 +79,7 @@ if [ "$MODE" = "dev" ]; then
   echo " ~ Start api dev"
   echo " ~"
   echo
-  uv run python3 -m activetigger -p "$API_PORT"
+  uv run --no-sync python3 -m activetigger -p "$API_PORT"
 else
   echo
   echo " ~"
@@ -78,7 +90,7 @@ else
   # and runs a background asyncio update loop. Heavy compute is offloaded to
   # multiprocessing workers via queue_manager. --proxy-headers is required
   # because nginx forwards X-Forwarded-* in front of the API.
-  exec uv run uvicorn activetigger.app.main:app \
+  exec uv run --no-sync uvicorn activetigger.app.main:app \
     --host 0.0.0.0 \
     --port "$API_PORT" \
     --proxy-headers \

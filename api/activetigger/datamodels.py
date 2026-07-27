@@ -1559,12 +1559,16 @@ class PrepareSplitModel(BaseModel):
     cols_text: list[str]
     col_id: str = "row_number"
     cols_keep: list[str] = []
-    method: Literal["chunk", "regex", "wtpsplit"]
+    method: Literal["chunk", "regex", "wtpsplit", "none"]
     chunk_size: int | None = None
     regex_pattern: str | None = None
     granularity: Literal["sentence", "paragraph"] | None = None
     language: str | None = None
     min_chars: int = 10
+    drop_duplicates: bool = False
+    remove_html: bool = False
+    remove_urls: bool = False
+    force_unique_id: bool = False
 
 
 class PrepareTaskModel(BaseModel):

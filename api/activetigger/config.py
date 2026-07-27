@@ -93,6 +93,7 @@ DEFAULT_EMBEDDINGS_MODELS = {
     },
     "all-mpnet-base-v2": {},
     "Qwen/Qwen3-Embedding-0.6B": {},
+    "Qwen/Qwen3-Embedding-8B": {},
 }
 
 

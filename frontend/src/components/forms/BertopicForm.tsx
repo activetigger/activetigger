@@ -6,6 +6,7 @@ import { useComputeBertopic, useStopProcesses } from '../../core/api';
 import { useAppContext } from '../../core/useAppContext';
 import { getRandomName } from '../../core/utils';
 import { ComputeBertopicModel } from '../../types';
+import { ButtonNewFeature } from '../ButtonNewFeature';
 
 interface BertopicCreationFormProps {
   projectSlug: string | null;
@@ -47,10 +48,12 @@ export const BertopicForm: FC<BertopicCreationFormProps> = ({
 
   if (bindableFeatures.length === 0) {
     return (
-      <div className="alert alert-warning">
-        BERTopic reuses embeddings from a project feature. Compute a sentence-embeddings feature
-        first from the project <b>Settings</b> page, under the <b>Features</b> tab (
-        <i>Add a new feature</i>), then come back here to run BERTopic on it.
+      <div>
+        <div className="alert alert-warning">
+          BERTopic reuses embeddings from a project feature. Compute a sentence-embeddings feature
+          first, then come back here to run BERTopic on it.
+        </div>
+        {projectSlug && <ButtonNewFeature projectSlug={projectSlug} />}
       </div>
     );
   }
@@ -60,6 +63,7 @@ export const BertopicForm: FC<BertopicCreationFormProps> = ({
       <form onSubmit={handleSubmitNewModel(onSubmitNewModel)}>
         <label htmlFor="name">Name</label>
         <input id="name" type="text" {...register('name')} />
+        {projectSlug && <ButtonNewFeature projectSlug={projectSlug} />}
         <label htmlFor="existing_feature">
           Embeddings feature
           <a className="existing_feature">
