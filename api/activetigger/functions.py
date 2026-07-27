@@ -198,6 +198,20 @@ def get_device() -> torch.device:
     return torch.device("cpu")
 
 
+def release_device_memory() -> None:
+    """
+    Return cached accelerator memory to the OS after a heavy torch job.
+    Freed Python objects stay in the CUDA/MPS allocator cache until this
+    is called; no-op on CPU-only setups.
+    """
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+        torch.cuda.ipc_collect()
+    elif torch.backends.mps.is_available():
+        torch.mps.empty_cache()
+
+
 def get_gpu_memory_info() -> GpuInformationModel:
     """
     Get info on GPU

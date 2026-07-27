@@ -20,7 +20,7 @@ from typing import Optional
 import numpy as np
 from pandas import DataFrame, Series
 
-from activetigger.functions import get_device
+from activetigger.functions import get_device, release_device_memory
 from activetigger.tasks.base_task import BaseTask
 
 
@@ -141,7 +141,4 @@ class ComputeClipImagexp(BaseTask):
                 del clip_model
             del self.paths
             gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
-                torch.cuda.empty_cache()
-                torch.cuda.ipc_collect()
+            release_device_memory()

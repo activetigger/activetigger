@@ -37,6 +37,7 @@ from activetigger.functions import (
     get_metrics_multilabel,
     logits_to_probs,
     matrix_to_label,
+    release_device_memory,
     split_annotation,
 )
 from activetigger.monitoring import TaskTimer
@@ -776,10 +777,7 @@ class TrainBert(BaseTask):
                     device,
                     self.event,
                 )
-                if torch.cuda.is_available():
-                    torch.cuda.synchronize()
-                    torch.cuda.empty_cache()
-                    torch.cuda.ipc_collect()
+                release_device_memory()
                 gc.collect()
 
             except Exception as e:

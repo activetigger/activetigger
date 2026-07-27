@@ -31,6 +31,7 @@ from activetigger.functions import (
     get_metrics_multiclass,
     get_metrics_multilabel,
     logits_to_probs,
+    release_device_memory,
 )
 from activetigger.tasks.base_task import BaseTask
 
@@ -446,10 +447,7 @@ class PredictImage(BaseTask):
             # raises, and an exception here would mask the real error from
             # the prediction loop
             try:
-                if torch.cuda.is_available():
-                    torch.cuda.synchronize()
-                    torch.cuda.empty_cache()
-                    torch.cuda.ipc_collect()
+                release_device_memory()
             except Exception as e:
                 print("Error in cleaning GPU memory", e)
 
