@@ -264,8 +264,10 @@ class Models(Base):
     user_name: Mapped[str] = mapped_column(ForeignKey("users.user_name"))
     user: Mapped[Users] = relationship()
     project_slug: Mapped[str]
-    scheme: Mapped[Schemes] = relationship(back_populates="models")
-    scheme_name: Mapped[str]
+    scheme: Mapped[Schemes | None] = relationship(back_populates="models")
+    # scheme-agnostic models (e.g. bertopic) store NULL: the composite FK to
+    # schemes is not enforced when one of its columns is NULL
+    scheme_name: Mapped[str | None]
     kind: Mapped[str]
     parameters: Mapped[dict[str, Any]]
     path: Mapped[str]

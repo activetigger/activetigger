@@ -65,6 +65,9 @@ class TrainMLMultiClass(BaseTask):
         self.test_size = test_size
         self.path = path
         self.model_path = path.joinpath(name)
+        # artifacts are staged here and promoted to model_path only once
+        # the whole training has succeeded
+        self.work_path = path.joinpath(f"{name}.tmp")
         self.retrain = retrain
         self.model_params = model_params
         self.scheme = scheme
@@ -76,16 +79,23 @@ class TrainMLMultiClass(BaseTask):
 
     def __init_paths(self, retrain: bool) -> None:
         """
-        Create a directory for the files to be saved
+        Create the staging directory for the files to be saved. The
+        existing model directory (retrain case) is left untouched until
+        the new training has fully succeeded.
         """
-        # if retrain, clear the folder
-        if retrain:
+        if not retrain and self.model_path.exists():
+            raise Exception("The model already exists")
+        if self.work_path.exists():
+            shutil.rmtree(self.work_path)
+        os.mkdir(self.work_path)
+
+    def __promote_staging(self) -> None:
+        """
+        Atomically replace the model directory with the staged files.
+        """
+        if self.model_path.exists():
             shutil.rmtree(self.model_path)
-            os.mkdir(self.model_path)
-        else:
-            if self.model_path.exists():
-                raise Exception("The model already exists")
-            os.mkdir(self.model_path)
+        os.rename(self.work_path, self.model_path)
 
     def __check_data(
         self, X: pd.DataFrame, Y: pd.Series, exclude_labels: list[str]
@@ -156,18 +166,18 @@ class TrainMLMultiClass(BaseTask):
         metrics_test: MLStatisticsModel,
         statistics_cv10: MLStatisticsModel | None,
     ) -> None:
-        """Add an entry in the data base and save the following files:
+        """Save the following files in the staging directory:
         - proba.csv with the probabilities
         - data using during training (training_data.parquet)
         - a pickle version of the database entry (#NOTE: AM: Artefact ?)
         - metrics for the training (train, trainvalid and cv10)
         """
         # Write the proba
-        proba.to_csv(self.model_path / "proba.csv")
+        proba.to_csv(self.work_path / "proba.csv")
 
         # Write the training data
         X_train["label"] = Y_train
-        X_train.to_parquet(self.model_path / "training_data.parquet")
+        X_train.to_parquet(self.work_path / "training_data.parquet")
 
         # Dump it in the folder
         element = QuickModelComputed(
@@ -192,19 +202,11 @@ class TrainMLMultiClass(BaseTask):
             statistics_cv10=statistics_cv10,
         )
 
-        path_to_model_tmp = self.model_path / f"model{str(self.unique_id)}.pkl"
-        path_to_model = self.model_path / "model.pkl"
-        with open(path_to_model_tmp, "wb") as file:
+        with open(self.work_path / "model.pkl", "wb") as file:
             pickle.dump(element, file)
-        os.replace(path_to_model_tmp, path_to_model)
 
         # Write the statistics
-        path_to_metrics_json_tmp = str(
-            self.path.joinpath(self.name).joinpath(f"metrics_training_{str(self.unique_id)}.json")
-        )
-        path_to_metrics_json = str(self.path.joinpath(self.name).joinpath("metrics_training.json"))
-
-        with open(path_to_metrics_json_tmp, "w") as file:
+        with open(self.work_path / "metrics_training.json", "w") as file:
             json.dump(
                 {
                     "train": metrics_train.model_dump(mode="json"),
@@ -213,7 +215,6 @@ class TrainMLMultiClass(BaseTask):
                 },
                 file,
             )
-        os.replace(path_to_metrics_json_tmp, path_to_metrics_json)
 
     def _check_cancelled(self) -> None:
         """Raise if the user requested cancellation."""
@@ -222,8 +223,17 @@ class TrainMLMultiClass(BaseTask):
 
     def __call__(self) -> EventsModel:
         """
-        Fit quickmodel and calculate statistics
+        Fit quickmodel and calculate statistics.
+        On failure the staged files are removed and the previous model
+        directory (retrain case) is left untouched.
         """
+        try:
+            return self.__run()
+        except Exception:
+            shutil.rmtree(self.work_path, ignore_errors=True)
+            raise
+
+    def __run(self) -> EventsModel:
         task_timer = TaskTimer(
             compulsory_steps=["setup", "train", "evaluate", "save_files"], optional_steps=["cv10"]
         )
@@ -252,8 +262,14 @@ class TrainMLMultiClass(BaseTask):
 
         # predict on test data --- --- --- --- --- --- --- --- --- --- --- --- -
         try:
-            Y_pred_train = pd.Series(self.model.predict(X_train), index=X_train.index)  # ty: ignore[unresolved-attribute]
-            Y_pred_test = pd.Series(self.model.predict(X_test), index=X_test.index)  # ty: ignore[unresolved-attribute]
+            Y_pred_train = pd.Series(
+                self.model.predict(X_train),  # ty: ignore[unresolved-attribute]
+                index=X_train.index,
+            )
+            Y_pred_test = pd.Series(
+                self.model.predict(X_test),  # ty: ignore[unresolved-attribute]
+                index=X_test.index,
+            )
         except Exception as e:
             raise Exception(
                 (
@@ -265,7 +281,11 @@ class TrainMLMultiClass(BaseTask):
         try:
             task_timer.start("evaluate")
             proba_values = self.model.predict_proba(self.X)  # ty: ignore[unresolved-attribute]
-            proba = pd.DataFrame(proba_values, columns=self.model.classes_, index=self.X.index)  # ty: ignore[unresolved-attribute]
+            proba = pd.DataFrame(
+                proba_values,
+                columns=self.model.classes_,  # ty: ignore[unresolved-attribute]
+                index=self.X.index,
+            )
             proba["prediction"] = proba.idxmax(axis=1)
             proba["entropy"] = entropy(proba_values, axis=1)
             # Add entropy-LABEL defined as the entropy of p(A) / 1-p(A)
@@ -309,6 +329,7 @@ class TrainMLMultiClass(BaseTask):
         self.__create_saving_files(
             proba, X_train, Y_train, metrics_train, metrics_test, statistics_cv10
         )
+        self.__promote_staging()
         task_timer.stop("save_files")
 
         return EventsModel(events=task_timer.get_events())

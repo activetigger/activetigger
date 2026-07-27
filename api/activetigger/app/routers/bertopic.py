@@ -49,7 +49,6 @@ def compute_bertopic(
             parameters=bertopic,
             name=bertopic.name,
             user=current_user.username,
-            scheme=bertopic.scheme,
         )
         get_orchestrator().log_action(
             current_user.username, f"COMPUTE BERTopic MODEL: {bertopic.name}", project.name

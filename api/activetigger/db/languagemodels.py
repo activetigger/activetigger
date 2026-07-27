@@ -58,7 +58,7 @@ class ModelsService:
         name: str,
         user: str,
         status: str,
-        scheme: str,
+        scheme: str | None,
         params: dict[str, Any],
         path: str,
         retrain: bool = False,

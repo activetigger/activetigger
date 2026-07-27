@@ -650,7 +650,6 @@ class ComputeBertopicModel(BertopicParamsModel):
     umap_n_components: int = 5
     top_n_words: int = 15
     n_gram_range: tuple[int, int] = (1, 2)
-    scheme: str
 
 
 class GenerationAvailableModel(BaseModel):
@@ -816,7 +815,6 @@ class BertopicComputing(ProcessComputing):
     parameters: BertopicParamsModel
     force_compute_embeddings: bool
     get_progress: Callable[[], str | float | None] | None = None
-    scheme: str  # This is a dummy necessary to save the model in the database, it will not be used afterwards — Axel
 
 
 class QuickModelInModel(BaseModel):
@@ -1011,7 +1009,7 @@ class PromptsProjectStateModel(BaseModel):
 class ModelDescriptionModel(BaseModel):
     name: str
     kind: str
-    scheme: str
+    scheme: str | None = None
     parameters: dict[str, Any]
     path: str
     time: str

@@ -352,7 +352,9 @@ class Project:
         self.generations = Generations(
             self.db_manager, cast(list[GenerationComputing], self.computing)
         )
-        self.projections = Projections(self.params.dir, self.computing, self.queue)
+        self.projections = Projections(
+            project_slug, self.params.dir, self.computing, self.queue, self.db_manager
+        )
         self.textometrics = Textometrics(self.params.dir, self.computing, self.queue)
         self.bertopic = Bertopic(
             project_slug,
@@ -1073,9 +1075,10 @@ class Project:
         if next.frame and len(next.frame) == 4:
             if not next.projection_name:
                 raise ValueError("No active projection selected for frame selection")
-            if next.projection_name not in self.projections.available:
+            projection = self.projections.get(next.projection_name)
+            if projection is None:
                 raise ValueError(f"Projection '{next.projection_name}' does not exist")
-            projection_data = self.projections.available[next.projection_name].data
+            projection_data = projection.data
             if projection_data is None:
                 raise ValueError("No vizualisation data available")
             f_frame = (

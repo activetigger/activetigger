@@ -25,14 +25,15 @@ from activetigger.features import Features
 from activetigger.queue_manager import Queue
 from activetigger.tasks.compute_bertopic import ComputeBertopic
 
-# TODO : put params in database
-# TODO : Implement the get_topics and get_projection methods
-# TODO : Richer state with defined typemodels
-
 
 class Bertopic:
     """
     Class to handle BERTopic computations.
+
+    The database (models table, kind="bertopic") is the source of truth:
+    a row is inserted only once a computation has completed. Heavy
+    artifacts (topics, clusters, projection, report) stay on disk in the
+    run directory referenced by the row's path.
     """
 
     models_service: ModelsService
@@ -46,7 +47,6 @@ class Bertopic:
         features: Features,
         db_manager: DatabaseManager,
     ) -> None:
-        self.cache: dict[str, BERTopicDescriptionModel] = {}
         self.project_slug = project_slug
         self.queue = queue
         self.computing = computing
@@ -70,7 +70,6 @@ class Bertopic:
         parameters: BertopicParamsModel,
         name: str,
         user: str,
-        scheme: str,  # This is a dummy necessary to save the model in the database, it will not be used afterwards — Axel
     ) -> str:
         """
         Compute BERTopic model.
@@ -116,24 +115,30 @@ class Bertopic:
                 kind="bertopic",
                 force_compute_embeddings=False,
                 get_progress=self.get_progress(name),
-                scheme=scheme,
             )
         )
         return unique_id
 
     def add(self, element: BertopicComputing) -> None:
         """
-        Add a trained BERTopic in the database
+        Register a computed BERTopic in the database (called once the
+        task has completed). The params.json written by the task holds
+        the full run description (parameters, columns, paths, timestamp)
+        and becomes the row's parameters.
         """
         model_path = self.path.joinpath("runs").joinpath(element.name)
+        try:
+            params = self.get_params(model_path)
+        except (OSError, json.JSONDecodeError):
+            params = {"bertopic_params": element.parameters.model_dump()}
         self.models_service.add_model(
             kind="bertopic",
             project=self.project_slug,
             name=element.name,
             user=element.user,
             status="trained",
-            scheme=element.scheme,
-            params=element.parameters.model_dump(),
+            scheme=None,
+            params=params,
             path=str(model_path),
         )
 
@@ -151,35 +156,35 @@ class Bertopic:
             if e.kind == "bertopic"
         }
 
-    def get_model(self, name: str) -> BERTopicDescriptionModel:
-        """
-        Get a BERTopic model parameters.
-        """
-        if name in self.cache:
-            return self.cache[name]
-        else:
-            model = BERTopicDescriptionModel(
-                name=name, time=self.get_params(self.path.joinpath("runs") / name)["timestamp"]
-            )
-            self.cache[name] = model
-            return model
-
     def available(self) -> dict[str, BERTopicDescriptionModel]:
         """
-        Get available BERTopic models.
+        Get available BERTopic models from the database.
         """
-
         return {
-            p.name: self.get_model(p.name)
-            for p in self.path.joinpath("runs").iterdir()
-            if p.is_dir() & p.joinpath("params.json").exists()
+            m.name: BERTopicDescriptionModel(name=m.name, time=m.time)
+            for m in self.models_service.available_models(self.project_slug, "bertopic")
         }
 
     def name_available(self, name: str) -> bool:
         """
-        Check if a BERTopic model name is available.
+        Check if a BERTopic model name is available
+        (neither registered in the database nor currently computing).
         """
-        return slugify(name) not in self.available()
+        slug = slugify(name)
+        computing_names = [e.name for e in self.computing if e.kind == "bertopic"]
+        return slug not in computing_names and not self.models_service.model_exists(
+            self.project_slug, slug
+        )
+
+    def _run_path(self, name: str) -> Path:
+        """
+        Resolve the run directory of a registered model from its
+        database row.
+        """
+        model = self.models_service.get_model(self.project_slug, name)
+        if model is None or model.kind != "bertopic":
+            raise FileNotFoundError(f"Model {name} does not exist.")
+        return Path(model.path)
 
     def state(self) -> BertopicProjectStateModel:
         return BertopicProjectStateModel(
@@ -280,17 +285,12 @@ class Bertopic:
 
     def delete(self, name: str) -> None:
         """
-        Delete a BERTopic model.
+        Delete a BERTopic model (database row first, then artifacts).
         """
-
-        # on disk
-        path_model = self.path.joinpath("runs").joinpath(name)
-        # In database
+        path_model = self._run_path(name)
         self.models_service.delete_model(self.project_slug, name)
         if path_model.exists():
             shutil.rmtree(path_model)
-        else:
-            raise FileNotFoundError(f"Model {name} does not exist.")
 
     def clear_bertopic(self) -> None:
         """
@@ -305,7 +305,7 @@ class Bertopic:
         Return a list of dictionaries where a dictionary is a row in the dataframe
         (alike TopicsOutModel).
         """
-        path_model = self.path.joinpath("runs").joinpath(name)
+        path_model = self._run_path(name)
         if path_model.exists():
             df = pd.read_csv(path_model.joinpath("bertopic_topics.csv"), index_col=0)
             df.columns = df.columns.astype(str)
@@ -320,7 +320,7 @@ class Bertopic:
         Return a list of dictionaries where a dictionary is a row in the dataframe
         (structure: {'id' : cluster}).
         """
-        path_model = self.path.joinpath("runs").joinpath(name)
+        path_model = self._run_path(name)
         if path_model.exists():
             return pd.read_csv(path_model.joinpath("bertopic_clusters.csv"), index_col=0).to_dict()[
                 "cluster"
@@ -330,32 +330,26 @@ class Bertopic:
 
     def get_parameters(self, name: str) -> BertopicOutModelParameters:
         """
-        Get parameters file from a BERTopic model
-        TODO : cache ?
+        Get the parameters of a BERTopic model from its database row.
         """
-        path_model = self.path.joinpath("runs").joinpath(name)
-        if not path_model.exists():
+        model = self.models_service.get_model(self.project_slug, name)
+        if model is None or model.kind != "bertopic":
             raise FileNotFoundError(f"Model {name} does not exist.")
-        params_path = path_model.joinpath("params.json")
-        if not params_path.exists():
-            raise FileNotFoundError(f"Parameters for model {name} do not exist.")
-        with open(params_path) as f:
-            r = json.load(f)
-            return BertopicOutModelParameters(**r)
+        return BertopicOutModelParameters(**(model.parameters or {}))
 
     def get_projection(self, name: str) -> BertopicProjectionData:
         """
         Open the project and the cluster
         """
-        path_clusters = self.path.joinpath("runs").joinpath(name).joinpath("bertopic_clusters.csv")
-        path_projection = self.path.joinpath("runs").joinpath(name).joinpath("projection2D.parquet")
+        path_model = self._run_path(name)
+        path_clusters = path_model.joinpath("bertopic_clusters.csv")
+        path_projection = path_model.joinpath("projection2D.parquet")
         if not path_clusters.exists() or not path_projection.exists():
             raise FileNotFoundError(f"Projection for model {name} does not exist.")
         clusters = pd.read_csv(path_clusters, index_col=0)
         clusters.index = clusters.index.astype(str)
         projection = pd.read_parquet(path_projection)
         projection["cluster"] = clusters["cluster"]
-        path_model = self.path.joinpath("runs").joinpath(name)
         cluster_id_label_mapper = {}
         if path_model.exists():
             df = pd.read_csv(path_model.joinpath("bertopic_topics.csv"), index_col=0)
@@ -381,7 +375,7 @@ class Bertopic:
         """
         Export topics from a BERTopic model.
         """
-        path_model = self.path.joinpath("runs").joinpath(name)
+        path_model = self._run_path(name)
         if path_model.exists():
             topics_path = path_model.joinpath("bertopic_topics.csv")
             if topics_path.exists():
@@ -396,7 +390,7 @@ class Bertopic:
         Export clusters from a BERTopic model.
         Rename id_external to original column name for consistency with other exports.
         """
-        path_model = self.path.joinpath("runs").joinpath(name)
+        path_model = self._run_path(name)
         if not path_model.exists():
             raise FileNotFoundError(f"Model {name} does not exist.")
         clusters_path = path_model.joinpath("bertopic_clusters.csv")
@@ -420,7 +414,7 @@ class Bertopic:
         """
         Export clusters from a BERTopic model.
         """
-        path_model = self.path.joinpath("runs").joinpath(name)
+        path_model = self._run_path(name)
         if path_model.exists():
             report_path = path_model.joinpath("report.html")
             if report_path.exists():
@@ -434,20 +428,11 @@ class Bertopic:
         """
         Export embeddings used for BERTopic model.
         """
-
-        path_params = self.path.joinpath("runs").joinpath(name).joinpath("params.json")
-        if path_params.exists():
-            with open(path_params, "r") as file:
-                path_embeddings = json.load(file)["path_embeddings"]
-            path_embeddings = Path(path_embeddings)
-            if path_embeddings.exists():
-                return FileResponse(
-                    path=path_embeddings, filename=f"bertopic_embeddings_{name}.parquet"
-                )
-            else:
-                raise FileNotFoundError(f"Embeddings for model {name} do not exist.")
-        else:
-            raise FileNotFoundError(f"Model {name} does not exist.")
+        params = self.get_parameters(name)
+        path_embeddings = Path(params.path_embeddings)
+        if not path_embeddings.exists():
+            raise FileNotFoundError(f"Embeddings for model {name} do not exist.")
+        return FileResponse(path=path_embeddings, filename=f"bertopic_embeddings_{name}.parquet")
 
     def export_to_scheme(self, name: str) -> tuple[list[str], dict[str, int], dict[int, str]]:
         """
