@@ -14,13 +14,15 @@ from activetigger.datamodels import (
     NewUserModel,
     ProjectModel,
     ProjectSummaryModel,
+    UserCredentialInput,
+    UserCredentialPublic,
     UserInDBModel,
     UserModel,
     UsersStateModel,
     UserStatistics,
 )
 from activetigger.db.manager import DatabaseManager
-from activetigger.functions import compare_to_hash, get_dir_size, get_hash
+from activetigger.functions import compare_to_hash, decrypt, encrypt, get_dir_size, get_hash
 from activetigger.messages import Messages
 
 USERS_PARAMETERS_FILE = "users_parameters.yaml"
@@ -285,6 +287,59 @@ class Users:
         """
         user = self.db_manager.users_service.get_user(username)
         return user.contact or ""
+
+    def list_credentials(self, username: str) -> list[UserCredentialPublic]:
+        """
+        List saved endpoint/credentials entries, without the secrets
+        """
+        informations = self.db_manager.users_service.get_informations(username)
+        return [
+            UserCredentialPublic(
+                name=name, api=entry.get("api", ""), endpoint=entry.get("endpoint")
+            )
+            for name, entry in informations.get("credentials", {}).items()
+        ]
+
+    def add_credentials(self, username: str, credential: UserCredentialInput) -> None:
+        """
+        Save an endpoint/credentials entry in the user informations.
+        The secret is encrypted and never sent back to the client.
+        An existing entry with the same name is replaced.
+        """
+        if credential.name.strip() == "":
+            raise Exception("You should provide a name")
+        informations = self.db_manager.users_service.get_informations(username)
+        credentials = dict(informations.get("credentials", {}))
+        credentials[credential.name.strip()] = {
+            "api": credential.api,
+            "endpoint": credential.endpoint,
+            "credentials": encrypt(credential.credentials, config.secret_key),
+        }
+        informations["credentials"] = credentials
+        self.db_manager.users_service.update_informations(username, informations)
+
+    def delete_credentials(self, username: str, name: str) -> None:
+        """
+        Delete a saved endpoint/credentials entry
+        """
+        informations = self.db_manager.users_service.get_informations(username)
+        credentials = dict(informations.get("credentials", {}))
+        if name not in credentials:
+            raise Exception(f"Credentials {name} not found")
+        del credentials[name]
+        informations["credentials"] = credentials
+        self.db_manager.users_service.update_informations(username, informations)
+
+    def resolve_credentials(self, username: str, name: str) -> tuple[str | None, str]:
+        """
+        Get the (endpoint, decrypted secret) of a saved entry.
+        Backend use only: never expose the result in a route.
+        """
+        informations = self.db_manager.users_service.get_informations(username)
+        entry = informations.get("credentials", {}).get(name)
+        if entry is None:
+            raise Exception(f"Credentials {name} not found")
+        return entry.get("endpoint"), decrypt(entry["credentials"], config.secret_key)
 
     def force_change_password(self, username: str, password: str) -> None:
         """

@@ -10,6 +10,8 @@ import { components } from './generated/openapi';
  */
 
 export type UserModel = components['schemas']['UserModel'];
+export type UserCredentialInput = components['schemas']['UserCredentialInput'];
+export type UserCredentialPublic = components['schemas']['UserCredentialPublic'];
 
 export type ProjectModel = components['schemas']['ProjectModel'];
 export type ProjectBaseModel = components['schemas']['ProjectBaseModel'];
@@ -296,4 +298,6 @@ export interface GenModel {
   name: string;
   endpoint?: string;
   credentials?: string;
+  // name of a credentials entry saved in the user account, resolved server-side
+  saved_credentials?: string;
 }

@@ -81,6 +81,20 @@ class UsersService:
         with self.SessionMaker.begin() as session:
             _ = session.execute(update(Users).filter_by(user_name=user_name).values(key=password))
 
+    def get_informations(self, user_name: str) -> dict:
+        with self.SessionMaker() as session:
+            user = session.scalars(select(Users).filter_by(user_name=user_name)).first()
+            if user is None:
+                raise DBException(f"User {user_name} not found")
+            return dict(user.informations or {})
+
+    def update_informations(self, user_name: str, informations: dict) -> None:
+        # JSON columns don't track in-place mutation: always write a full dict
+        with self.SessionMaker.begin() as session:
+            _ = session.execute(
+                update(Users).filter_by(user_name=user_name).values(informations=informations)
+            )
+
     def change_contact(self, user_name: str, contact: str) -> None:
         """
         Change contact email for a specific user

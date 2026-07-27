@@ -55,14 +55,25 @@ def list_ollama_models(endpoint: str) -> list[dict[str, str]]:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/generate/openai/models")
+@router.get("/generate/openai/models", dependencies=[Depends(verified_user)])
 def list_openai_compatible_models(
-    endpoint: str, credentials: str | None = None
+    current_user: Annotated[UserInDBModel, Depends(verified_user)],
+    endpoint: str | None = None,
+    credentials: str | None = None,
+    saved_credentials: str | None = None,
 ) -> list[dict[str, str]]:
     """
-    Query an OpenAI-compatible endpoint to list available models via /v1/models
+    Query an OpenAI-compatible endpoint to list available models via /v1/models.
+    If saved_credentials is given, the endpoint/secret saved in the user account are used.
     """
     try:
+        if saved_credentials is not None:
+            saved_endpoint, credentials = get_orchestrator().users.resolve_credentials(
+                current_user.username, saved_credentials
+            )
+            endpoint = endpoint or saved_endpoint
+        if endpoint is None:
+            raise Exception("You should provide an endpoint")
         return OpenAPI.list_models(endpoint, credentials)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -94,6 +105,13 @@ def add_project_generation_models(
     """
     test_rights(ProjectAction.UPDATE, current_user.username, project.name)
     try:
+        # resolve credentials saved in the user account, so the secret never transits by the client
+        if model.saved_credentials is not None:
+            endpoint, credentials = get_orchestrator().users.resolve_credentials(
+                current_user.username, model.saved_credentials
+            )
+            model.endpoint = model.endpoint or endpoint
+            model.credentials = credentials
         return project.generations.add_model(project.name, model, current_user.username)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

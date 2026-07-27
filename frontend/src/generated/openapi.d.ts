@@ -187,6 +187,50 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/users/credentials': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List User Credentials
+     * @description List the endpoint/credentials entries saved by the current user (secrets stay in the backend)
+     */
+    get: operations['list_user_credentials_users_credentials_get'];
+    put?: never;
+    /**
+     * Add User Credentials
+     * @description Save an endpoint/credentials entry for the current user (replaces an entry with the same name)
+     */
+    post: operations['add_user_credentials_users_credentials_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/users/credentials/delete': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Delete User Credentials
+     * @description Delete a saved endpoint/credentials entry of the current user
+     */
+    post: operations['delete_user_credentials_users_credentials_delete_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/users/auth/{action}': {
     parameters: {
       query?: never;
@@ -1760,7 +1804,8 @@ export interface paths {
     };
     /**
      * List Openai Compatible Models
-     * @description Query an OpenAI-compatible endpoint to list available models via /v1/models
+     * @description Query an OpenAI-compatible endpoint to list available models via /v1/models.
+     *     If saved_credentials is given, the endpoint/secret saved in the user account are used.
      */
     get: operations['list_openai_compatible_models_generate_openai_models_get'];
     put?: never;
@@ -2637,9 +2682,7 @@ export interface components {
     /**
      * AnnotationsDataModel
      * @description Import annotations from a file.
-     *
-     *     The file itself is sent beforehand through the chunked-upload protocol
-     *     (see activetigger.uploads); `upload_id` references the staged csv.
+     *     sent beforehand through the chunked-upload protocol
      */
     AnnotationsDataModel: {
       /** Col Id */
@@ -3065,10 +3108,7 @@ export interface components {
     /**
      * EvalSetDataModel
      * @description Add an eval/test set to a text project.
-     *
-     *     The data file is sent beforehand through the chunked-upload protocol
-     *     (see activetigger.uploads); `upload_id` references it. `filename` is
-     *     filled server-side from the staged file's sanitized name.
+     *     sent beforehand through the chunked-upload protocol
      */
     EvalSetDataModel: {
       /** Cols Text */
@@ -3090,10 +3130,7 @@ export interface components {
     /**
      * EvalSetImageModel
      * @description Eval-set payload for image projects.
-     *
-     *     The image zip and optional labels file are sent beforehand through the
-     *     chunked-upload protocol (see activetigger.uploads) and referenced by
-     *     upload id. The filenames are filled server-side.
+     *     sent beforehand through the chunked-upload protocol
      */
     EvalSetImageModel: {
       /** Upload Id */
@@ -3213,6 +3250,8 @@ export interface components {
       endpoint?: string | null;
       /** Credentials */
       credentials?: string | null;
+      /** Saved Credentials */
+      saved_credentials?: string | null;
     };
     /**
      * GenerationModel
@@ -3229,6 +3268,8 @@ export interface components {
       endpoint?: string | null;
       /** Credentials */
       credentials?: string | null;
+      /** Saved Credentials */
+      saved_credentials?: string | null;
       /** Id */
       id: number;
     };
@@ -4731,9 +4772,8 @@ export interface components {
     };
     /**
      * TextDatasetModel
-     * @description External dataset for prediction, sent beforehand through the
-     *     chunked-upload protocol (see activetigger.uploads); `upload_id`
-     *     references it. `filename` is filled server-side.
+     * @description External dataset for prediction
+     *     sent beforehand through the chunked-upload protocol
      */
     TextDatasetModel: {
       /** Id */
@@ -4913,6 +4953,32 @@ export interface components {
       total_size: number;
       /** Total Chunks */
       total_chunks: number;
+    };
+    /**
+     * UserCredentialInput
+     * @description Endpoint/credentials pair saved in the user account
+     */
+    UserCredentialInput: {
+      /** Name */
+      name: string;
+      /** Api */
+      api: string;
+      /** Endpoint */
+      endpoint?: string | null;
+      /** Credentials */
+      credentials: string;
+    };
+    /**
+     * UserCredentialPublic
+     * @description Saved credentials entry without the secret
+     */
+    UserCredentialPublic: {
+      /** Name */
+      name: string;
+      /** Api */
+      api: string;
+      /** Endpoint */
+      endpoint?: string | null;
     };
     /**
      * UserModel
@@ -5208,6 +5274,90 @@ export interface operations {
         'application/json': components['schemas']['ChangeEmailModel'];
       };
     };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
+  list_user_credentials_users_credentials_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UserCredentialPublic'][];
+        };
+      };
+    };
+  };
+  add_user_credentials_users_credentials_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UserCredentialInput'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HTTPValidationError'];
+        };
+      };
+    };
+  };
+  delete_user_credentials_users_credentials_delete_post: {
+    parameters: {
+      query: {
+        name: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
     responses: {
       /** @description Successful Response */
       200: {
@@ -7774,9 +7924,10 @@ export interface operations {
   };
   list_openai_compatible_models_generate_openai_models_get: {
     parameters: {
-      query: {
-        endpoint: string;
+      query?: {
+        endpoint?: string | null;
         credentials?: string | null;
+        saved_credentials?: string | null;
       };
       header?: never;
       path?: never;

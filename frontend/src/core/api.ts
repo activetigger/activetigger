@@ -28,6 +28,7 @@ import {
   SelectionConfig,
   SupportedAPI,
   TextDatasetModel,
+  UserCredentialInput,
   newBertModel,
   newImageModel,
   newNerModel,
@@ -2439,6 +2440,7 @@ export async function getProjectGenModels(
       // Transform null to undefined
       endpoint: model.endpoint || undefined,
       credentials: model.credentials || undefined,
+      saved_credentials: model.saved_credentials || undefined,
     }));
 }
 
@@ -2480,12 +2482,15 @@ export async function fetchOllamaModels(
 }
 
 export async function fetchOpenAICompatibleModels(
-  endpoint: string,
+  endpoint?: string,
   credentials?: string,
+  savedCredentials?: string,
 ): Promise<Array<{ slug: string; name: string }>> {
   const baseUrl = config.api.url.replace(/\/+$/, '');
-  const params = new URLSearchParams({ endpoint });
+  const params = new URLSearchParams();
+  if (endpoint) params.append('endpoint', endpoint);
   if (credentials) params.append('credentials', credentials);
+  if (savedCredentials) params.append('saved_credentials', savedCredentials);
   const url = `${baseUrl}/generate/openai/models?${params.toString()}`;
   const auth = JSON.parse(localStorage.getItem('activeTigger.auth') || '{}');
   const res = await fetch(url, {
@@ -2682,6 +2687,56 @@ export function useChangeEmail() {
   );
 
   return { changeEmail };
+}
+
+/**
+ * Saved endpoint/credentials of the current user (secrets stay in the backend)
+ */
+export function useUserCredentials(refreshKey: unknown = 0) {
+  const result = useAsyncMemo(async () => {
+    const res = await api.GET('/users/credentials', {});
+    if (res.data && !res.error) return res.data;
+    return [];
+  }, [refreshKey]);
+  return { userCredentials: getAsyncMemoData(result) };
+}
+
+export function useAddUserCredentials() {
+  const { notify } = useNotifications();
+  const addUserCredentials = useCallback(
+    async (credential: UserCredentialInput) => {
+      const res = await api.POST('/users/credentials', {
+        body: credential,
+      });
+      if (res.error) {
+        notify({ type: 'error', message: formatApiError(res.error) });
+        return false;
+      }
+      notify({ type: 'success', message: 'Credentials saved.' });
+      return true;
+    },
+    [notify],
+  );
+  return { addUserCredentials };
+}
+
+export function useDeleteUserCredentials() {
+  const { notify } = useNotifications();
+  const deleteUserCredentials = useCallback(
+    async (name: string) => {
+      const res = await api.POST('/users/credentials/delete', {
+        params: { query: { name } },
+      });
+      if (res.error) {
+        notify({ type: 'error', message: formatApiError(res.error) });
+        return false;
+      }
+      notify({ type: 'success', message: 'Credentials deleted.' });
+      return true;
+    },
+    [notify],
+  );
+  return { deleteUserCredentials };
 }
 
 /**

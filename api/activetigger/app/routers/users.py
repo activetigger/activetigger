@@ -25,6 +25,8 @@ from activetigger.datamodels import (
     ChangePasswordModel,
     NewUserModel,
     ResetPasswordResultModel,
+    UserCredentialInput,
+    UserCredentialPublic,
     UserInDBModel,
     UserModel,
     UserStatistics,
@@ -203,6 +205,47 @@ def change_email(
         get_orchestrator().users.change_email(
             current_user.username, changemail.email, changemail.password
         )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.get("/users/credentials", dependencies=[Depends(verified_user)], tags=["users"])
+def list_user_credentials(
+    current_user: Annotated[UserInDBModel, Depends(verified_user)],
+) -> list[UserCredentialPublic]:
+    """
+    List the endpoint/credentials entries saved by the current user (secrets stay in the backend)
+    """
+    try:
+        return get_orchestrator().users.list_credentials(current_user.username)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/users/credentials", dependencies=[Depends(verified_user)], tags=["users"])
+def add_user_credentials(
+    current_user: Annotated[UserInDBModel, Depends(verified_user)],
+    credential: UserCredentialInput,
+) -> None:
+    """
+    Save an endpoint/credentials entry for the current user (replaces an entry with the same name)
+    """
+    try:
+        get_orchestrator().users.add_credentials(current_user.username, credential)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post("/users/credentials/delete", dependencies=[Depends(verified_user)], tags=["users"])
+def delete_user_credentials(
+    current_user: Annotated[UserInDBModel, Depends(verified_user)],
+    name: str,
+) -> None:
+    """
+    Delete a saved endpoint/credentials entry of the current user
+    """
+    try:
+        get_orchestrator().users.delete_credentials(current_user.username, name)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 

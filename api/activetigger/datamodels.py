@@ -311,6 +311,27 @@ class UserInDBModel(UserModel):
     hashed_password: str
 
 
+class UserCredentialInput(BaseModel):
+    """
+    Endpoint/credentials pair saved in the user account
+    """
+
+    name: str
+    api: str
+    endpoint: str | None = None
+    credentials: str
+
+
+class UserCredentialPublic(BaseModel):
+    """
+    Saved credentials entry without the secret
+    """
+
+    name: str
+    api: str
+    endpoint: str | None = None
+
+
 class CompareSchemesModel(BaseModel):
     """
     Compare two schemes
@@ -572,6 +593,8 @@ class GenerationCreationModel(BaseModel):
     name: str
     endpoint: str | None = None
     credentials: str | None = None
+    # name of a credentials entry saved in the user account, resolved server-side
+    saved_credentials: str | None = None
 
 
 class GenerationModel(GenerationCreationModel):
