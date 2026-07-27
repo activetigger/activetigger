@@ -218,6 +218,9 @@ export interface DisplayConfig {
   displayFormat?: 'table' | 'cards';
   displayMeanAnnotationTime?: boolean;
   spanAnnotationMode?: 'locked' | 'neutral';
+  // focus mode modal: text size (% of normal) and text frame width (% of screen)
+  focusFontSize?: number;
+  focusTextWidth?: number;
 }
 
 export interface newBertModel {

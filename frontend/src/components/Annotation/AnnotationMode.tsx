@@ -3,7 +3,7 @@ import { ChangeEvent, Dispatch, FC, SetStateAction, useEffect, useMemo, useState
 import { FaMapMarkedAlt } from 'react-icons/fa';
 import { GiTigerHead } from 'react-icons/gi';
 import { HiOutlineQuestionMarkCircle } from 'react-icons/hi';
-import { LuMessageSquare, LuRefreshCw } from 'react-icons/lu';
+import { LuMaximize, LuMessageSquare, LuRefreshCw } from 'react-icons/lu';
 import { MdDisplaySettings } from 'react-icons/md';
 import Select from 'react-select';
 import { Tooltip } from 'react-tooltip';
@@ -21,6 +21,7 @@ interface AnnotationModeFormProps {
   setActiveMenu: Dispatch<SetStateAction<boolean>>;
   setShowDisplayViz: Dispatch<SetStateAction<boolean>>;
   setShowDisplayConfig: Dispatch<SetStateAction<boolean>>;
+  setShowFocusMode: Dispatch<SetStateAction<boolean>>;
   setShowPromptsModal?: Dispatch<SetStateAction<boolean>>;
   nSample: number | null;
   statistics: ReturnType<typeof useStatistics>['statistics'];
@@ -39,6 +40,7 @@ export const AnnotationModeForm: FC<AnnotationModeFormProps> = ({
   setActiveMenu,
   setShowDisplayViz,
   setShowDisplayConfig,
+  setShowFocusMode,
   setShowPromptsModal,
   nSample,
   statistics,
@@ -453,6 +455,17 @@ export const AnnotationModeForm: FC<AnnotationModeFormProps> = ({
           <Tooltip anchorSelect=".getelement" place="top">
             Get next element with the selection mode
           </Tooltip>
+        </button>
+
+        <button
+          type="button"
+          className="btn-secondary-action"
+          onClick={() => {
+            setShowFocusMode(true);
+          }}
+          title="Focus mode: annotate in a distraction-free fullscreen view"
+        >
+          <LuMaximize size={20} />
         </button>
 
         <button

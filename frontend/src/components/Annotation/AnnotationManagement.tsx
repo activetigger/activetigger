@@ -85,6 +85,9 @@ export const AnnotationManagement: FC = () => {
 
   const [showDisplayConfig, setShowDisplayConfig] = useState<boolean>(false);
   const [showDisplayViz, setShowDisplayViz] = useState<boolean>(false);
+  // focus mode: render the annotation block alone in a fullscreen modal.
+  // Deliberately not persisted so a reload always comes back to the normal page.
+  const [showFocusMode, setShowFocusMode] = useState<boolean>(false);
   const [showCodebook, setShowCodebook] = useState<boolean>(false);
   const [showPromptsModal, setShowPromptsModal] = useState<boolean>(false);
   const { codebook } = useGetSchemeCodebook(projectName || null, currentScheme || null);
@@ -343,20 +346,11 @@ export const AnnotationManagement: FC = () => {
     (hp) => hp.dataset === 'train' && hp.project_slug === projectName && !hp.skip,
   );
 
-  return (
+  // The annotation area (element + tag inputs) is built once and rendered
+  // either in place or inside the focus-mode modal — never both: the tag
+  // inputs attach document-level keyboard shortcuts that must stay unique.
+  const annotationArea = (
     <>
-      {/**
-       * Annotation mode form
-       **/}
-      <AnnotationModeForm
-        fetchNextElement={fetchNextElement}
-        setActiveMenu={setActiveMenu}
-        setShowDisplayViz={setShowDisplayViz}
-        setShowDisplayConfig={setShowDisplayConfig}
-        setShowPromptsModal={setShowPromptsModal}
-        nSample={nSample}
-        statistics={statistics}
-      />
       {elementId === 'noelement' && (
         <div className="alert horizontal center">
           No element available
@@ -379,7 +373,9 @@ export const AnnotationManagement: FC = () => {
         )} // add class to force bottom if settings OR multiclass label
         style={
           {
-            '--text-width': `${displayConfig.textFrameWidth}%`,
+            '--text-width': showFocusMode
+              ? `${displayConfig.focusTextWidth ?? 70}%`
+              : `${displayConfig.textFrameWidth}%`,
           } as CSSProperties
         }
       >
@@ -444,6 +440,25 @@ export const AnnotationManagement: FC = () => {
           </>
         )}
       </div>
+    </>
+  );
+
+  return (
+    <>
+      {/**
+       * Annotation mode form
+       **/}
+      <AnnotationModeForm
+        fetchNextElement={fetchNextElement}
+        setActiveMenu={setActiveMenu}
+        setShowDisplayViz={setShowDisplayViz}
+        setShowDisplayConfig={setShowDisplayConfig}
+        setShowPromptsModal={setShowPromptsModal}
+        setShowFocusMode={setShowFocusMode}
+        nSample={nSample}
+        statistics={statistics}
+      />
+      {!showFocusMode && annotationArea}
 
       <div>
         {displayConfig.displayHistory ? (
@@ -498,6 +513,61 @@ export const AnnotationManagement: FC = () => {
               currentElement={element}
             />
           </div>
+        </Modal.Body>
+      </Modal>
+      <Modal
+        show={showFocusMode}
+        onHide={() => setShowFocusMode(false)}
+        fullscreen={true}
+        id="focus-modal"
+      >
+        <Modal.Header closeButton>
+          <Modal.Title>Focus</Modal.Title>
+          <div className="focus-modal-controls">
+            <label>
+              <span className="small-gray">Text size {displayConfig.focusFontSize ?? 100}%</span>
+              <input
+                type="range"
+                min={60}
+                max={200}
+                step={10}
+                value={displayConfig.focusFontSize ?? 100}
+                onChange={(e) =>
+                  setAppContext((prev) => ({
+                    ...prev,
+                    displayConfig: {
+                      ...prev.displayConfig,
+                      focusFontSize: Number(e.target.value),
+                    },
+                  }))
+                }
+              />
+            </label>
+            <label>
+              <span className="small-gray">Width {displayConfig.focusTextWidth ?? 70}%</span>
+              <input
+                type="range"
+                min={40}
+                max={100}
+                step={5}
+                value={displayConfig.focusTextWidth ?? 70}
+                onChange={(e) =>
+                  setAppContext((prev) => ({
+                    ...prev,
+                    displayConfig: {
+                      ...prev.displayConfig,
+                      focusTextWidth: Number(e.target.value),
+                    },
+                  }))
+                }
+              />
+            </label>
+          </div>
+        </Modal.Header>
+        <Modal.Body
+          style={{ '--focus-font-size': displayConfig.focusFontSize ?? 100 } as CSSProperties}
+        >
+          {annotationArea}
         </Modal.Body>
       </Modal>
       <Modal show={showDisplayConfig} onHide={handleCloseConfig} size="sm" id="config-modal">
