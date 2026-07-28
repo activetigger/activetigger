@@ -1,3 +1,18 @@
+"""
+Fine-tuning of token-classification (NER) models on span-scheme annotations.
+
+Known tradeoff — adjacent same-tag entities are merged at decoding time:
+``decode_spans`` stitches consecutive same-tag spans separated only by
+whitespace back into a single span. This compensates for BIO fragmentation
+(a model emitting ``B-X B-X`` on a multi-word entity such as "John Smith"
+instead of ``B-X I-X``), which is by far the more common failure mode. The
+cost is that two genuinely distinct same-tag entities separated only by
+whitespace (e.g. "Paris Berlin" annotated as two LOC spans) can never be
+predicted as separate spans — the ``B-`` boundary signal is discarded, so
+such gold pairs are guaranteed to count as errors under the exact metric.
+Revisit if datasets with frequent adjacent same-tag entities show up.
+"""
+
 import gc
 import json
 import logging
@@ -40,10 +55,9 @@ IGNORE_LABEL = -100
 
 
 def parse_spans(raw: Any) -> list[dict]:
-    """Parse a single annotation cell into a list of {start, end, tag} dicts.
-
-    Empty / non-string values yield an empty list, which means "no entities"
-    (a valid label, not missing data — caller filters NaN before reaching here).
+    """
+    Parse a single annotation cell into a list of {start, end, tag} dicts.
+    Handle multiple cases (empty, string or dict)
     """
     if raw is None:
         return []
@@ -63,8 +77,9 @@ def parse_spans(raw: Any) -> list[dict]:
 
 
 def build_bio_labels(scheme_labels: list[str]) -> tuple[list[str], dict[str, int], dict[int, str]]:
-    """Build BIO label vocabulary from the user-defined scheme labels.
-
+    """
+    Build BIO label vocabulary from the user-defined scheme labels.
+    A Beginning and Itermediate per label
     "O" gets id 0 so we can default to it cheaply when initializing label tensors.
     """
     labels = ["O"]
@@ -82,10 +97,10 @@ def align_labels(
     word_ids: list[int | None],
     label2id: dict[str, int],
 ) -> list[int]:
-    """Token-level BIO labels aligned to offset_mapping.
-
+    """
+    From span level to token information
+    Token-level BIO labels aligned to offset_mapping (dic token>characters).
     Create a mask that indicate the token that starts each entity based on the word splitting
-
     First subword of a word gets the BIO tag, continuation subwords and
     special tokens get IGNORE_LABEL.
     """
@@ -130,8 +145,9 @@ def align_labels(
 def token_labels_to_entities(
     label_ids: list[int], id2label: dict[int, str]
 ) -> set[tuple[int, int, str]]:
-    """Collapse a token-level BIO id sequence into a set of entity tuples
-    (start_token_idx, end_token_idx_inclusive, tag).
+    """
+    Token-level BIO id sequence > tags
+    return (start_token_idx, end_token_idx_inclusive, tag).
 
     Used by ``compute_entity_f1`` to score predictions during training.
     Tokens labeled ``IGNORE_LABEL`` (-100, e.g. subword continuations and
@@ -167,7 +183,8 @@ def token_labels_to_entities(
 
 
 def compute_entity_f1(eval_pred, id2label: dict[int, str]) -> dict[str, float]:
-    """Trainer ``compute_metrics`` callback: returns entity-level
+    """
+    Trainer ``compute_metrics`` callback: returns entity-level
     precision / recall / F1, computed by extracting (token_start, token_end,
     tag) tuples from gold and predicted BIO sequences and intersecting.
 
@@ -182,7 +199,12 @@ def compute_entity_f1(eval_pred, id2label: dict[int, str]) -> dict[str, float]:
     total_tp = total_fp = total_fn = 0
     for pred_seq, gold_seq in zip(predictions, labels):
         gold_entities = token_labels_to_entities(list(gold_seq), id2label)
-        pred_entities = token_labels_to_entities(list(pred_seq), id2label)
+        # Mask predictions where gold is IGNORE_LABEL (continuation subwords,
+        # special tokens, padding): the model receives no loss there, so its
+        # output is unconstrained — scoring it would make entity boundaries
+        # depend on arbitrary predictions (a perfect model could score 0).
+        pred_masked = [p if g != IGNORE_LABEL else IGNORE_LABEL for p, g in zip(pred_seq, gold_seq)]
+        pred_entities = token_labels_to_entities(pred_masked, id2label)
         tp = len(gold_entities & pred_entities)
         total_tp += tp
         total_fp += len(pred_entities) - tp
@@ -200,7 +222,8 @@ def decode_spans(
     id2label: dict[int, str],
     text: str | None = None,
 ) -> list[dict]:
-    """Decode token-level BIO predictions into a list of {start, end, tag}.
+    """
+    Decode token-level BIO predictions into a list of {start, end, tag}.
 
     Predictions are read only at the first subword of each word; continuation
     subwords share the predicted entity but extend the span's character range.
@@ -287,10 +310,6 @@ def decode_spans(
 class TrainNer(BaseTask):
     """
     Fine-tune a token-classification model on span-scheme annotations.
-
-    Mirrors TrainBert's lifecycle (progress / loss / log files, save layout)
-    so the existing language-model orchestration code can drive it without
-    branching, but operates on BIO token tags instead of sequence labels.
     """
 
     kind = "train_ner"
@@ -602,18 +621,13 @@ class TrainNer(BaseTask):
         if len(self.df) < 2:
             raise Exception("Not enough annotated documents to train (need at least 2).")
 
-        # Stringify ids for the gold-span lookup used during evaluation. The
-        # dataset rows carry `str(id)` (see __tokenize_and_align), while
-        # self.df.index keeps the caller's dtype — typically int — so a
-        # `self.df.loc[str_id]` lookup would silently miss every row.
+        # Stringify ids for the gold-span lookup used during evaluation.
         self.gold_by_id: dict[str, list[dict]] = {
             str(idx): spans for idx, spans in self.df["__spans__"].items()
         }
 
         labels, label2id, id2label = build_bio_labels(self.scheme_labels)
-        # Fast tokenizer is required: word_ids() and return_offsets_mapping
-        # are not available on slow (Python) tokenizers, so failing loudly
-        # here beats a confusing AttributeError mid-tokenization.
+        # Fast tokenizer is required
         tokenizer = AutoTokenizer.from_pretrained(
             self.base_model, trust_remote_code=True, use_fast=True
         )
