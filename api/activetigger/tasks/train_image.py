@@ -61,13 +61,15 @@ class ImageLoggingCallback(TrainerCallback):
     Image-classification training callback.
 
     Mirrors the BERT CustomLoggingCallback but **does not** divide the logged
-    training loss by gradient_accumulation_steps. In modern HF Transformers
-    (5.x), `fixed_cross_entropy` uses `reduction="sum"` and divides by
-    `num_items_in_batch` (the total items across all sub-batches in the
-    optimizer step) when the model accepts loss kwargs — so the reported
-    train_loss is already at per-item scale, matching eval_loss. Applying
-    the old gradacc correction under-scales train_loss by gradacc and
-    breaks comparability with eval_loss on the loss chart.
+    training loss by gradient_accumulation_steps. Image-classification heads
+    (e.g. ViT) compute their loss via `self.loss_function`, which in modern HF
+    Transformers (5.x) uses `reduction="sum"` divided by `num_items_in_batch`
+    (the total items across all sub-batches in the optimizer step) when the
+    model accepts loss kwargs — so the reported train_loss is already at
+    per-item scale, matching eval_loss, and a gradacc correction would
+    under-scale it. Text encoder heads instead ignore num_items_in_batch,
+    which is why the BERT callback applies a correction (gated on
+    model_accepts_loss_kwargs) and this one must not.
     """
 
     event: Optional[multiprocessing.synchronize.Event]

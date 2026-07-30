@@ -60,6 +60,16 @@ class CustomLoggingCallback(TrainerCallback):
         self.event = event
         self.current_path = current_path
         self.logger = logger
+        # Set from trainer.model_accepts_loss_kwargs after the Trainer is built
+        # (see __load_trainer). When the model's forward accepts **kwargs, the
+        # Trainer assumes the loss is normalized via num_items_in_batch and
+        # skips its own division by gradient_accumulation_steps — but our loss
+        # paths (model-internal encoder heads, CustomTrainer) all ignore
+        # num_items_in_batch, so the logged train loss comes out inflated by
+        # gradacc and must be corrected here. When the forward does NOT accept
+        # **kwargs (transformers <= 4.x encoder models), the Trainer already
+        # normalizes and dividing again would deflate the train curve (#1109).
+        self.needs_gradacc_correction = False
 
     def on_step_end(
         self,
@@ -72,10 +82,7 @@ class CustomLoggingCallback(TrainerCallback):
         progress_percentage = (state.global_step / state.max_steps) * 100
         with open(self.current_path.joinpath("progress_train"), "w") as f:
             f.write(str(progress_percentage))
-        # Normalize training loss: HuggingFace Trainer accumulates raw losses
-        # across forward passes but divides only by optimizer steps, inflating
-        # the logged training loss by gradient_accumulation_steps.
-        gradacc = args.gradient_accumulation_steps
+        gradacc = args.gradient_accumulation_steps if self.needs_gradacc_correction else 1
         adjusted_history = []
         for entry in state.log_history:
             if "loss" in entry and "eval_loss" not in entry and gradacc > 1:
@@ -473,6 +480,10 @@ class TrainBert(BaseTask):
             )
         else:
             raise ValueError(f"Loss function {loss} not recognized.")
+
+        # On very old transformers (<4.46) the attribute doesn't exist and the
+        # Trainer always normalizes the logged loss itself: no correction.
+        callback.needs_gradacc_correction = getattr(trainer, "model_accepts_loss_kwargs", False)
 
         return trainer
 
