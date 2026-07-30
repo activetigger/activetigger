@@ -760,9 +760,9 @@ class Orchestrator:
         """
         # TODO : put those elements in the config file
         path_data = Path("../frontend/public/gwsd_train_test.csv")
-        col_id = "id"
+        col_id = "guid"
         col_text = "sentence"
-        col_label = "label_agg"
+        col_label = "label"
 
         if not path_data.exists():
             raise Exception("The demo dataset is not available")
