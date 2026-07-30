@@ -24,7 +24,7 @@ Main files:
 - `templates/frontend-deployment.yaml`: frontend workload;
 - `templates/postgresql-deployment.yaml`: embedded PostgreSQL workload;
 - `templates/ingress.yaml`: public routing;
-- `templates/secret.yaml`: generated or external secret references.
+- `templates/secret.yaml`: development Secret generation, disabled when using an external Secret.
 
 ## Current prototype deployment
 
@@ -111,6 +111,90 @@ On the ENSAE cluster, `--server-side=false` was needed because server-side apply
 
 The HuggingFace/SentenceTransformers cache variables are not required for startup, but they are recommended. They store downloaded embedding models under `/data/models`, which is backed by the API PVC, so models do not need to be downloaded again after every pod restart.
 
+## Secret management with Onyxia Vault
+
+### Before catalog integration: manual Helm deployment
+
+For the current manual Helm deployment, only the initial `ROOT_PASSWORD` is managed through Vault.
+
+The current flow is:
+
+```text
+Vault -> vault CLI -> Kubernetes Secret -> API env var
+```
+
+Install the Vault CLI if needed: <https://developer.hashicorp.com/vault/install>.
+
+Set up the Vault CLI:
+
+```bash
+export VAULT_ADDR=<vault-url>
+export VAULT_TOKEN=<vault-token>
+```
+
+In your Onyxia account, in **My Secrets**, create a KV secret with name `<secret-name>`, then add a variable `ROOT_PASSWORD` with the value `<root-password>`.
+
+Read the secret from Vault:
+
+```bash
+vault kv get onyxia-kv/<user-id>/<secret-name>
+export ROOT_PASSWORD="$(vault kv get -field=ROOT_PASSWORD onyxia-kv/<user-id>/<secret-name>)"
+```
+
+Create the Kubernetes Secret before installing the chart:
+
+```bash
+kubectl create secret generic activetigger-secret \
+  -n "$NAMESPACE" \
+  --from-literal=root-password="$ROOT_PASSWORD"
+```
+
+Important: `kubectl create secret` fails if the Secret already exists. For a fresh deployment, this is expected and safe. For an update or redeploy on ENSAE, avoid `kubectl apply` for this Secret: patch/apply requests can be blocked by the gateway/WAF with an HTML “Web Page Blocked” response. Use delete + create instead:
+
+```bash
+kubectl delete secret activetigger-secret -n "$NAMESPACE"
+
+kubectl create secret generic activetigger-secret \
+  -n "$NAMESPACE" \
+  --from-literal=root-password="$ROOT_PASSWORD"
+```
+
+Deploy with an existing Kubernetes Secret:
+
+```bash
+helm upgrade --install activetigger ./charts/activetigger \
+  --namespace "$NAMESPACE" \
+  --server-side=false \
+  --timeout 25m \
+  --set secrets.create=false \
+  --set secrets.existingSecret=activetigger-secret
+```
+
+
+When `secrets.create=false`, the chart reads `ROOT_PASSWORD` from this Secret. 
+
+Do not pass real secret values with `helm --set`; they can leak into shell history and Helm release metadata. Keep real values in Vault and only pass the Kubernetes Secret name to Helm.
+
+### After catalog integration: native Onyxia service launch
+
+Once ActiveTigger is added to the Onyxia service catalog, the target flow is:
+
+```text
+Onyxia launcher -> chart values -> VAULT_* env vars -> entrypoint reads Vault -> ROOT_PASSWORD env var -> API startup
+```
+
+Onyxia can inject Vault connection values into the chart/app, such as:
+
+```text
+VAULT_ADDR
+VAULT_TOKEN
+VAULT_MOUNT
+VAULT_TOP_DIR
+VAULT_RELATIVE_PATH
+```
+
+The chart should then pass these variables to the API pod. A small ActiveTigger entrypoint wrapper can read the Vault KV v2 secret, export `ROOT_PASSWORD`, then execute the normal API entrypoint.
+
 ## Useful kubectl commands
 
 Check deployed resources:
@@ -152,12 +236,13 @@ helm uninstall activetigger -n "$NAMESPACE"
 PVCs may remain after uninstall, depending on the storage reclaim policy. Delete them only when the project data can be safely removed.
 
 
-
-
-
 ## Known limitations
 
-- Some secrets are still configurable directly through `values.yaml`.
+- `values.yaml` still contains development placeholder secrets for non-Vault local testing.
+- The current Vault flow is only a manual bridge. Vault remains the source of truth, but there is no automatic synchronization, rotation, or pod restart when the Vault value changes. More automatic Vault-to-Kubernetes options should be evaluated:
+  - **Vault Secrets Operator**: syncs Vault secrets into Kubernetes Secrets, but it is not currently exposed in the ENSAE namespace.
+  - **Vault Agent Injector**: injects a Vault Agent init/sidecar and renders secrets as files, but it is not currently available in the ENSAE namespace.
+  - **Vault API from Python**: ActiveTigger could read Vault directly at startup
 - The API image currently installs Python dependencies dynamically at container startup.
 - GPU support is prototype-level and should be validated with explicit CUDA/PyTorch diagnostics.
 - The default ingress host is ENSAE-specific.
@@ -166,7 +251,8 @@ PVCs may remain after uninstall, depending on the storage reclaim policy. Delete
 
 ## Next steps
 
-- Move secrets to an external Secret or Onyxia-compatible secret mechanism.
+- Clarify with DSI team whether a supported Vault-to-Kubernetes bridge can be enabled for user namespaces, or whether another secret-management approach without Vault is preferable before catalog integration.
+- Validate the Vault mode through the Onyxia service catalog UI.
 - Build production images with dependencies preinstalled.
 - Add a clean external PostgreSQL configuration path.
 - Confirm GPU runtime requirements on the target Kubernetes cluster.

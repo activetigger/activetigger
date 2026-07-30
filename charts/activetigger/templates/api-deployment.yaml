@@ -78,17 +78,24 @@ spec:
                 secretKeyRef:
                   name: {{ include "activetigger.secretName" . }}
                   key: root-password
+            {{- if .Values.secrets.create }}
             - name: SECRET_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ include "activetigger.secretName" . }}
                   key: secret-key
+            {{- end }}
             {{- if .Values.postgresql.enabled }}
+            {{- if .Values.secrets.create }}
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   name: {{ include "activetigger.secretName" . }}
                   key: database-url
+            {{- else }}
+            - name: DATABASE_URL
+              value: {{ include "activetigger.databaseUrl" . | quote }}
+            {{- end }}
             {{- end }}
           volumeMounts:
             - name: data
