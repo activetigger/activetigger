@@ -143,13 +143,11 @@ class TrainMLMultiClass(BaseTask):
         """
         num_folds = 10
         kf = KFold(n_splits=num_folds, shuffle=True, random_state=self.random_seed)
-        f = self.Y.notnull()
-        Y_pred_10cv = pd.Series(
-            cross_val_predict(self.model, self.X[f], self.Y[f], cv=kf), index=self.Y[f].index
-        )
+        X, Y = self.__check_data(self.X, self.Y, self.exclude_labels)
+        Y_pred_10cv = pd.Series(cross_val_predict(self.model, X, Y, cv=kf), index=Y.index)
 
         statistics_cv10 = get_metrics_multiclass(
-            self.Y[f],
+            Y,
             Y_pred_10cv,
         )
         # overwrite false_predictions

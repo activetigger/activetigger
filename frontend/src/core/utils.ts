@@ -545,13 +545,13 @@ export const isEmbeddingLikeFeature = (name: string): boolean =>
   /sentence-embeddings|embeddings|fasttext/i.test(name);
 
 // Pick the priority default feature for a quick model:
-// prefer a BERT prediction, fall back to a sentence-embedding,
-// then to the last fasttext-like feature.
+// prefer a sentence-embedding (BERT predictions bias quality estimates upward),
+// fall back to a BERT prediction, then to the last fasttext-like feature.
 export const pickDefaultQuickModelFeature = (features: string[]): string | undefined => {
-  const bert = features.find((f) => /predict/i.test(f));
-  if (bert) return bert;
   const embedding = features.find((f) => /sentence-embeddings|embeddings/i.test(f));
   if (embedding) return embedding;
+  const bert = features.find((f) => /predict/i.test(f));
+  if (bert) return bert;
   for (let i = features.length - 1; i >= 0; i--) {
     if (/fasttext/i.test(features[i])) return features[i];
   }
