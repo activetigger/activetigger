@@ -21,6 +21,14 @@ from activetigger.functions import get_hash, get_root_pwd
 def set_sqlite_pragma(dbapi_connection, _):
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA foreign_keys=ON")
+    # WAL lets readers proceed while a writer holds the lock; the default
+    # rollback-journal mode blocks every read during any write, which under
+    # multi-user load surfaces as "database is locked" errors
+    cursor.execute("PRAGMA journal_mode=WAL")
+    # with WAL, NORMAL is durable enough and avoids an fsync per commit
+    cursor.execute("PRAGMA synchronous=NORMAL")
+    # wait up to 15s for a lock instead of failing after the 5s default
+    cursor.execute("PRAGMA busy_timeout=15000")
     cursor.close()
 
 
