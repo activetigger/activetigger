@@ -113,6 +113,16 @@ class ProjectsService:
             )
             session.add(new_token)
 
+    def prune_old_tokens(self, older_than_hours: int = 48) -> None:
+        """
+        Delete tokens created long enough ago that they cannot be valid
+        anymore (access tokens expire after 24h). The table is scanned on
+        every authenticated request and otherwise grows forever.
+        """
+        cutoff = datetime.datetime.now(timezone.utc) - datetime.timedelta(hours=older_than_hours)
+        with self.Session.begin() as session:
+            session.execute(delete(Tokens).where(Tokens.time_created < cutoff))
+
     def get_token_status(self, token: str):
         with self.Session() as session:
             found_token = session.scalars(select(Tokens).filter_by(token=token)).first()
@@ -602,24 +612,33 @@ class ProjectsService:
         elements: list[dict],  # [{"element_id": str, "annotation": str, "comment": str}]
         selection: str = "not defined",
     ):
+        # Commit in chunks: a label import can be tens of thousands of rows,
+        # and a single transaction holds the database write lock for the whole
+        # insert — on SQLite that stalls every other writer (and the token
+        # check of every request) for the duration.
+        chunk_size = 1000
         session = self.Session()
-        for e in elements:
-            annotation = Annotations(
-                time=datetime.datetime.now(timezone.utc),
-                dataset=dataset,
-                user_name=e.get(
-                    "user_name", user_name
-                ),  # allow overriding user_name for each annotation
-                project_slug=project_slug,
-                element_id=e["element_id"],
-                scheme_name=scheme,
-                annotation=e["annotation"],
-                comment=e["comment"],
-                selection=selection,
-            )
-            session.add(annotation)
-        session.commit()
-        session.close()
+        try:
+            for i, e in enumerate(elements, start=1):
+                annotation = Annotations(
+                    time=datetime.datetime.now(timezone.utc),
+                    dataset=dataset,
+                    user_name=e.get(
+                        "user_name", user_name
+                    ),  # allow overriding user_name for each annotation
+                    project_slug=project_slug,
+                    element_id=e["element_id"],
+                    scheme_name=scheme,
+                    annotation=e["annotation"],
+                    comment=e["comment"],
+                    selection=selection,
+                )
+                session.add(annotation)
+                if i % chunk_size == 0:
+                    session.commit()
+            session.commit()
+        finally:
+            session.close()
 
     def add_annotation(
         self,

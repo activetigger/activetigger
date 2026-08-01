@@ -5,6 +5,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
+    Index,
     Integer,
     MetaData,
     PrimaryKeyConstraint,
@@ -154,10 +155,14 @@ class Auths(Base):
 
 class Logs(Base):
     __tablename__ = "logs"
+    # the logs table grows with every user action and is queried on hot paths
+    # (recent users on the home page, last activity per project state build) —
+    # without these indexes every such query is a full-table scan
+    __table_args__ = (Index("ix_logs_project_slug_time", "project_slug", "time"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     time: Mapped[datetime.datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
+        DateTime(timezone=True), server_default=func.now(), index=True
     )
     user_name: Mapped[str] = mapped_column(ForeignKey("users.user_name"))
     user: Mapped[Users] = relationship()
@@ -173,7 +178,8 @@ class Tokens(Base):
     time_created: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
-    token: Mapped[str]
+    # looked up by value on every authenticated request (token status check)
+    token: Mapped[str] = mapped_column(index=True)
     status: Mapped[str]
     time_revoked: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True))
 

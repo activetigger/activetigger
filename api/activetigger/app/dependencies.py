@@ -9,6 +9,8 @@ from fastapi import (
 )
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 
 from activetigger.datamodels import (
     UserInDBModel,
@@ -17,6 +19,11 @@ from activetigger.orchestrator import get_orchestrator
 from activetigger.project import Project
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+# Transient database failures ("database is locked", connection-pool timeout).
+# These must never be reported as 401: the frontend drops the whole user
+# session on 401, so a DB hiccup would log every user out.
+DB_UNAVAILABLE_ERRORS = (OperationalError, SQLAlchemyTimeoutError)
 
 # per-project locks to avoid duplicate loading without blocking unrelated projects
 _project_locks: dict[str, asyncio.Lock] = {}
@@ -70,14 +77,24 @@ def verified_user(request: Request, token: Annotated[str, Depends(oauth2_scheme)
         username = payload.get("sub")
         if username is None:
             raise HTTPException(status_code=401, detail="Problem with token")
+    except HTTPException:
+        raise
     except JWTError:
         raise HTTPException(status_code=401, detail="Problem with token")
+    except DB_UNAVAILABLE_ERRORS as e:
+        raise HTTPException(
+            status_code=503, detail="Database temporarily unavailable, please retry"
+        ) from e
     except Exception as e:
         raise HTTPException(status_code=401, detail="Problem with token") from e
 
     # get user caracteristics
     try:
         return orchestrator.users.get_user(name=username)
+    except DB_UNAVAILABLE_ERRORS as e:
+        raise HTTPException(
+            status_code=503, detail="Database temporarily unavailable, please retry"
+        ) from e
     except Exception as e:
         raise HTTPException(status_code=404) from e
 

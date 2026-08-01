@@ -427,6 +427,12 @@ class Orchestrator:
         # add it in the database as active
         self.db_manager.projects_service.add_token(encoded_jwt, "active")
 
+        # logins are rare enough to piggyback the tokens-table cleanup here
+        try:
+            self.db_manager.projects_service.prune_old_tokens()
+        except Exception as e:
+            print(f"Error while pruning old tokens: {e}")
+
         return encoded_jwt
 
     def revoke_access_token(self, token) -> None:

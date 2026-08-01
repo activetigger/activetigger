@@ -254,6 +254,15 @@ class TrainBert(BaseTask):
     def __init_logger(self, log_path) -> Logger:
         """Load the logger and set it up"""
         logger = logging.getLogger("train_bert_model")
+        # without an explicit level the logger inherits WARNING and every
+        # logger.info() is dropped — status.log stays empty
+        logger.setLevel(logging.INFO)
+        logger.propagate = False
+        # the logger is a per-process singleton and loky reuses workers:
+        # drop handlers from previous trainings or logs leak across models
+        for handler in logger.handlers[:]:
+            logger.removeHandler(handler)
+            handler.close()
         file_handler = logging.FileHandler(log_path)
         formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
         file_handler.setFormatter(formatter)
@@ -441,6 +450,14 @@ class TrainBert(BaseTask):
             save_strategy="best" if has_test else "epoch",
             metric_for_best_model="eval_loss" if has_test else None,
             save_steps=float(eval_steps) if has_test else 500,
+            # Checkpoints are written every eval_steps, which collapses to a
+            # few steps on small labelled sets. Optimizer state (~2/3 of the
+            # checkpoint size) is only needed to resume training, which we
+            # never do — load_best_model_at_end only reloads weights. Without
+            # these caps a camembert-large run writes 3.4GB per save and can
+            # fill the disk (and on slow volumes the saves dominate wall-clock).
+            save_only_model=True,
+            save_total_limit=2,
             logging_steps=int(eval_steps),
             do_eval=has_test,
             greater_is_better=False if has_test else None,
