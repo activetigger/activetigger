@@ -761,7 +761,7 @@ class FeatureComputing(ProcessComputing):
     parameters: dict
 
 
-class TextometricsParametersModel(BaseModel):
+class LexicometricsParametersModel(BaseModel):
     tokenizer: str = "bert-base-multilingual-cased"
     n_most_frequent: int = 100
     language: str = "en"
@@ -772,9 +772,9 @@ class TextometricsParametersModel(BaseModel):
     tfidf_max_documents: int = 10000
 
 
-class TextometricsComputing(ProcessComputing):
-    kind: Literal["textometrics"]
-    parameters: TextometricsParametersModel
+class LexicometricsComputing(ProcessComputing):
+    kind: Literal["lexicometrics"]
+    parameters: LexicometricsParametersModel
 
 
 class PromptComputing(ProcessComputing):
@@ -1101,34 +1101,35 @@ class TfidfDocumentTopWordsModel(BaseModel):
     top_words: list[TfidfWordScoreModel]
 
 
-class TextometricsStatisticsModel(BaseModel):
+class LexicometricsStatisticsModel(BaseModel):
     """
-    Statistics computed by the textometrics task. Future statistics are new
-    optional fields, so older textometrics.json files still load.
+    Statistics computed by the lexicometrics task. Future statistics are new
+    optional fields, so older lexicometrics.json files still load.
     """
 
     words_per_doc: DistributionModel
-    tokens_per_doc: DistributionModel
+    # None when the tokenizer could not be loaded when computing (non-fatal)
+    tokens_per_doc: DistributionModel | None = None
     most_frequent_words: list[WordFrequencyModel]
     # tfidf_documents is None when the train set exceeds
-    # TextometricsParametersModel.tfidf_max_documents (size trade-off)
+    # LexicometricsParametersModel.tfidf_max_documents (size trade-off)
     tfidf_words: list[TfidfWordTopDocumentsModel] | None = None
     tfidf_documents: list[TfidfDocumentTopWordsModel] | None = None
 
 
-class TextometricsModel(BaseModel):
+class LexicometricsModel(BaseModel):
     """
-    Textometry statistics of the annotable dataset.
+    Lexicometry statistics of the annotable dataset.
     """
 
     version: int = 1
     computed_at: str
     user: str
-    parameters: TextometricsParametersModel
-    statistics: TextometricsStatisticsModel
+    parameters: LexicometricsParametersModel
+    statistics: LexicometricsStatisticsModel
 
 
-class TextometricsProjectStateModel(BaseModel):
+class LexicometricsProjectStateModel(BaseModel):
     available: bool
     training: dict[str, str]
 
@@ -1172,7 +1173,7 @@ class ProjectStateModel(BaseModel):
     imagemodels: ImageModelsProjectStateModel | None = None
     nermodels: NerModelsProjectStateModel | None = None
     projections: ProjectionsProjectStateModel
-    textometrics: TextometricsProjectStateModel
+    lexicometrics: LexicometricsProjectStateModel
     generations: GenerationsProjectStateModel
     bertopic: BertopicProjectStateModel
     users: UsersStateModel

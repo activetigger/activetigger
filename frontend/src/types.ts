@@ -33,7 +33,7 @@ export type PrepareSessionModel = components['schemas']['PrepareSessionModel'];
 export type PrepareSplitModel = components['schemas']['PrepareSplitModel'];
 export type PrepareStatusModel = components['schemas']['PrepareStatusModel'];
 
-export type TextometricsModel = components['schemas']['TextometricsModel'];
+export type LexicometricsModel = components['schemas']['LexicometricsModel'];
 export type DistributionModel = components['schemas']['DistributionModel'];
 export type TfidfWordTopDocumentsModel = components['schemas']['TfidfWordTopDocumentsModel'];
 export type TfidfDocumentTopWordsModel = components['schemas']['TfidfDocumentTopWordsModel'];

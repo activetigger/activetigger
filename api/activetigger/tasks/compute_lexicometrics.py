@@ -47,15 +47,15 @@ def distribution_statistics(values: Series, bins: int = 30) -> dict:
     }
 
 
-class ComputeTextometrics(BaseTask):
+class ComputeLexicometrics(BaseTask):
     """
-    Compute textometry statistics on a corpus.
+    Compute lexicometry statistics on a corpus.
 
     Returns a flat dict keyed by statistic name so new statistics can be
     added later without changing the storage format.
     """
 
-    kind = "textometrics"
+    kind = "lexicometrics"
 
     def __init__(
         self,
@@ -85,7 +85,7 @@ class ComputeTextometrics(BaseTask):
 
     def __stop_process_opportunity(self):
         if self.event is not None and self.event.is_set():
-            raise Exception("Textometrics computation interrupted by user")
+            raise Exception("Lexicometrics computation interrupted by user")
 
     def __call__(self) -> dict:
         texts = self.load_texts()
@@ -103,7 +103,9 @@ class ComputeTextometrics(BaseTask):
 
         return {
             "words_per_doc": distribution_statistics(words_per_doc),
-            "tokens_per_doc": distribution_statistics(tokens_per_doc),
+            "tokens_per_doc": (
+                distribution_statistics(tokens_per_doc) if tokens_per_doc is not None else None
+            ),
             "most_frequent_words": most_frequent_words,
             "tfidf_words": tfidf_words,
             "tfidf_documents": tfidf_documents,
@@ -116,13 +118,21 @@ class ComputeTextometrics(BaseTask):
         df = pd.read_parquet(self.path_data.joinpath(config.train_file), columns=[self.col_text])
         return df[self.col_text].fillna("").astype(str)
 
-    def count_tokens(self, texts: Series, batch_size: int = 1000) -> Series:
+    def count_tokens(self, texts: Series, batch_size: int = 1000) -> Series | None:
         """
         Number of subword tokens per document (relevant to model context limits).
         """
-        tokenizer = AutoTokenizer.from_pretrained(self.tokenizer_name)
-        if tokenizer is None:
-            raise Exception(f"Could not load tokenizer {self.tokenizer_name}")
+        try:
+            try:
+                # prefer the local cache to avoid any network dependency
+                tokenizer = AutoTokenizer.from_pretrained(
+                    self.tokenizer_name, local_files_only=True
+                )
+            except Exception:
+                tokenizer = AutoTokenizer.from_pretrained(self.tokenizer_name)
+        except Exception as e:
+            print(f"Could not load tokenizer {self.tokenizer_name}, skipping token counts: {e}")
+            return None
         counts: list[int] = []
         values = texts.tolist()
         for i in range(0, len(values), batch_size):

@@ -58,7 +58,7 @@ export const CurrentProjectState: FC = () => {
             : false) ||
           authenticatedUser.username in project.quickmodel.training ||
           authenticatedUser.username in project.projections.training ||
-          authenticatedUser.username in project.textometrics.training ||
+          authenticatedUser.username in project.lexicometrics.training ||
           authenticatedUser.username in project.bertopic.training ||
           Object.values(project.features.training).length > 0
         : false;

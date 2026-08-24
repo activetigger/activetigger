@@ -33,6 +33,7 @@ from activetigger.datamodels import (
     GenerationRequest,
     GenerationResult,
     ImageModelModel,
+    LexicometricsComputing,
     LMComputing,
     NerModelModel,
     NextInModel,
@@ -53,7 +54,6 @@ from activetigger.datamodels import (
     QuickModelInModel,
     StaticFileModel,
     TextDatasetModel,
-    TextometricsComputing,
     UpdateComputing,
 )
 from activetigger.db.manager import DatabaseManager
@@ -70,6 +70,7 @@ from activetigger.functions import (
 from activetigger.generation.generations import Generations
 from activetigger.imagemodels import ImageModels
 from activetigger.languagemodels import LanguageModels
+from activetigger.lexicometrics import Lexicometrics
 from activetigger.messages import Messages
 from activetigger.monitoring import Monitoring
 from activetigger.nermodels import NerModels
@@ -83,7 +84,6 @@ from activetigger.tasks.create_project import CreateProject, CreateProjectImagex
 from activetigger.tasks.extend_features import ExtendFeatures
 from activetigger.tasks.generate_call import GenerateCall
 from activetigger.tasks.update_datasets import UpdateDatasets
-from activetigger.textometrics import Textometrics
 from activetigger.users import Users
 
 
@@ -355,7 +355,7 @@ class Project:
         self.projections = Projections(
             project_slug, self.params.dir, self.computing, self.queue, self.db_manager
         )
-        self.textometrics = Textometrics(self.params.dir, self.computing, self.queue)
+        self.lexicometrics = Lexicometrics(self.params.dir, self.computing, self.queue)
         self.bertopic = Bertopic(
             project_slug,
             self.params.dir,
@@ -1541,7 +1541,7 @@ class Project:
             imagemodels=self.imagemodels.state() if self.imagemodels is not None else None,
             nermodels=self.nermodels.state() if self.nermodels is not None else None,
             projections=self.projections.state(),
-            textometrics=self.textometrics.state(),
+            lexicometrics=self.lexicometrics.state(),
             generations=self.generations.state(),
             bertopic=self.bertopic.state(),
             errors=self.errors.state(),
@@ -2722,9 +2722,9 @@ class Project:
                     case "projection":
                         projection = cast(ProjectionComputing, e)
                         self.projections.add(projection, results)
-                    case "textometrics":
-                        textometrics_computation = cast(TextometricsComputing, e)
-                        self.textometrics.add(textometrics_computation, results)
+                    case "lexicometrics":
+                        lexicometrics_computation = cast(LexicometricsComputing, e)
+                        self.lexicometrics.add(lexicometrics_computation, results)
                     case "generation":
                         e = cast(GenerationComputing, e)
                         r = cast(

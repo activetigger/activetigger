@@ -527,16 +527,16 @@ export function useStatistics(projectSlug: string | null, currentScheme: string 
 }
 
 /**
- * useGetTextometrics
- * GET the textometry statistics of the project (null if not computed yet)
+ * useGetLexicometrics
+ * GET the lexicometry statistics of the project (null if not computed yet)
  * @param projectSlug
  */
-export function useGetTextometrics(projectSlug: string | null) {
+export function useGetLexicometrics(projectSlug: string | null) {
   const [fetchTrigger, setFetchTrigger] = useState<boolean>(false);
 
-  const getTextometrics = useAsyncMemo(async () => {
+  const getLexicometrics = useAsyncMemo(async () => {
     if (projectSlug) {
-      const res = await api.GET('/projects/{project_slug}/textometrics', {
+      const res = await api.GET('/projects/{project_slug}/lexicometrics', {
         params: {
           path: { project_slug: projectSlug },
         },
@@ -548,31 +548,31 @@ export function useGetTextometrics(projectSlug: string | null) {
 
   const reFetch = useCallback(() => setFetchTrigger((f) => !f), []);
 
-  return { textometrics: getAsyncMemoData(getTextometrics), reFetchTextometrics: reFetch };
+  return { lexicometrics: getAsyncMemoData(getLexicometrics), reFetchLexicometrics: reFetch };
 }
 
 /**
- * useComputeTextometrics
- * POST to launch the computation of textometry statistics on the train dataset
+ * useComputeLexicometrics
+ * POST to launch the computation of lexicometry statistics on the train dataset
  * @param projectSlug
  */
-export function useComputeTextometrics(projectSlug: string | null) {
+export function useComputeLexicometrics(projectSlug: string | null) {
   const { notify } = useNotifications();
 
-  const computeTextometrics = useCallback(async () => {
+  const computeLexicometrics = useCallback(async () => {
     if (projectSlug) {
-      const res = await api.POST('/projects/{project_slug}/textometrics/compute', {
+      const res = await api.POST('/projects/{project_slug}/lexicometrics/compute', {
         params: {
           path: { project_slug: projectSlug },
         },
       });
-      if (!res.error) notify({ type: 'info', message: 'Textometrics are computing.' });
+      if (!res.error) notify({ type: 'info', message: 'Lexicometrics are computing.' });
       return true;
     }
     return false;
   }, [projectSlug, notify]);
 
-  return computeTextometrics;
+  return computeLexicometrics;
 }
 
 /**

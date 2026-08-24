@@ -5,12 +5,12 @@ import { Link } from 'react-router-dom';
 import Select from 'react-select';
 import { VictoryAxis, VictoryBar, VictoryChart, VictoryTheme } from 'victory';
 
-import { useComputeTextometrics, useGetTextometrics } from '../core/api';
+import { useComputeLexicometrics, useGetLexicometrics } from '../core/api';
 import { useAppContext } from '../core/useAppContext';
 import { DistributionModel } from '../types';
 import { StopProcessButton } from './StopProcessButton';
 
-interface TextometricsManagementProps {
+interface LexicometricsManagementProps {
   projectSlug: string | null;
 }
 
@@ -113,24 +113,24 @@ const DistributionHistogram: FC<{ title: string; distribution: DistributionModel
 };
 
 /**
- * Textometry statistics of the train dataset: computed on demand by a
+ * Lexicometry statistics of the train dataset: computed on demand by a
  * background task, then displayed (distributions + most frequent words)
  */
-export const TextometricsManagement: FC<TextometricsManagementProps> = ({ projectSlug }) => {
+export const LexicometricsManagement: FC<LexicometricsManagementProps> = ({ projectSlug }) => {
   const {
     appContext: { currentProject: project },
   } = useAppContext();
 
-  const isTraining = Object.keys(project?.textometrics?.training || {}).length > 0;
-  const { textometrics, reFetchTextometrics } = useGetTextometrics(projectSlug);
-  const computeTextometrics = useComputeTextometrics(projectSlug);
+  const isTraining = Object.keys(project?.lexicometrics?.training || {}).length > 0;
+  const { lexicometrics, reFetchLexicometrics } = useGetLexicometrics(projectSlug);
+  const computeLexicometrics = useComputeLexicometrics(projectSlug);
   const [nWordsDisplayed, setNWordsDisplayed] = useState<string>('20');
 
   // tf-idf explorer state
   const [selectedWord, setSelectedWord] = useState<string | null>(null);
   const [documentFilter, setDocumentFilter] = useState<string>('');
-  const tfidfWords = textometrics?.statistics.tfidf_words;
-  const tfidfDocuments = textometrics?.statistics.tfidf_documents;
+  const tfidfWords = lexicometrics?.statistics.tfidf_words;
+  const tfidfDocuments = lexicometrics?.statistics.tfidf_documents;
   const wordOptions = useMemo(
     () =>
       (tfidfWords || []).map((element) => ({
@@ -154,22 +154,22 @@ export const TextometricsManagement: FC<TextometricsManagementProps> = ({ projec
 
   // when the computation ends (training goes back to empty), refetch the results
   useEffect(() => {
-    if (!isTraining) reFetchTextometrics();
-  }, [isTraining, reFetchTextometrics]);
+    if (!isTraining) reFetchLexicometrics();
+  }, [isTraining, reFetchLexicometrics]);
 
   if (isTraining)
     return (
       <div className="col-12 my-3">
-        <div>Computing textometrics...</div>
-        <StopProcessButton projectSlug={projectSlug} kind="textometrics" />
+        <div>Computing lexicometrics...</div>
+        <StopProcessButton projectSlug={projectSlug} kind="lexicometrics" />
       </div>
     );
 
-  if (!textometrics)
+  if (!lexicometrics)
     return (
       <div className="col-12 my-3">
-        <button className="btn btn-primary" onClick={computeTextometrics}>
-          Compute textometrics
+        <button className="btn btn-primary" onClick={computeLexicometrics}>
+          Compute lexicometrics
         </button>
       </div>
     );
@@ -178,10 +178,10 @@ export const TextometricsManagement: FC<TextometricsManagementProps> = ({ projec
     <div className="col-12 my-3">
       <div className="d-flex align-items-center gap-3 mb-3">
         <span className="explanations">
-          Computed on {new Date(textometrics.computed_at).toLocaleString()} (tokenizer:{' '}
-          {textometrics.parameters.tokenizer})
+          Computed on {new Date(lexicometrics.computed_at).toLocaleString()} (tokenizer:{' '}
+          {lexicometrics.parameters.tokenizer})
         </span>
-        <button className="btn btn-secondary btn-sm" onClick={computeTextometrics}>
+        <button className="btn btn-secondary btn-sm" onClick={computeLexicometrics}>
           Recompute
         </button>
       </div>
@@ -192,20 +192,29 @@ export const TextometricsManagement: FC<TextometricsManagementProps> = ({ projec
         <div className="col-md-4">
           <DistributionSummaryTable
             distributions={[
-              { label: 'Words', distribution: textometrics.statistics.words_per_doc },
-              { label: 'Tokens', distribution: textometrics.statistics.tokens_per_doc },
+              { label: 'Words', distribution: lexicometrics.statistics.words_per_doc },
+              ...(lexicometrics.statistics.tokens_per_doc
+                ? [{ label: 'Tokens', distribution: lexicometrics.statistics.tokens_per_doc }]
+                : []),
             ]}
           />
         </div>
         <div className="col-md-8">
           <DistributionHistogram
             title="Words per document"
-            distribution={textometrics.statistics.words_per_doc}
+            distribution={lexicometrics.statistics.words_per_doc}
           />
-          <DistributionHistogram
-            title="Tokens per document"
-            distribution={textometrics.statistics.tokens_per_doc}
-          />
+          {lexicometrics.statistics.tokens_per_doc ? (
+            <DistributionHistogram
+              title="Tokens per document"
+              distribution={lexicometrics.statistics.tokens_per_doc}
+            />
+          ) : (
+            <div className="alert alert-warning">
+              Token counts unavailable: the tokenizer ({lexicometrics.parameters.tokenizer}) could
+              not be loaded when the statistics were computed. Recompute to try again.
+            </div>
+          )}
         </div>
       </div>
       <div className="row mt-3">
@@ -226,8 +235,8 @@ export const TextometricsManagement: FC<TextometricsManagementProps> = ({ projec
           </div>
           <CompactRankedList
             items={(nWordsDisplayed === 'all'
-              ? textometrics.statistics.most_frequent_words
-              : textometrics.statistics.most_frequent_words.slice(0, Number(nWordsDisplayed))
+              ? lexicometrics.statistics.most_frequent_words
+              : lexicometrics.statistics.most_frequent_words.slice(0, Number(nWordsDisplayed))
             ).map((element) => ({
               key: element.word,
               label: element.word,
@@ -241,7 +250,7 @@ export const TextometricsManagement: FC<TextometricsManagementProps> = ({ projec
           <h4 className="subsection">TF-IDF explorer</h4>
           {!tfidfWords ? (
             <div className="alert alert-info">
-              Recompute textometrics to get the TF-IDF statistics.
+              Recompute lexicometrics to get the TF-IDF statistics.
             </div>
           ) : (
             <Tabs defaultActiveKey="byword" className="mb-2">
@@ -277,7 +286,7 @@ export const TextometricsManagement: FC<TextometricsManagementProps> = ({ projec
                 {!tfidfDocuments ? (
                   <div className="alert alert-info">
                     The train set is larger than the limit (
-                    {textometrics.parameters.tfidf_max_documents} documents): the per-document
+                    {lexicometrics.parameters.tfidf_max_documents} documents): the per-document
                     TF-IDF view is not stored to keep the statistics file small.
                   </div>
                 ) : (

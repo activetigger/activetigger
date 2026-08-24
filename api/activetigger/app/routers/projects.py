@@ -25,12 +25,12 @@ from activetigger.datamodels import (
     DatasetModel,
     EvalSetDataModel,
     EvalSetImageModel,
+    LexicometricsModel,
     ProjectAuthsModel,
     ProjectBaseModel,
     ProjectDescriptionModel,
     ProjectStateModel,
     ProjectUpdateModel,
-    TextometricsModel,
     UserInDBModel,
     WaitingModel,
 )
@@ -78,40 +78,42 @@ def get_project_statistics(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/projects/{project_slug}/textometrics", dependencies=[Depends(verified_user)])
-def get_textometrics(
+@router.get("/projects/{project_slug}/lexicometrics", dependencies=[Depends(verified_user)])
+def get_lexicometrics(
     project: Annotated[Project, Depends(get_project)],
     current_user: Annotated[UserInDBModel, Depends(verified_user)],
-) -> TextometricsModel | None:
+) -> LexicometricsModel | None:
     """
-    Textometry statistics of the train dataset (None if not computed yet)
+    Lexicometry statistics of the train dataset (None if not computed yet)
     """
     test_rights(ProjectAction.GET, current_user.username, project.project_slug)
     try:
-        return project.textometrics.get()
+        return project.lexicometrics.get()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/projects/{project_slug}/textometrics/compute", dependencies=[Depends(verified_user)])
-def compute_textometrics(
+@router.post(
+    "/projects/{project_slug}/lexicometrics/compute", dependencies=[Depends(verified_user)]
+)
+def compute_lexicometrics(
     project: Annotated[Project, Depends(get_project)],
     current_user: Annotated[UserInDBModel, Depends(verified_user)],
 ) -> WaitingModel:
     """
-    Launch the computation of textometry statistics on the train dataset
+    Launch the computation of lexicometry statistics on the train dataset
     """
     test_rights(ProjectAction.ADD, current_user.username, project.project_slug)
     try:
-        project.textometrics.compute(
+        project.lexicometrics.compute(
             project_slug=project.name,
             username=current_user.username,
             language=project.params.language,
         )
         get_orchestrator().log_action(
-            current_user.username, "COMPUTE TEXTOMETRICS", project.project_slug
+            current_user.username, "COMPUTE LEXICOMETRICS", project.project_slug
         )
-        return WaitingModel(detail="Textometrics are computing")
+        return WaitingModel(detail="Lexicometrics are computing")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

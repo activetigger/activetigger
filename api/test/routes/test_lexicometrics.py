@@ -5,27 +5,27 @@ from fastapi.testclient import TestClient
 from test.utils import create_project, delete_project, get_project_state
 
 
-def test_textometrics(client: TestClient, superuser_headers: dict[str, str]) -> None:
+def test_lexicometrics(client: TestClient, superuser_headers: dict[str, str]) -> None:
     """
-    Testing the textometrics computation flow: not computed -> compute -> available.
+    Testing the lexicometrics computation flow: not computed -> compute -> available.
     """
 
-    project_name = f"Test-textometrics-{int(time.time())}"
+    project_name = f"Test-lexicometrics-{int(time.time())}"
     project = create_project(client, superuser_headers, project_name)
     project_slug = project["project_slug"]
 
     try:
         # not computed yet
-        r = client.get(f"/api/projects/{project_slug}/textometrics", headers=superuser_headers)
+        r = client.get(f"/api/projects/{project_slug}/lexicometrics", headers=superuser_headers)
         assert r.status_code == 200, r.text
         assert r.json() is None
 
         state = get_project_state(client, superuser_headers, project_slug)
-        assert state["textometrics"] == {"available": False, "training": {}}
+        assert state["lexicometrics"] == {"available": False, "training": {}}
 
         # launch the computation
         r = client.post(
-            f"/api/projects/{project_slug}/textometrics/compute", headers=superuser_headers
+            f"/api/projects/{project_slug}/lexicometrics/compute", headers=superuser_headers
         )
         assert r.status_code == 200, r.text
 
@@ -34,17 +34,17 @@ def test_textometrics(client: TestClient, superuser_headers: dict[str, str]) -> 
             client,
             superuser_headers,
             project_slug,
-            expect=lambda s: s["textometrics"]["available"],
+            expect=lambda s: s["lexicometrics"]["available"],
             timeout=60,
         )
-        assert state["textometrics"]["available"]
-        assert state["textometrics"]["training"] == {}
+        assert state["lexicometrics"]["available"]
+        assert state["lexicometrics"]["training"] == {}
 
         # get the statistics
-        r = client.get(f"/api/projects/{project_slug}/textometrics", headers=superuser_headers)
+        r = client.get(f"/api/projects/{project_slug}/lexicometrics", headers=superuser_headers)
         assert r.status_code == 200, r.text
-        textometrics = r.json()
-        statistics = textometrics["statistics"]
+        lexicometrics = r.json()
+        statistics = lexicometrics["statistics"]
         n_train = statistics["words_per_doc"]["summary"]["count"]
         assert n_train == 100
         assert statistics["tokens_per_doc"]["summary"]["count"] == n_train

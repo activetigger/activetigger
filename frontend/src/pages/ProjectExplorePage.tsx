@@ -6,8 +6,8 @@ import { BertopicPage } from '../pages/BertopicPage';
 
 import { DataTabular } from '../components/DataTabular';
 import { ProjectPageLayout } from '../components/layout/ProjectPageLayout';
+import { LexicometricsManagement } from '../components/LexicometricsManagement';
 import { ProjectionManagement } from '../components/ProjectionManagement';
-import { TextometricsManagement } from '../components/TextometricsManagement';
 import { useAppContext } from '../core/useAppContext';
 
 /**
@@ -52,11 +52,11 @@ export const ProjectExplorePage: FC = () => {
                 />
               </Tab>
               {project?.params.kind !== 'image' && developmentMode && (
-                <Tab eventKey="textometry" title="Textometry">
+                <Tab eventKey="lexicometry" title="Lexicometry">
                   <div className="explanations">
                     Statistics on your train data (word and token count, most frequent words)
                   </div>
-                  <TextometricsManagement projectSlug={projectName || null} />
+                  <LexicometricsManagement projectSlug={projectName || null} />
                 </Tab>
               )}
               <Tab eventKey="visualization" title="Visualization" unmountOnExit={true}>
