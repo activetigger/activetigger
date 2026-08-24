@@ -24,6 +24,8 @@ export const DEFAULT_CONTEXT: AppContextValue = {
     displayFormat: 'cards',
     displayMeanAnnotationTime: false,
     spanAnnotationMode: 'locked',
+    imageGridMode: false,
+    imageGridSize: 3,
   },
   selectionConfig: {
     mode: 'random',

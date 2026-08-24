@@ -3,7 +3,6 @@ import { SubmitHandler, useForm } from 'react-hook-form';
 import { HiOutlineQuestionMarkCircle } from 'react-icons/hi';
 import { Tooltip } from 'react-tooltip';
 import { useComputeBertopic, useStopProcesses } from '../../core/api';
-import { useAppContext } from '../../core/useAppContext';
 import { getRandomName } from '../../core/utils';
 import { ComputeBertopicModel } from '../../types';
 import { ButtonNewFeature } from '../ButtonNewFeature';
@@ -23,9 +22,6 @@ export const BertopicForm: FC<BertopicCreationFormProps> = ({
 }) => {
   const { computeBertopic } = useComputeBertopic(projectSlug);
   const { stopProcesses } = useStopProcesses(projectSlug);
-  const {
-    appContext: { currentScheme },
-  } = useAppContext();
 
   const { handleSubmit: handleSubmitNewModel, register } = useForm<ComputeBertopicModel>({
     defaultValues: {
@@ -37,7 +33,6 @@ export const BertopicForm: FC<BertopicCreationFormProps> = ({
       existing_feature: bindableFeatures[0] ?? '',
       filter_text_length: 50,
       input_datasets: 'train',
-      scheme: currentScheme,
     },
   });
 

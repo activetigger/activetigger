@@ -24,6 +24,7 @@ import { DisplayProjection } from '../vizualisation/DisplayProjection';
 import { AnnotationHistoryList } from './AnnotationHistoryList';
 import { AnnotationModeForm } from './AnnotationMode';
 import { ImageClassificationPanelImagexp } from './ImageClassificationPanelImagexp';
+import { ImageGridAnnotationImagexp } from './ImageGridAnnotationImagexp';
 import { MulticlassInput } from './MulticlassInput';
 import { MultilabelInput } from './MultilabelInput';
 import { PromptsPanel } from './PromptsPanel';
@@ -77,6 +78,7 @@ export const AnnotationManagement: FC = () => {
     selectionHistory,
     phase,
     currentProjectionName,
+    developmentMode,
   } = appContext;
 
   const navigate = useNavigate();
@@ -196,6 +198,29 @@ export const AnnotationManagement: FC = () => {
       : 'multiclass',
   );
 
+  // experimental image grid batch annotation: image projects, multiclass
+  // schemes, train dataset, experimental mode only
+  const imageGridActive =
+    !!displayConfig.imageGridMode &&
+    project?.params?.kind === 'image' &&
+    kindScheme === 'multiclass' &&
+    developmentMode &&
+    effectivePhase === 'train';
+
+  // turn the grid mode off when experimental mode is disabled or the current
+  // project is not an image project (same pattern as the prompt selection mode)
+  useEffect(() => {
+    if (
+      displayConfig.imageGridMode &&
+      (!developmentMode || (project?.params && project.params.kind !== 'image'))
+    ) {
+      setAppContext((prev) => ({
+        ...prev,
+        displayConfig: { ...prev.displayConfig, imageGridMode: false },
+      }));
+    }
+  }, [developmentMode, displayConfig.imageGridMode, project?.params, setAppContext]);
+
   // get statistics to display
   const { statistics, reFetchStatistics } = useStatistics(
     projectName || null,
@@ -205,6 +230,11 @@ export const AnnotationManagement: FC = () => {
   // react to URL param change
   useEffect(() => {
     resetScroll();
+    // the grid annotation mode manages its own batch fetching: don't fetch
+    // or navigate to a single next element while it is active
+    if (imageGridActive) {
+      return;
+    }
     if (elementId === 'noelement') {
       return;
     }
@@ -275,6 +305,7 @@ export const AnnotationManagement: FC = () => {
     setAppContext,
     notify,
     element,
+    imageGridActive,
   ]);
 
   // mark the moment the current element became visible to the user
@@ -383,7 +414,7 @@ export const AnnotationManagement: FC = () => {
   useEffect(() => {
     // fetch next element in the new phase
     // only if there is one current element to avoid triggering fetchnext at page load
-    if (element !== null) {
+    if (element !== null && !imageGridActive) {
       fetchNextElement();
     }
     // disabling echaustive deps as we only want to track phase to avoid unnecessary fetchNext
@@ -391,7 +422,7 @@ export const AnnotationManagement: FC = () => {
   }, [effectivePhase]);
 
   useEffect(() => {
-    if (element !== null) {
+    if (element !== null && !imageGridActive) {
       fetchNextElement();
     }
     // disabling echaustive deps as we only want to track phase to avoid unnecessary fetchNext
@@ -516,7 +547,19 @@ export const AnnotationManagement: FC = () => {
         nSample={nSample}
         statistics={statistics}
       />
-      {!showFocusMode && annotationArea}
+      {imageGridActive && project?.params?.project_slug ? (
+        <ImageGridAnnotationImagexp
+          projectSlug={project.params.project_slug}
+          scheme={currentScheme}
+          selectionConfig={sanitizedSelectionConfig}
+          phase={effectivePhase}
+          availableLabels={availableLabels}
+          gridSize={displayConfig.imageGridSize ?? 3}
+          onValidated={reFetchStatistics}
+        />
+      ) : (
+        !showFocusMode && annotationArea
+      )}
 
       <div>
         {displayConfig.displayHistory ? (
@@ -625,7 +668,7 @@ export const AnnotationManagement: FC = () => {
         <Modal.Body
           style={{ '--focus-font-size': displayConfig.focusFontSize ?? 100 } as CSSProperties}
         >
-          {annotationArea}
+          {!imageGridActive && annotationArea}
         </Modal.Body>
       </Modal>
       <Modal show={showDisplayConfig} onHide={handleCloseConfig} size="sm" id="config-modal">
@@ -658,7 +701,9 @@ export const AnnotationManagement: FC = () => {
             <PromptsPanel
               projectSlug={project.params.project_slug}
               state={(project as unknown as { prompts?: PromptsProjectStateModel | null }).prompts}
-              currentText={project.params.kind !== 'image' ? element?.text ?? undefined : undefined}
+              currentText={
+                project.params.kind !== 'image' ? (element?.text ?? undefined) : undefined
+              }
             />
           )}
         </Modal.Body>

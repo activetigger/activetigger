@@ -40,6 +40,25 @@ def get_next(
     test_rights(ProjectAction.GET, current_user.username, project.name)
     try:
         return project.get_next(
+            next=next.model_copy(update={"n": 1}),
+            username=current_user.username,
+        )[0]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/elements/next/batch", dependencies=[Depends(verified_user)])
+def get_next_batch(
+    project: Annotated[Project, Depends(get_project)],
+    current_user: Annotated[UserInDBModel, Depends(verified_user)],
+    next: NextInModel,
+) -> list[ElementOutModel]:
+    """
+    Get the next n elements to annotate in one call.
+    """
+    test_rights(ProjectAction.GET, current_user.username, project.name)
+    try:
+        return project.get_next(
             next=next,
             username=current_user.username,
         )

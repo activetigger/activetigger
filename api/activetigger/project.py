@@ -958,20 +958,20 @@ class Project:
         self,
         next: NextInModel,
         username: str = "user",
-    ) -> ElementOutModel:
+    ) -> list[ElementOutModel]:
         """
-        Get next item for a specific scheme with a specific selection method
+        Get next item(s) for a specific scheme with a specific selection method
         - fixed
         - random
         - active (entropy or active LABEL)
         - maxprob
         - test
 
+        next.n : number of elements to return (batch mode)
         history : previous selected elements
         frame is the use of projection coordinates to limit the selection
         filter is a regex to use on the corpus
         """
-        element_id = None
 
         if next.scheme not in self.schemes.available():
             raise ValueError("Scheme doesn't exist")
@@ -992,7 +992,6 @@ class Project:
 
         # check conditions for active learning and get proba
         proba = None
-        predict = PredictedLabel(label=None, proba=None, entropy=None)
         if next.model_active is not None:
             prediction = self.get_model_prediction(next.model_active.type, next.model_active.value)
             proba = prediction.reindex(df.index)
@@ -1099,10 +1098,13 @@ class Project:
             raise ValueError(
                 "No element available with this selection mode and history. Clear the history to access previous elements."
             )
-        indicator = None
-        similarity: float | None = None
-        rank: int | None = None
         n_sample = f.sum()  # use len(ss) for adding history
+
+        n = min(max(1, next.n), 100)
+        element_ids: list = []
+        indicators: dict = {}
+        similarities: dict = {}
+        ranks: dict = {}
 
         # validate selection method
         valid_selections = {"fixed", "random", "maxprob", "active", "prompt"}
@@ -1111,11 +1113,11 @@ class Project:
 
         # select an element based on the method
 
-        if next.selection == "fixed":  # next row
-            element_id = ss.index[0]
+        if next.selection == "fixed":  # next rows
+            element_ids = list(ss.index[:n])
 
-        elif next.selection == "random":  # random row
-            element_id = ss.sample(n=1).index[0]
+        elif next.selection == "random":  # random rows
+            element_ids = list(ss.sample(n=min(n, len(ss))).index)
 
         # be sure that the model has been trained
         if next.selection in ["maxprob", "active"] and next.model_active is None:
@@ -1130,9 +1132,9 @@ class Project:
                 .drop(next.history, errors="ignore")
                 .sort_values(ascending=False)
             )
-            element_id = ss_maxprob.index[0]
-            n_sample = f.sum()
-            indicator = f"probability: {round(proba.loc[element_id, next.label_prob], 2)}"
+            element_ids = list(ss_maxprob.index[:n])
+            for eid in element_ids:
+                indicators[eid] = f"probability: {round(proba.loc[eid, next.label_prob], 2)}"
 
         # active: two modes depending on whether label_prob is set
         if next.selection == "active" and proba is not None:
@@ -1149,9 +1151,9 @@ class Project:
                     .drop(next.history, errors="ignore")
                     .sort_values(ascending=False)
                 )
-                element_id = ss_active.index[0]
-                n_sample = f.sum()
-                indicator = f"probability: {round(proba.loc[element_id, next.label_prob], 2)}"
+                element_ids = list(ss_active.index[:n])
+                for eid in element_ids:
+                    indicators[eid] = f"probability: {round(proba.loc[eid, next.label_prob], 2)}"
             else:
                 # active (no label): higher entropy (uncertainty sampling)
                 ss_active = (
@@ -1159,9 +1161,9 @@ class Project:
                     .drop(next.history, errors="ignore")
                     .sort_values(ascending=False)
                 )
-                element_id = ss_active.index[0]
-                n_sample = f.sum()
-                indicator = f"entropy: {round(proba.loc[element_id, 'entropy'], 2)}"
+                element_ids = list(ss_active.index[:n])
+                for eid in element_ids:
+                    indicators[eid] = f"entropy: {round(proba.loc[eid, 'entropy'], 2)}"
 
         # prompt: cosine similarity between a saved prompt embedding and the
         # element embeddings of its bound feature (multimodal-embeddings on
@@ -1185,70 +1187,79 @@ class Project:
                 candidates = candidates[(candidates >= lo) & (candidates <= hi)]
             if candidates.empty:
                 raise ValueError("No candidate elements have embeddings for the prompt's feature.")
-            element_id = candidates.index[0]
-            similarity = float(candidates.iloc[0])
-            # rank in the full prompt ranking (1-based), independent of the
-            # currently filtered candidate pool, so the user sees the absolute
-            # position across the whole dataset.
-            loc = ranked.index.get_loc(element_id)
-            if not isinstance(loc, int):
-                raise ValueError(
-                    f"Expected unique position for {element_id} in prompt ranking, got {type(loc).__name__}"
-                )
-            rank = loc + 1
-            indicator = f"similarity: {round(similarity, 3)}"
-        if element_id is None:
+            element_ids = list(candidates.index[:n])
+            for eid in element_ids:
+                similarities[eid] = float(candidates.loc[eid])
+                # rank in the full prompt ranking (1-based), independent of the
+                # currently filtered candidate pool, so the user sees the
+                # absolute position across the whole dataset.
+                loc = ranked.index.get_loc(eid)
+                if not isinstance(loc, int):
+                    raise ValueError(
+                        f"Expected unique position for {eid} in prompt ranking, got {type(loc).__name__}"
+                    )
+                ranks[eid] = loc + 1
+                indicators[eid] = f"similarity: {round(similarities[eid], 3)}"
+        if len(element_ids) == 0:
             raise ValueError("No element available with this selection mode.")
 
-        # get prediction for the element selected
+        # build the output for each selected element
+        elements: list[ElementOutModel] = []
+        for element_id in element_ids:
+            # get prediction for the element selected
+            predict = PredictedLabel(label=None, proba=None, entropy=None)
+            if (
+                next.model_active is not None
+                and next.model_active.type is not None
+                and next.model_active.value is not None
+                and next.dataset == "train"
+            ):
+                predict = self.get_prediction_element(
+                    next.model_active.type,
+                    next.model_active.value,
+                    element_id,
+                )
 
-        if (
-            next.model_active is not None
-            and next.model_active.type is not None
-            and next.model_active.value is not None
-            and next.dataset == "train"
-        ):
-            predict = self.get_prediction_element(
-                next.model_active.type,
-                next.model_active.value,
+            # get all tags already existing for the element selected
+            previous = self.schemes.projects_service.get_annotations_by_element(
+                self.params.project_slug,
+                next.scheme,
                 element_id,
             )
 
-        # get all tags already existing for the element selected
-        previous = self.schemes.projects_service.get_annotations_by_element(
-            self.params.project_slug,
-            next.scheme,
-            element_id,
-        )
+            if next.dataset in ["test", "valid"]:
+                context = {}
+            else:
+                if self.data.train is None:
+                    raise Exception("Train dataset is not defined")
+                # get context for the selected element
+                context = dict(
+                    self.data.train.loc[element_id, self.params.cols_context]
+                    .fillna("NA")
+                    .apply(str)
+                )
 
-        if next.dataset in ["test", "valid"]:
-            context = {}
-        else:
-            if self.data.train is None:
-                raise Exception("Train dataset is not defined")
-            # get context for the single selected element
-            context = dict(
-                self.data.train.loc[element_id, self.params.cols_context].fillna("NA").apply(str)
+            text = df.loc[element_id, "text"]
+            if pd.isna(text):
+                text = "NA"
+
+            elements.append(
+                ElementOutModel(
+                    element_id=element_id,
+                    text=text,
+                    context=context,
+                    selection=next.selection,
+                    info=indicators.get(element_id),
+                    predict=predict,
+                    frame=next.frame,
+                    limit=None,
+                    history=previous,
+                    n_sample=n_sample,
+                    similarity=similarities.get(element_id),
+                    rank=ranks.get(element_id),
+                )
             )
-
-        text = df.loc[element_id, "text"]
-        if pd.isna(text):
-            text = "NA"
-
-        return ElementOutModel(
-            element_id=element_id,
-            text=text,
-            context=context,
-            selection=next.selection,
-            info=indicator,
-            predict=predict,
-            frame=next.frame,
-            limit=None,
-            history=previous,
-            n_sample=n_sample,
-            similarity=similarity,
-            rank=rank,
-        )
+        return elements
 
     def get_element(
         self,

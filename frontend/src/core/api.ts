@@ -14,6 +14,7 @@ import {
   AnnotationsDataModel,
   AvailableProjectsModel,
   ComputeBertopicModel,
+  ElementOutModel,
   EvalSetDataModel,
   GenModel,
   LoginParams,
@@ -941,6 +942,50 @@ export function useGetNextElementId(
   ]);
 
   return { getNextElementId };
+}
+
+/**
+ * Get the next n elements to annotate in one call (batch).
+ */
+export function useGetNextElementsBatch(
+  projectSlug: string | null,
+  currentScheme: string | null,
+  projectionName: string | null | undefined,
+  selectionConfig: SelectionConfig,
+  history: string[],
+  phase: string,
+  activeModel: ActiveModel | null,
+) {
+  const getNextElementsBatch = useCallback(
+    async (n: number): Promise<ElementOutModel[] | null> => {
+      if (!projectSlug || !currentScheme) return null;
+      const res = await api.POST('/elements/next/batch', {
+        params: { query: { project_slug: projectSlug } },
+        body: {
+          scheme: currentScheme,
+          selection: selectionConfig.mode,
+          sample: selectionConfig.sample,
+          on_labels: selectionConfig.labels,
+          filter: selectionConfig.filter,
+          history: history,
+          frame: selectionConfig.frameSelection ? selectionConfig.frame : null,
+          projection_name: selectionConfig.frameSelection ? projectionName : null,
+          dataset: phase,
+          label_prob: selectionConfig.label_prob,
+          on_users: selectionConfig.users,
+          model_active: activeModel,
+          prompt_id: selectionConfig.prompt_id,
+          similarity_range: selectionConfig.similarity_range,
+          n: n,
+        },
+      });
+      if (res.error || !res.data) return null;
+      return res.data;
+    },
+    [projectSlug, currentScheme, projectionName, selectionConfig, history, phase, activeModel],
+  );
+
+  return { getNextElementsBatch };
 }
 
 /**

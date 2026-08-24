@@ -3,9 +3,10 @@ import { useAppContext } from '../core/useAppContext';
 
 export const TagDisplayParameters: FC = () => {
   const {
-    appContext: { displayConfig },
+    appContext: { displayConfig, currentProject, developmentMode },
     setAppContext,
   } = useAppContext();
+  const isImageProject = currentProject?.params?.kind === 'image';
   return (
     <div className="d-flex flex-column">
       <label>
@@ -251,6 +252,51 @@ export const TagDisplayParameters: FC = () => {
           }));
         }}
       />
+
+      {isImageProject && developmentMode && (
+        <>
+          <hr />
+          <label title="Experimental: annotate images in batch on a N x N grid. Multiclass schemes on the train dataset only. Designed for computer screens.">
+            <input
+              type="checkbox"
+              checked={!!displayConfig.imageGridMode}
+              onChange={(_) => {
+                setAppContext((prev) => ({
+                  ...prev,
+                  displayConfig: {
+                    ...displayConfig,
+                    imageGridMode: !displayConfig.imageGridMode,
+                  },
+                }));
+              }}
+            />
+            Grid display 🧪
+          </label>
+          {displayConfig.imageGridMode && (
+            <div className="horizontal">
+              <span className="text-nowrap me-1">
+                Grid size {displayConfig.imageGridSize ?? 3} × {displayConfig.imageGridSize ?? 3}
+              </span>
+              <input
+                type="range"
+                min="2"
+                max="5"
+                value={displayConfig.imageGridSize ?? 3}
+                onChange={(e) => {
+                  setAppContext((prev) => ({
+                    ...prev,
+                    displayConfig: {
+                      ...displayConfig,
+                      imageGridSize: Number(e.target.value),
+                    },
+                  }));
+                }}
+                style={{ marginRight: '10px' }}
+              />
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 };

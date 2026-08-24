@@ -234,6 +234,7 @@ class NextInModel(BaseModel):
     # (min, max) cosine-similarity bounds for prompt selection. Inclusive on
     # both ends. None means no filtering.
     similarity_range: tuple[float, float] | None = None
+    n: int = 1
 
 
 class ElementInModel(BaseModel):

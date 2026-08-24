@@ -221,6 +221,9 @@ export interface DisplayConfig {
   // focus mode modal: text size (% of normal) and text frame width (% of screen)
   focusFontSize?: number;
   focusTextWidth?: number;
+  // experimental: batch grid annotation for image projects.
+  imageGridMode?: boolean;
+  imageGridSize?: number;
 }
 
 export interface newBertModel {

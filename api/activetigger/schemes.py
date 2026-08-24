@@ -747,7 +747,8 @@ class Schemes:
                     annotation.scheme,
                     username,
                     table.dataset,
-                    "table",
+                    annotation.comment,
+                    annotation.selection or "table",
                 )
             except Exception:
                 errors.append(annotation)
