@@ -1,4 +1,5 @@
 import { parquetMetadataAsync, parquetRead } from 'hyparquet';
+import { compressors } from 'hyparquet-compressors';
 import { fromPairs, sample, zip } from 'lodash';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
@@ -26,6 +27,8 @@ export async function loadParquetFile(file: File): Promise<DataType> {
     parquetRead({
       metadata,
       file: arrayBuffer,
+      // support all parquet compression codecs (ZSTD, gzip, brotli...), not just snappy
+      compressors,
       // here is the callback which will be called once the file has been loaded
       onComplete: (arrayData) => {
         // extract headers from metadata
