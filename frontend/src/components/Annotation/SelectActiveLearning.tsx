@@ -2,8 +2,8 @@ import { FC, useEffect, useMemo, useState } from 'react';
 import { Modal } from 'react-bootstrap';
 import { HiBan } from 'react-icons/hi';
 import { LuRefreshCw } from 'react-icons/lu';
+import { Link } from 'react-router-dom';
 import Select from 'react-select';
-import { Tooltip } from 'react-tooltip';
 import { useRetrainQuickModel, useTrainQuickModel } from '../../core/api';
 import { useNotifications } from '../../core/notifications';
 import { useAppContext } from '../../core/useAppContext';
@@ -26,6 +26,7 @@ type ModelOption = {
   label: string;
   time?: string; // optional because you use availableBertModels?.[e]?.time
   labels_excluded: string[]; // always present
+  isDisabled?: boolean; // react-select uses it to gray out the option
 };
 
 type GroupedModels = Array<{
@@ -64,13 +65,6 @@ export const SelectActiveLearning: FC<SelectActiveLearningProps> = ({
     [project?.imagemodels, currentScheme],
   );
 
-  const availableBertModelsWithPrediction = Object.entries(availableBertModels || {})
-    .filter(([_, v]) => v && v.predicted)
-    .map(([k, _]) => k);
-  const availableImageModelsWithPrediction = Object.entries(availableImageModels || {})
-    .filter(([_, v]) => v && v.predicted)
-    .map(([k, _]) => k);
-
   const groupedModels: GroupedModels = [
     {
       label: 'Quick Models',
@@ -92,7 +86,7 @@ export const SelectActiveLearning: FC<SelectActiveLearningProps> = ({
     },
     {
       label: 'Language Models',
-      options: (availableBertModelsWithPrediction ?? [])
+      options: Object.keys(availableBertModels || {})
         .filter((e) => e) // <-- ensure non-null
         .map((e) => {
           const excluded = availableBertModels?.[e]?.exclude_labels ?? [];
@@ -102,12 +96,13 @@ export const SelectActiveLearning: FC<SelectActiveLearningProps> = ({
             type: 'languagemodel',
             time: availableBertModels?.[e]?.time ?? '',
             labels_excluded: excluded,
+            isDisabled: !availableBertModels?.[e]?.predicted,
           };
         }),
     },
     {
       label: 'Image Models',
-      options: (availableImageModelsWithPrediction ?? [])
+      options: Object.keys(availableImageModels || {})
         .filter((e) => e)
         .map((e) => {
           const excluded = availableImageModels?.[e]?.exclude_labels ?? [];
@@ -117,10 +112,16 @@ export const SelectActiveLearning: FC<SelectActiveLearningProps> = ({
             type: 'imagemodel',
             time: availableImageModels?.[e]?.time ?? '',
             labels_excluded: excluded,
+            isDisabled: !availableImageModels?.[e]?.predicted,
           };
         }),
     },
   ];
+
+  // some listed models can't be activated because their predictions are not computed
+  const hasDisabledModels = groupedModels.some((group) =>
+    group.options.some((option) => option.isDisabled),
+  );
 
   const { trainQuickModel } = useTrainQuickModel(projectSlug || null, currentScheme || null);
   const availableFeatures = project?.features.available ? project?.features.available : [];
@@ -211,6 +212,9 @@ export const SelectActiveLearning: FC<SelectActiveLearningProps> = ({
   const { retrainQuickModel } = useRetrainQuickModel(projectSlug || null, currentScheme || null);
   const [updatedQuickModel, setUpdatedQuickModel] = useState(false);
 
+  // model picked in the dropdown, only applied when the user explicitly validates it
+  const [pendingModel, setPendingModel] = useState<ModelOption | null>(null);
+
   useEffect(() => {
     if (
       !updatedQuickModel &&
@@ -250,6 +254,12 @@ export const SelectActiveLearning: FC<SelectActiveLearningProps> = ({
     setAppContext((prev) => ({ ...prev, activeModel: newValue }));
   };
 
+  const modelTypeLabels: Record<string, string> = {
+    quickmodel: 'Quick Model',
+    languagemodel: 'Language Model',
+    imagemodel: 'Image Model',
+  };
+
   return (
     <Modal show={display} onHide={() => setActiveMenu(false)} id="active-modal" size="lg">
       <Modal.Header closeButton>
@@ -264,58 +274,93 @@ export const SelectActiveLearning: FC<SelectActiveLearningProps> = ({
         )}
         {availableQuickModels.length + Object.keys(availableBertModels).length > 0 && (
           <>
-            <div className="horizontal center mb-3">
+            {/* current active model status */}
+            <div className="horizontal center mb-2 gap-2">
+              {activeModel ? (
+                <>
+                  <span>
+                    Currently active model : <b>{activeModel.label}</b>
+                    {modelTypeLabels[activeModel.type]
+                      ? ` (${modelTypeLabels[activeModel.type]})`
+                      : ''}
+                  </span>
+                  <button
+                    className="btn-secondary-action d-flex align-items-center gap-1"
+                    onClick={() => {
+                      setActiveModel(null);
+                    }}
+                  >
+                    <HiBan size={16} /> Deactivate
+                  </button>
+                </>
+              ) : (
+                <span>No model currently activated for active learning</span>
+              )}
+            </div>
+
+            {/* retrain controls for the active quick model */}
+            {activeModel?.type === 'quickmodel' && (
+              <div className="horizontal center mb-3 gap-2">
+                <button
+                  className="btn-secondary-action d-flex align-items-center gap-1"
+                  onClick={() => {
+                    retrainQuickModel(activeModel.value);
+                  }}
+                >
+                  <LuRefreshCw size={16} /> Retrain now
+                </button>
+                <span>or auto-retrain every</span>
+                <input
+                  type="number"
+                  id="frequencySlider"
+                  min="0"
+                  max="500"
+                  value={freqRefreshQuickModel}
+                  onChange={(e) => {
+                    refreshFreq(Number(e.currentTarget.value));
+                  }}
+                  step="5"
+                  style={{ width: '70px' }}
+                />
+                <span>annotations</span>
+              </div>
+            )}
+
+            <hr />
+
+            {/* pick a model + explicit validation */}
+            <div className="horizontal center mb-3 gap-2">
               <Select<ModelOption, false, { label: string; options: ModelOption[] }>
                 options={groupedModels}
-                value={activeModel as ModelOption | null}
+                value={pendingModel}
                 onChange={(selectedOption) => {
-                  setActiveModel(selectedOption ? (selectedOption as ActiveModel) : null);
+                  setPendingModel(selectedOption);
                 }}
                 isSearchable
                 placeholder="Select a model for active learning"
                 className="w-50"
               />
-
-              <div>
-                <button
-                  className="btn-secondary-action"
-                  onClick={() => {
-                    setActiveModel(null);
-                  }}
-                >
-                  <HiBan size={20} data-tooltip-id="delete-tooltip" />
-                </button>
-                {activeModel?.type === 'quickmodel' && (
-                  <button
-                    className="btn-secondary-action"
-                    onClick={() => {
-                      retrainQuickModel(activeModel.value);
-                    }}
-                  >
-                    <LuRefreshCw size={20} data-tooltip-id="retrain-tooltip" />
-                  </button>
-                )}
-                <Tooltip id="retrain-tooltip" place="bottom" content="Retrain model" />
-                <Tooltip id="delete-tooltip" place="bottom" content="Deactivate model" />
-              </div>
-              {activeModel?.type === 'quickmodel' && (
-                <div className="d-flex align-items-center ms-3">
-                  <span className="me-2">Retrain every</span>
-                  <input
-                    type="number"
-                    id="frequencySlider"
-                    min="0"
-                    max="500"
-                    value={freqRefreshQuickModel}
-                    onChange={(e) => {
-                      refreshFreq(Number(e.currentTarget.value));
-                    }}
-                    step="5"
-                    style={{ flex: '1 1 30%', width: '60px' }}
-                  />
-                </div>
-              )}
+              <button
+                className="btn-primary-action"
+                disabled={!pendingModel}
+                onClick={() => {
+                  if (pendingModel) {
+                    setActiveModel(pendingModel as ActiveModel);
+                    setPendingModel(null);
+                  }
+                }}
+              >
+                Use this model
+              </button>
             </div>
+            {hasDisabledModels && (
+              <div className="horizontal center text-muted" style={{ fontSize: '0.85em' }}>
+                Deactivated models need their predictions to be computed in the&nbsp;
+                <Link to={`/projects/${projectSlug}/model`} onClick={() => setActiveMenu(false)}>
+                  Model panel
+                </Link>
+              </div>
+            )}
           </>
         )}
 

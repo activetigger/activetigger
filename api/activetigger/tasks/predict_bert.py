@@ -212,8 +212,10 @@ class PredictBertMultiClass(BaseTask):
             tokenizer = AutoTokenizer.from_pretrained(str(self.path), trust_remote_code=True)
         else:
             tokenizer = AutoTokenizer.from_pretrained(self.modeltype, trust_remote_code=True)
+        # fp32 upcast: models fine-tuned from fp16 checkpoints (e.g. deberta-v3)
+        # are saved in fp16, and fp16 inference on CPU is extremely slow.
         model = AutoModelForSequenceClassification.from_pretrained(
-            self.path, trust_remote_code=True
+            self.path, trust_remote_code=True, dtype=torch.float32
         )
 
         return tokenizer, model, self.max_length

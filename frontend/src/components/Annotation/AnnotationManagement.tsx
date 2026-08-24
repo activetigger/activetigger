@@ -701,9 +701,7 @@ export const AnnotationManagement: FC = () => {
             <PromptsPanel
               projectSlug={project.params.project_slug}
               state={(project as unknown as { prompts?: PromptsProjectStateModel | null }).prompts}
-              currentText={
-                project.params.kind !== 'image' ? (element?.text ?? undefined) : undefined
-              }
+              currentText={project.params.kind !== 'image' ? element?.text ?? undefined : undefined}
             />
           )}
         </Modal.Body>

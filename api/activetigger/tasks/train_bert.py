@@ -635,6 +635,11 @@ class TrainBert(BaseTask):
             id2label=id2label,
             label2id=label2id,
             trust_remote_code=True,
+            # Some checkpoints (e.g. deberta-v3) store fp16 weights and
+            # transformers>=5 loads them in the checkpoint dtype by default.
+            # fp16 on CPU falls back to extremely slow kernels (and pure-fp16
+            # training is numerically fragile anyway): always fine-tune in fp32.
+            dtype=torch.float32,
             problem_type="multi_label_classification"
             if self.training_kind == "multilabel"
             else "single_label_classification",
