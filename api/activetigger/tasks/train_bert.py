@@ -447,7 +447,12 @@ class TrainBert(BaseTask):
             # Logging and saving parameters
             eval_strategy="steps" if has_test else "no",
             eval_steps=eval_steps if has_test else None,
-            save_strategy="best" if has_test else "epoch",
+            # save_strategy must be "steps", not "best": on transformers 5.x
+            # SaveStrategy.BEST never sets state.best_model_checkpoint (only
+            # the STEPS/EPOCH branches track best_global_step), so
+            # load_best_model_at_end silently reloads nothing and the saved /
+            # exported model is the last-step one instead of the best (#1116).
+            save_strategy="steps" if has_test else "epoch",
             metric_for_best_model="eval_loss" if has_test else None,
             save_steps=float(eval_steps) if has_test else 500,
             # Checkpoints are written every eval_steps, which collapses to a

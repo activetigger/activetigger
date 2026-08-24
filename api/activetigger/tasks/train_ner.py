@@ -476,7 +476,10 @@ class TrainNer(BaseTask):
             per_device_eval_batch_size=int(params.batchsize),
             eval_strategy="steps" if has_test else "no",
             eval_steps=eval_steps if has_test else None,
-            save_strategy="best" if has_test else "epoch",
+            # "steps", not "best": SaveStrategy.BEST never sets
+            # state.best_model_checkpoint on transformers 5.x, so
+            # load_best_model_at_end silently no-ops (see train_bert.py, #1116).
+            save_strategy="steps" if has_test else "epoch",
             # NER is selected on entity F1 rather than eval_loss because a
             # token-classification model can hit lower loss by over-predicting
             # the dominant `O` class without improving entity-level quality.

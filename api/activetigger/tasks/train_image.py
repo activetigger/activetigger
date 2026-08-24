@@ -361,7 +361,10 @@ class TrainImage(BaseTask):
             per_device_eval_batch_size=int(params.batchsize),
             eval_strategy="steps" if has_test else "no",
             eval_steps=eval_steps if has_test else None,
-            save_strategy="best" if has_test else "epoch",
+            # "steps", not "best": SaveStrategy.BEST never sets
+            # state.best_model_checkpoint on transformers 5.x, so
+            # load_best_model_at_end silently no-ops (see train_bert.py, #1116).
+            save_strategy="steps" if has_test else "epoch",
             metric_for_best_model="eval_loss" if has_test else None,
             save_steps=float(eval_steps) if has_test else 500,
             logging_steps=int(eval_steps),
