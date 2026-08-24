@@ -512,6 +512,7 @@ class TrainBert(BaseTask):
         df_test_results: pd.DataFrame | None,
         training_data: pd.DataFrame,
         bert_model,
+        tokenizer,
         params_to_save: dict[str, Any],
         metrics_train: MLStatisticsModel,
         metrics_test: MLStatisticsModel | None,
@@ -521,7 +522,7 @@ class TrainBert(BaseTask):
         - predictions of the train set (csv)
         - predictions of the test set  (csv)
         - data used during the training (parquet)
-        - the trained model
+        - the trained model and its tokenizer
         - the parameters used during the training (json)
         - metrics (json)
 
@@ -542,8 +543,10 @@ class TrainBert(BaseTask):
             )
         training_data.to_parquet(current_path.joinpath("training_data.parquet"))
 
-        # save the trained bert model
+        # save the trained bert model with its tokenizer so the exported
+        # archive can be loaded without fetching the base model from the hub
         bert_model.save_pretrained(current_path)
+        tokenizer.save_pretrained(current_path)
 
         # Save parameters
         with open(current_path.joinpath("parameters.json"), "w") as f:
@@ -776,6 +779,7 @@ class TrainBert(BaseTask):
                 df_test_results=df_test_results,
                 training_data=self.df[[self.col_text, self.col_label]],
                 bert_model=bert_model,
+                tokenizer=tokenizer,
                 params_to_save=params_to_save,
                 metrics_train=metrics_train,  # ty: ignore[possibly-unresolved-reference]
                 metrics_test=metrics_test,  # ty: ignore[possibly-unresolved-reference]

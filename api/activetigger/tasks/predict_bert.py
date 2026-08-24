@@ -206,8 +206,12 @@ class PredictBertMultiClass(BaseTask):
         """
         Load the model and tokenizer from the path
         """
-        # load the tokenizer and model
-        tokenizer = AutoTokenizer.from_pretrained(self.modeltype, trust_remote_code=True)
+        # models trained before the tokenizer was saved alongside the weights
+        # only have the base model name, so fall back to the hub for those
+        if (self.path / "tokenizer_config.json").exists():
+            tokenizer = AutoTokenizer.from_pretrained(str(self.path), trust_remote_code=True)
+        else:
+            tokenizer = AutoTokenizer.from_pretrained(self.modeltype, trust_remote_code=True)
         model = AutoModelForSequenceClassification.from_pretrained(
             self.path, trust_remote_code=True
         )

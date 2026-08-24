@@ -80,10 +80,12 @@ class ComputeBertEmbeddings(BaseTask):
                 print("Not enough GPU memory, fallback to CPU")
                 device = torch.device("cpu")
 
-        # tokenizer comes from the base HF model (same convention as predict_bert);
-        # weights come from the local fine-tuned checkpoint.
-        base_model = self._load_base_model_name()
-        tokenizer = AutoTokenizer.from_pretrained(base_model, trust_remote_code=True)
+        # prefer the tokenizer saved with the fine-tuned checkpoint
+        if self.model_path.joinpath("tokenizer_config.json").exists():
+            tokenizer = AutoTokenizer.from_pretrained(str(self.model_path), trust_remote_code=True)
+        else:
+            base_model = self._load_base_model_name()
+            tokenizer = AutoTokenizer.from_pretrained(base_model, trust_remote_code=True)
         model = AutoModel.from_pretrained(str(self.model_path), trust_remote_code=True)
         model.to(device)
         model.eval()
