@@ -592,10 +592,8 @@ class ProjectsService:
                         # If comment exists, append the rename info
                         (
                             Annotations.comment.isnot(None),
-                            func.concat(
-                                Annotations.comment,
-                                f" | Renamed from '{former_label}' to '{new_label}'",
-                            ),
+                            Annotations.comment
+                            + f" | Renamed from '{former_label}' to '{new_label}'",
                         ),
                         # If no comment, create new one
                         else_=f"Renamed from '{former_label}' to '{new_label}'",

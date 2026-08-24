@@ -11,7 +11,7 @@ import {
   useStatistics,
 } from '../../core/api';
 import { useAppContext } from '../../core/useAppContext';
-import { ElementOutModel, PromptsProjectStateModel } from '../../types';
+import { ElementOutModel, PromptsProjectStateModel, SelectionConfig } from '../../types';
 
 import MDEditor from '@uiw/react-md-editor';
 import classNames from 'classnames';
@@ -30,6 +30,37 @@ import { PromptsPanel } from './PromptsPanel';
 import { SelectActiveLearning } from './SelectActiveLearning';
 import { TextClassificationPanel } from './TextClassificationPanel';
 import { TextSpanPanel } from './TextSpanPanel';
+
+/**
+ * Drop references to labels that no longer exist in the scheme (after a label
+ * rename/merge, a label deletion or a scheme switch) from the persisted
+ * selection config
+ */
+const sanitizeSelectionConfig = (
+  config: SelectionConfig,
+  availableLabels: string[],
+): SelectionConfig => {
+  // no labels means the scheme/project is not loaded yet: don't touch anything
+  if (availableLabels.length === 0) return config;
+  const keptLabels = config.labels?.filter((label) => availableLabels.includes(label));
+  const labelsStale =
+    config.labels !== undefined &&
+    keptLabels !== undefined &&
+    keptLabels.length !== config.labels.length;
+  const labelProbStale =
+    config.label_prob !== undefined && !availableLabels.includes(config.label_prob);
+  if (!labelsStale && !labelProbStale) return config;
+  const sanitized = { ...config };
+  if (labelsStale) {
+    sanitized.labels = keptLabels && keptLabels.length > 0 ? keptLabels : undefined;
+  }
+  if (labelProbStale) {
+    // maxprob requires a target label; active without a label falls back to entropy
+    sanitized.label_prob = undefined;
+    if (config.mode === 'maxprob') sanitized.mode = 'fixed';
+  }
+  return sanitized;
+};
 
 export const AnnotationManagement: FC = () => {
   const { notify } = useNotifications();
@@ -104,13 +135,44 @@ export const AnnotationManagement: FC = () => {
     }
   };
 
+  // labels of the current scheme
+  const availableLabels =
+    currentScheme && project && project.schemes.available[currentScheme]
+      ? project.schemes.available[currentScheme].labels
+      : [];
+  // keyed off label *content*: the project polling rebuilds the array
+  // reference every ~2s even when the labels are unchanged
+  const availableLabelsKey = availableLabels.join('|');
+
+  // selection config with stale label references removed; used for every
+  // /elements/next call so a label rename/merge or deletion can never send a
+  // filter on a label that no longer exists
+  const sanitizedSelectionConfig = useMemo(
+    () => sanitizeSelectionConfig(selectionConfig, availableLabels),
+    // availableLabels is read but tracked via availableLabelsKey (content-stable)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selectionConfig, availableLabelsKey],
+  );
+
+  // write the sanitized config back to the context so the UI
+  useEffect(() => {
+    if (sanitizedSelectionConfig !== selectionConfig) {
+      setAppContext((prev) => ({
+        ...prev,
+        selectionConfig: sanitizeSelectionConfig(prev.selectionConfig, availableLabels),
+      }));
+    }
+    // availableLabels is read but tracked via sanitizedSelectionConfig (memo above)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sanitizedSelectionConfig, selectionConfig, setAppContext]);
+
   // hooks to manage element
   const historyIds = useMemo(() => history.map((h) => h.element_id), [history]);
   const { getNextElementId } = useGetNextElementId(
     projectName || null,
     currentScheme || null,
     currentProjectionName || null,
-    selectionConfig,
+    sanitizedSelectionConfig,
     historyIds,
     effectivePhase,
     activeModel || null,
@@ -128,10 +190,6 @@ export const AnnotationManagement: FC = () => {
   const { addElementInAnnotationSessionHistory } = useAnnotationSessionHistory();
 
   // define parameters for configuration panels
-  const availableLabels =
-    currentScheme && project && project.schemes.available[currentScheme]
-      ? project.schemes.available[currentScheme].labels
-      : [];
   const [kindScheme] = useState<string>(
     currentScheme && project && project.schemes.available[currentScheme]
       ? project.schemes.available[currentScheme].kind || 'multiclass'
@@ -166,7 +224,7 @@ export const AnnotationManagement: FC = () => {
             ...prev,
             selectionHistory: {
               ...prev.selectionHistory,
-              [res.element_id]: JSON.stringify(selectionConfig),
+              [res.element_id]: JSON.stringify(sanitizedSelectionConfig),
             },
           }));
           // redirect to the next element page replacing history
@@ -213,7 +271,7 @@ export const AnnotationManagement: FC = () => {
     effectivePhase,
     projectName,
     reFetchStatistics,
-    selectionConfig,
+    sanitizedSelectionConfig,
     setAppContext,
     notify,
     element,

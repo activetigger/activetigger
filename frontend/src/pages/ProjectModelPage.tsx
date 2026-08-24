@@ -1,7 +1,7 @@
 import { FC, useState } from 'react';
 import { Tab, Tabs } from 'react-bootstrap';
 import { HiOutlineQuestionMarkCircle } from 'react-icons/hi';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { Tooltip } from 'react-tooltip';
 import { ImageModelEvaluation } from '../components/ImageModelEvaluation';
 import { ImageModelManagement } from '../components/ImageModelManagement';
@@ -26,7 +26,14 @@ export const ProjectModelPage: FC = () => {
     appContext: { currentProject, currentScheme },
   } = useAppContext();
 
-  const [activeKey, setActiveKey] = useState<string>('models');
+  // Allow deep-linking to a specific tab, e.g. /model/?tab=prediction from the Export page
+  const [searchParams] = useSearchParams();
+  const requestedTab = searchParams.get('tab');
+  const [activeKey, setActiveKey] = useState<string>(
+    requestedTab && ['models', 'evaluation', 'prediction'].includes(requestedTab)
+      ? requestedTab
+      : 'models',
+  );
   const [predictionModel, setPredictionModel] = useState<string | null>(null);
   const [quickPredictionModel, setQuickPredictionModel] = useState<string | null>(null);
   const isImage = currentProject?.params?.kind === 'image';

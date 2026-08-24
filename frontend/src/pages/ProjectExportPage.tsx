@@ -297,8 +297,10 @@ export const ProjectExportPage: FC = () => {
                     {!availableQuickPredictionAll && !availableQuickPredictionExternal && (
                       <div className="alert alert-info mt-3 py-2 small mb-0" role="alert">
                         No prediction available for this quickmodel. Run one from the{' '}
-                        <Link to={`/projects/${projectName}/model/`}>Prediction tab</Link> first to
-                        enable the export.
+                        <Link to={`/projects/${projectName}/model/?tab=prediction`}>
+                          Prediction tab
+                        </Link>{' '}
+                        first to enable the export.
                       </div>
                     )}
                     {(availableQuickPredictionAll || availableQuickPredictionExternal) && (
@@ -355,8 +357,11 @@ export const ProjectExportPage: FC = () => {
                   {!availablePredictionAll && (
                     <div className="alert alert-info mt-3 py-2 small mb-0" role="alert">
                       No prediction available on the complete dataset for this model. Run one from
-                      the <Link to={`/projects/${projectName}/model/`}>Prediction tab</Link> first
-                      to enable the export.
+                      the{' '}
+                      <Link to={`/projects/${projectName}/model/?tab=prediction`}>
+                        Prediction tab
+                      </Link>{' '}
+                      first to enable the export.
                     </div>
                   )}
                   <div className="d-flex flex-wrap gap-2 mt-3">
