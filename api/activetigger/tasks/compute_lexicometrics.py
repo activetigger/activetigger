@@ -133,6 +133,9 @@ class ComputeLexicometrics(BaseTask):
         except Exception as e:
             print(f"Could not load tokenizer {self.tokenizer_name}, skipping token counts: {e}")
             return None
+        if tokenizer is None:
+            print(f"Could not load tokenizer {self.tokenizer_name}, skipping token counts")
+            return None
         counts: list[int] = []
         values = texts.tolist()
         for i in range(0, len(values), batch_size):
