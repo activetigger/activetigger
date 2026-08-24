@@ -292,9 +292,11 @@ def get_statistics(
     current_user: Annotated[UserInDBModel, Depends(verified_user)], username: str
 ) -> UserStatistics:
     """
-    Get statistics for specific user
+    Get statistics for specific user.
+    Users can access their own statistics; other users require MANAGE_USERS.
     """
-    test_rights(ServerAction.MANAGE_USERS, current_user.username)
+    if username != current_user.username:
+        test_rights(ServerAction.MANAGE_USERS, current_user.username)
     try:
         return get_orchestrator().users.get_statistics(username)
     except Exception as e:

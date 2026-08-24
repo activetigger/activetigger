@@ -1,8 +1,9 @@
 import secrets
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from statistics import median
 from threading import Lock
 
 import yaml
@@ -14,6 +15,7 @@ from activetigger.datamodels import (
     NewUserModel,
     ProjectModel,
     ProjectSummaryModel,
+    UserActivityPointModel,
     UserCredentialInput,
     UserCredentialPublic,
     UserInDBModel,
@@ -55,6 +57,12 @@ class Users:
     """
     Managers users
     """
+
+    # parameters for per-user statistics
+    ANNOTATION_GAP_CAP_SECONDS = 600  # gaps above this are session breaks
+    ANNOTATION_GAP_MIN_SECONDS = 1.0  # gaps below this are batch/import writes
+    ANNOTATION_TIMES_LIMIT = 5000  # bound the timestamps query on large tables
+    ACTIVITY_DAYS = 7
 
     db_manager: DatabaseManager
     users_parameters: dict
@@ -363,13 +371,97 @@ class Users:
 
     def get_statistics(self, username: str) -> UserStatistics:
         """
-        Get statistics for specific user
+        Get statistics for specific user: authorized projects, total
+        annotations, recent hourly activity, median annotation time and
+        GPU/compute time of completed processes.
         """
         try:
             projects = {i[0]: i[1] for i in self.get_auth_projects(username)}
-            return UserStatistics(username=username, projects=projects)
+            total_annotations = self.db_manager.users_service.count_annotations(username)
+            times = self.db_manager.users_service.get_annotation_times(
+                username, limit=self.ANNOTATION_TIMES_LIMIT
+            )
+            gpu_time, compute_time = self._compute_process_times(username)
+            return UserStatistics(
+                username=username,
+                projects=projects,
+                total_annotations=total_annotations,
+                gpu_time_seconds=gpu_time,
+                compute_time_seconds=compute_time,
+                median_annotation_time_seconds=self._median_annotation_gap(times),
+                annotation_activity=self._build_hourly_activity(username, self.ACTIVITY_DAYS),
+            )
         except Exception as e:
             raise Exception(f"Error in getting statistics for {username}") from e
+
+    def _median_annotation_gap(self, times: list[datetime]) -> float | None:
+        """
+        Median gap in seconds between consecutive annotations, ignoring
+        session breaks (gaps above ANNOTATION_GAP_CAP_SECONDS) and
+        batch/import writes (gaps below ANNOTATION_GAP_MIN_SECONDS).
+        None if not enough data.
+        """
+        if len(times) < 2:
+            return None
+        ordered = sorted(times)
+        gaps = [
+            gap
+            for previous, current in zip(ordered, ordered[1:])
+            if self.ANNOTATION_GAP_MIN_SECONDS
+            <= (gap := (current - previous).total_seconds())
+            <= self.ANNOTATION_GAP_CAP_SECONDS
+        ]
+        if len(gaps) < 2:
+            return None
+        return float(median(gaps))
+
+    def _compute_process_times(self, username: str) -> tuple[float, float]:
+        """
+        (gpu_time_seconds, compute_time_seconds) over the user's completed
+        processes. GPU time sums the durations of processes whose events
+        report GPU usage; compute time sums all durations.
+        """
+        processes = self.db_manager.monitoring_service.get_completed_processes(
+            kind="all", username=username, limit=1000
+        )
+        gpu_time = 0.0
+        compute_time = 0.0
+        for process in processes:
+            if process.duration is None:
+                continue
+            compute_time += float(process.duration)
+            events = process.events if isinstance(process.events, dict) else {}
+            gpu_event = events.get("gpu")
+            try:
+                max_used_gb = (
+                    float(gpu_event.get("max_used_gb") or 0.0)
+                    if isinstance(gpu_event, dict)
+                    else 0.0
+                )
+            except (TypeError, ValueError):
+                max_used_gb = 0.0
+            if max_used_gb > 0:
+                gpu_time += float(process.duration)
+        return gpu_time, compute_time
+
+    def _build_hourly_activity(self, username: str, days: int) -> list[UserActivityPointModel]:
+        """
+        Zero-filled hourly annotation counts for the user over the last `days`
+        days (same series construction as Monitoring._compute_weekly_activity).
+        """
+        annotations_by_hour, _ = self.db_manager.monitoring_service.get_hourly_activity_counts(
+            days=days, user_name=username
+        )
+        total_hours = days * 24
+        now_hour = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+        start_hour = now_hour - timedelta(hours=total_hours - 1)
+        return [
+            UserActivityPointModel(
+                hour=(start_hour + timedelta(hours=i)).isoformat(),
+                annotations=annotations_by_hour.get(start_hour + timedelta(hours=i), 0),
+            )
+            for i in range(total_hours)
+        ]
 
     def get_storage(self, username: str) -> float:
         """

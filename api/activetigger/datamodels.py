@@ -1377,11 +1377,23 @@ class ModelInformationsModel(BaseModel):
     predicted: bool = False
 
 
+class UserActivityPointModel(BaseModel):
+    """
+    Hourly annotation bucket for a single user (hour = ISO UTC hour start)
+    """
+
+    hour: str
+    annotations: int
+
+
 class UserStatistics(BaseModel):
     username: str
     projects: dict[str, str]
-    # last_connexion
-    # last_actions
+    total_annotations: int = 0
+    gpu_time_seconds: float = 0.0
+    compute_time_seconds: float = 0.0  # all completed processes, fallback when no GPU
+    median_annotation_time_seconds: float | None = None
+    annotation_activity: list[UserActivityPointModel] = []
 
 
 class PromptInputModel(BaseModel):

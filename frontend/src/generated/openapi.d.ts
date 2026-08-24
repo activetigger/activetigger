@@ -260,7 +260,8 @@ export interface paths {
     };
     /**
      * Get Statistics
-     * @description Get statistics for specific user
+     * @description Get statistics for specific user.
+     *     Users can access their own statistics; other users require MANAGE_USERS.
      */
     get: operations['get_statistics_users_statistics_get'];
     put?: never;
@@ -3559,6 +3560,90 @@ export interface components {
       };
       base_parameters: components['schemas']['LMParametersModel'];
     };
+    /**
+     * LexicometricsModel
+     * @description Lexicometry statistics of the annotable dataset.
+     */
+    LexicometricsModel: {
+      /**
+       * Version
+       * @default 1
+       */
+      version: number;
+      /** Computed At */
+      computed_at: string;
+      /** User */
+      user: string;
+      parameters: components['schemas']['LexicometricsParametersModel'];
+      statistics: components['schemas']['LexicometricsStatisticsModel'];
+    };
+    /** LexicometricsParametersModel */
+    LexicometricsParametersModel: {
+      /**
+       * Tokenizer
+       * @default bert-base-multilingual-cased
+       */
+      tokenizer: string;
+      /**
+       * N Most Frequent
+       * @default 100
+       */
+      n_most_frequent: number;
+      /**
+       * Language
+       * @default en
+       */
+      language: string;
+      /**
+       * Tfidf N Words
+       * @default 300
+       */
+      tfidf_n_words: number;
+      /**
+       * Tfidf N Docs Per Word
+       * @default 25
+       */
+      tfidf_n_docs_per_word: number;
+      /**
+       * Tfidf N Words Per Doc
+       * @default 5
+       */
+      tfidf_n_words_per_doc: number;
+      /**
+       * Tfidf Min Term Freq
+       * @default 5
+       */
+      tfidf_min_term_freq: number;
+      /**
+       * Tfidf Max Documents
+       * @default 10000
+       */
+      tfidf_max_documents: number;
+    };
+    /** LexicometricsProjectStateModel */
+    LexicometricsProjectStateModel: {
+      /** Available */
+      available: boolean;
+      /** Training */
+      training: {
+        [key: string]: string | undefined;
+      };
+    };
+    /**
+     * LexicometricsStatisticsModel
+     * @description Statistics computed by the lexicometrics task. Future statistics are new
+     *     optional fields, so older lexicometrics.json files still load.
+     */
+    LexicometricsStatisticsModel: {
+      words_per_doc: components['schemas']['DistributionModel'];
+      tokens_per_doc?: components['schemas']['DistributionModel'] | null;
+      /** Most Frequent Words */
+      most_frequent_words: components['schemas']['WordFrequencyModel'][];
+      /** Tfidf Words */
+      tfidf_words?: components['schemas']['TfidfWordTopDocumentsModel'][] | null;
+      /** Tfidf Documents */
+      tfidf_documents?: components['schemas']['TfidfDocumentTopWordsModel'][] | null;
+    };
     /** MLStatisticsModel */
     MLStatisticsModel: {
       /** Training Kind */
@@ -4811,90 +4896,6 @@ export interface components {
       /** Path */
       path?: string | null;
     };
-    /**
-     * LexicometricsModel
-     * @description Lexicometry statistics of the annotable dataset.
-     */
-    LexicometricsModel: {
-      /**
-       * Version
-       * @default 1
-       */
-      version: number;
-      /** Computed At */
-      computed_at: string;
-      /** User */
-      user: string;
-      parameters: components['schemas']['LexicometricsParametersModel'];
-      statistics: components['schemas']['LexicometricsStatisticsModel'];
-    };
-    /** LexicometricsParametersModel */
-    LexicometricsParametersModel: {
-      /**
-       * Tokenizer
-       * @default bert-base-multilingual-cased
-       */
-      tokenizer: string;
-      /**
-       * N Most Frequent
-       * @default 100
-       */
-      n_most_frequent: number;
-      /**
-       * Language
-       * @default en
-       */
-      language: string;
-      /**
-       * Tfidf N Words
-       * @default 300
-       */
-      tfidf_n_words: number;
-      /**
-       * Tfidf N Docs Per Word
-       * @default 25
-       */
-      tfidf_n_docs_per_word: number;
-      /**
-       * Tfidf N Words Per Doc
-       * @default 5
-       */
-      tfidf_n_words_per_doc: number;
-      /**
-       * Tfidf Min Term Freq
-       * @default 5
-       */
-      tfidf_min_term_freq: number;
-      /**
-       * Tfidf Max Documents
-       * @default 10000
-       */
-      tfidf_max_documents: number;
-    };
-    /** LexicometricsProjectStateModel */
-    LexicometricsProjectStateModel: {
-      /** Available */
-      available: boolean;
-      /** Training */
-      training: {
-        [key: string]: string | undefined;
-      };
-    };
-    /**
-     * LexicometricsStatisticsModel
-     * @description Statistics computed by the lexicometrics task. Future statistics are new
-     *     optional fields, so older lexicometrics.json files still load.
-     */
-    LexicometricsStatisticsModel: {
-      words_per_doc: components['schemas']['DistributionModel'];
-      tokens_per_doc?: components['schemas']['DistributionModel'] | null;
-      /** Most Frequent Words */
-      most_frequent_words: components['schemas']['WordFrequencyModel'][];
-      /** Tfidf Words */
-      tfidf_words?: components['schemas']['TfidfWordTopDocumentsModel'][] | null;
-      /** Tfidf Documents */
-      tfidf_documents?: components['schemas']['TfidfDocumentTopWordsModel'][] | null;
-    };
     /** TfidfDocumentScoreModel */
     TfidfDocumentScoreModel: {
       /** Element Id */
@@ -4979,6 +4980,16 @@ export interface components {
       total_chunks: number;
     };
     /**
+     * UserActivityPointModel
+     * @description Hourly annotation bucket for a single user (hour = ISO UTC hour start)
+     */
+    UserActivityPointModel: {
+      /** Hour */
+      hour: string;
+      /** Annotations */
+      annotations: number;
+    };
+    /**
      * UserCredentialInput
      * @description Endpoint/credentials pair saved in the user account
      */
@@ -5024,6 +5035,28 @@ export interface components {
       projects: {
         [key: string]: string | undefined;
       };
+      /**
+       * Total Annotations
+       * @default 0
+       */
+      total_annotations: number;
+      /**
+       * Gpu Time Seconds
+       * @default 0
+       */
+      gpu_time_seconds: number;
+      /**
+       * Compute Time Seconds
+       * @default 0
+       */
+      compute_time_seconds: number;
+      /** Median Annotation Time Seconds */
+      median_annotation_time_seconds?: number | null;
+      /**
+       * Annotation Activity
+       * @default []
+       */
+      annotation_activity: components['schemas']['UserActivityPointModel'][];
     };
     /** UsersStateModel */
     UsersStateModel: {

@@ -1,11 +1,27 @@
-import { FC, useState } from 'react';
+import { FC, useEffect, useState } from 'react';
 import { Modal } from 'react-bootstrap';
 import { AddCredentials } from '../components/forms/AddCredentials';
 import { ChangeEmail } from '../components/forms/ChangeEmail';
 import { ChangePassword } from '../components/forms/ChangePassword';
 import { PageLayout } from '../components/layout/PageLayout';
-import { useCurrentUser, useDeleteUserCredentials, useUserCredentials } from '../core/api';
+import { UserActivityChart } from '../components/UserActivityChart';
+import {
+  useCurrentUser,
+  useDeleteUserCredentials,
+  useGetUserStatistics,
+  useUserCredentials,
+} from '../core/api';
 import { useAuth } from '../core/useAuth';
+
+const formatDuration = (seconds: number): string => {
+  if (!seconds || seconds <= 0) return '0s';
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.round(seconds % 60);
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+};
 
 export const AccountPage: FC = () => {
   const { authenticatedUser } = useAuth();
@@ -28,6 +44,14 @@ export const AccountPage: FC = () => {
   const username = currentUser?.username ?? authenticatedUser?.username;
   const status = currentUser?.status ?? authenticatedUser?.status;
   const contact = currentUser?.contact ?? '';
+
+  const { userStatistics, reFetchStatistics } = useGetUserStatistics(username ?? null);
+  useEffect(() => {
+    reFetchStatistics();
+  }, [username, reFetchStatistics]);
+
+  const activity = userStatistics?.annotation_activity || [];
+  const annotationsLast7Days = activity.reduce((sum, point) => sum + point.annotations, 0);
 
   return (
     <PageLayout currentPage="account">
@@ -118,8 +142,52 @@ export const AccountPage: FC = () => {
                   </button>
                 </div>
               </div>
+
+              <h4 className="mt-4 mb-2">Statistics</h4>
+              <div className="card mb-3">
+                <div className="card-body">
+                  {userStatistics ? (
+                    <>
+                      <div className="mb-2">
+                        <strong>Projects:</strong> {Object.keys(userStatistics.projects).length}
+                      </div>
+                      <div className="mb-2">
+                        <strong>Total annotations:</strong> {userStatistics.total_annotations}
+                      </div>
+                      <div className="mb-2">
+                        <strong>Annotations (last 7 days):</strong> {annotationsLast7Days}
+                      </div>
+                      <div className="mb-2">
+                        <strong>Median time per annotation:</strong>{' '}
+                        {userStatistics.median_annotation_time_seconds != null ? (
+                          `${userStatistics.median_annotation_time_seconds.toFixed(1)} s`
+                        ) : (
+                          <em className="text-muted">not enough data</em>
+                        )}
+                      </div>
+                      <div className="mb-2">
+                        <strong>GPU time:</strong> {formatDuration(userStatistics.gpu_time_seconds)}
+                      </div>
+                      <div className="mb-2">
+                        <strong>Compute time:</strong>{' '}
+                        {formatDuration(userStatistics.compute_time_seconds)}
+                      </div>
+                    </>
+                  ) : (
+                    <em className="text-muted">Loading statistics…</em>
+                  )}
+                </div>
+              </div>
             </div>
             <div className="col-0 col-sm-2 col-md-3" />
+          </div>
+        )}
+        {username && userStatistics && (
+          <div className="row">
+            <div className="col-12 col-lg-10 mx-auto">
+              <h4 className="mt-2 mb-0">Recent activity — last 7 days (hourly)</h4>
+              <UserActivityChart points={activity} />
+            </div>
           </div>
         )}
       </div>

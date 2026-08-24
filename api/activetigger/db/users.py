@@ -127,6 +127,34 @@ class UsersService:
             ).all()
             return list(distinct_users)
 
+    def count_annotations(self, username: str) -> int:
+        """
+        Total number of non-null annotations made by a user
+        """
+        with self.SessionMaker() as session:
+            count = session.execute(
+                select(func.count())
+                .select_from(Annotations)
+                .where(
+                    Annotations.user_name == username,
+                    Annotations.annotation.is_not(None),
+                )
+            ).scalar_one()
+            return int(count)
+
+    def get_annotation_times(self, username: str, limit: int = 5000) -> list[datetime.datetime]:
+        """
+        Timestamps of the most recent annotations of a user (most recent first)
+        """
+        with self.SessionMaker() as session:
+            rows = session.execute(
+                select(Annotations.time)
+                .where(Annotations.user_name == username)
+                .order_by(Annotations.time.desc())
+                .limit(limit)
+            ).all()
+            return [row[0] for row in rows]
+
     def get_user_created_projects(self, user_name: str) -> list[str]:
         """
         Projects user created
