@@ -122,7 +122,6 @@ Install or upgrade with the default CPU values:
 ```bash
 helm upgrade --install activetigger ./charts/activetigger \
   --namespace "$NAMESPACE" \
-  --server-side=false \
   --timeout 25m \
   -f my-values.yaml
 ```
@@ -132,7 +131,6 @@ Deploy the GPU prototype (same image, GPU behavior enabled through values):
 ```bash
 helm upgrade --install activetigger ./charts/activetigger \
   --namespace "$NAMESPACE" \
-  --server-side=false \
   --timeout 25m \
   -f my-values.yaml \
   --set api.gpu.enabled=true \
@@ -143,7 +141,7 @@ helm upgrade --install activetigger ./charts/activetigger \
   --set api.env.SENTENCE_TRANSFORMERS_HOME=/data/models/sentence-transformers
 ```
 
-On the ENSAE cluster, `--server-side=false` was needed because server-side apply requests for some workloads were blocked by the gateway/WAF.
+Helm version note: with Helm 3 (client-side apply, the default and only mode) the commands above work as-is. With **Helm 4**, server-side apply is the default and is blocked for some workloads by the ENSAE gateway/WAF: add `--server-side=false` to `helm upgrade` to force client-side apply. The flag does not exist in Helm 3 (`unknown flag` error).
 
 The HuggingFace/SentenceTransformers cache variables are not required for startup, but they are recommended. They store downloaded embedding models under `/data/models`, which is backed by the API PVC, so models do not need to be downloaded again after every pod restart.
 
@@ -200,7 +198,6 @@ Deploy with an existing Kubernetes Secret:
 ```bash
 helm upgrade --install activetigger ./charts/activetigger \
   --namespace "$NAMESPACE" \
-  --server-side=false \
   --timeout 25m \
   --set secrets.create=false \
   --set secrets.existingSecret=activetigger-secret

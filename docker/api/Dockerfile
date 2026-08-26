@@ -30,7 +30,10 @@ WORKDIR /api
 COPY --chown=python:python api/ /api/
 COPY docker/api/entrypoint.sh /entrypoint.sh
 
+# chown /api itself: WORKDIR created it as root, and entrypoint.sh must be able
+# to create /api/config.yaml when running as uid 1000 (Kubernetes).
 RUN chmod +x /entrypoint.sh \
+    && chown python:python /api \
     && mkdir -p /data/projects/static /data/models \
     && chown -R python:python /data
 
