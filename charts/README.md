@@ -54,14 +54,22 @@ activetigger/activetigger-api
 activetigger/activetigger-frontend
 ```
 
-Additional Dockerfiles were created for Kubernetes/Helm testing because the existing Docker Compose setup does not map directly to Kubernetes deployment conventions:
+The same Dockerfiles serve both the Docker Compose stack and Kubernetes:
 
-- `docker/api/Dockerfile.prototype`: API image used for the CPU prototype;
-- `docker/api/Dockerfile.gpu-prototype`: API image used for the GPU prototype;
-- `docker/frontend/Dockerfile.prototype`: frontend image used by the chart;
+- `docker/api/Dockerfile`: API image. The CPU/GPU choice is made at runtime by `entrypoint.sh` (`CPU_ONLY`/`GPU` env vars), so a single image and tag serve both deployments. Compose bind-mounts the live checkout over the baked-in code and starts the container as root to chown its named volumes; Kubernetes runs the baked-in code directly as uid 1000 via the pod securityContext.
+- `docker/frontend/Dockerfile`: frontend image used by the chart (nginx serving the built React app);
 - `docker/frontend/nginx.prototype.conf.template`: nginx template used by the frontend image to route `/api` to the API service.
 
-The chart defaults to these repositories in `charts/activetigger/values.yaml`. The CPU prototype uses the `prototype` API tag, and the GPU prototype uses the `gpu-prototype` API tag.
+Both images are built from the repository root (a root `.dockerignore` keeps local data and caches out). When building on Apple Silicon, target `linux/amd64` explicitly — the cluster nodes are amd64:
+
+```bash
+docker buildx build --platform linux/amd64 -f docker/api/Dockerfile \
+  -t activetigger/activetigger-api:prototype --push .
+docker buildx build --platform linux/amd64 -f docker/frontend/Dockerfile \
+  -t activetigger/activetigger-frontend:prototype --push .
+```
+
+The chart defaults to these repositories and the `prototype` tag in `charts/activetigger/values.yaml`.
 
 ## Install examples
 
@@ -90,17 +98,15 @@ helm upgrade --install activetigger ./charts/activetigger \
   --timeout 25m
 ```
 
-Deploy the GPU prototype:
+Deploy the GPU prototype (same image, GPU behavior enabled through values):
 
 ```bash
 helm upgrade --install activetigger ./charts/activetigger \
   --namespace "$NAMESPACE" \
   --server-side=false \
   --timeout 25m \
-  --set api.image.tag=gpu-prototype \
   --set api.gpu.enabled=true \
   --set api.env.CPU_ONLY=false \
-  --set api.env.GPU=true \
   --set api.env.N_WORKERS_GPU=1 \
   --set api.env.HF_HOME=/data/models/huggingface \
   --set api.env.TRANSFORMERS_CACHE=/data/models/huggingface/transformers \

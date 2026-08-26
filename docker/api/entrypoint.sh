@@ -51,12 +51,9 @@ if [ "$CPU_ONLY" = "true" ]; then
   echo "CPU-only mode: installing PyTorch without CUDA (~5GB savings)"
   uv sync --extra cpu
 else
-  echo "GPU mode: installing PyTorch with CUDA (~5GB extra)"
+  echo "GPU mode: installing PyTorch with CUDA (~5GB extra) and cuml-cu12"
   uv sync --extra gpu
-  if [ "$GPU" = "true" ]; then
-    echo "Mode GPU activated: installing cuml-cu12"
-    uv pip install --extra-index-url https://pypi.nvidia.com cuml-cu12
-  fi
+  uv pip install --extra-index-url https://pypi.nvidia.com cuml-cu12
 fi
 
 # Check for a config.yaml file in the api directory

@@ -15,7 +15,6 @@ api:
     DATA_PATH: /data
     API_PORT: "4000"
     CPU_ONLY: "true"
-    GPU: "false"
     ACTIVETIGGER_USER_HDD_MAX: "20"
     MAX_LOADED_PROJECTS: "2"
     N_WORKERS_CPU: "1"
