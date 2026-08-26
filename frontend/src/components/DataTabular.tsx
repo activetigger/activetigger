@@ -14,6 +14,7 @@ import { Tooltip } from 'react-tooltip';
 import { useAddTableAnnotations, useTableElements } from '../core/api';
 import { AppContextValue } from '../core/context';
 import { AnnotationModel } from '../types';
+import { ImageThumbnailImagexp } from './ImageThumbnailImagexp';
 import { TableFilterState, TableTagFilterSelect } from './TableTagFilterSelect';
 
 interface Row {
@@ -35,6 +36,7 @@ interface DataTabularModel {
   isTest: boolean;
   currentDataset: string;
   setAppContext: React.Dispatch<React.SetStateAction<AppContextValue>>;
+  projectKind?: string;
 }
 
 export const DataTabular: FC<DataTabularModel> = ({
@@ -47,7 +49,9 @@ export const DataTabular: FC<DataTabularModel> = ({
   isTest,
   currentDataset,
   setAppContext,
+  projectKind,
 }) => {
+  const isImageKind = projectKind === 'image';
   // data modification management
   const [modifiedRows, setModifiedRows] = useState<Record<string, AnnotationModel>>({});
 
@@ -162,33 +166,46 @@ export const DataTabular: FC<DataTabularModel> = ({
     },
     {
       key: 'text',
-      name: 'Text',
+      name: isImageKind ? 'Image' : 'Text',
       resizable: true,
 
-      renderCell: (props) => (
-        <div
-          style={{
-            maxHeight: '100%',
-            width: '100%',
-            whiteSpace: 'wrap',
-            overflowY: 'auto',
-            userSelect: 'none',
-          }}
-        >
-          <Highlighter
-            highlightClassName="Search"
-            searchWords={contains && isValidRegex(contains) ? [contains.replace('ALL:', '')] : []}
-            autoEscape={false}
-            textToHighlight={props.row.text}
-            highlightStyle={{
-              backgroundColor: 'yellow',
-              margin: '0px',
-              padding: '0px',
+      renderCell: (props) =>
+        isImageKind ? (
+          <div
+            style={{
+              width: '100%',
+              height: '100%',
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
             }}
-            caseSensitive={true}
-          />
-        </div>
-      ),
+          >
+            <ImageThumbnailImagexp projectSlug={projectSlug} elementId={props.row.id_internal} />
+          </div>
+        ) : (
+          <div
+            style={{
+              maxHeight: '100%',
+              width: '100%',
+              whiteSpace: 'wrap',
+              overflowY: 'auto',
+              userSelect: 'none',
+            }}
+          >
+            <Highlighter
+              highlightClassName="Search"
+              searchWords={contains && isValidRegex(contains) ? [contains.replace('ALL:', '')] : []}
+              autoEscape={false}
+              textToHighlight={props.row.text}
+              highlightStyle={{
+                backgroundColor: 'yellow',
+                margin: '0px',
+                padding: '0px',
+              }}
+              caseSensitive={true}
+            />
+          </div>
+        ),
     },
     {
       key: 'comment',
@@ -322,21 +339,25 @@ export const DataTabular: FC<DataTabularModel> = ({
             }}
           />
         </div>
-        <div>
-          <label htmlFor="filter-input">
-            Filter by content
-            <HiOutlineQuestionMarkCircle className="search" />
-            {!isValidRegex(contains || '') && <span className="badge danger">Regex not valid</span>}
-          </label>
-          <input
-            placeholder="Regex filter on text"
-            id="filter-input"
-            onChange={(e) => {
-              setPage(1);
-              setContains(e.target.value);
-            }}
-          />
-        </div>
+        {!isImageKind && (
+          <div>
+            <label htmlFor="filter-input">
+              Filter by content
+              <HiOutlineQuestionMarkCircle className="search" />
+              {!isValidRegex(contains || '') && (
+                <span className="badge danger">Regex not valid</span>
+              )}
+            </label>
+            <input
+              placeholder="Regex filter on text"
+              id="filter-input"
+              onChange={(e) => {
+                setPage(1);
+                setContains(e.target.value);
+              }}
+            />
+          </div>
+        )}
       </div>
       <div className="horizontal wrap" id="tabular-view-page-control">
         <div>
@@ -389,7 +410,7 @@ export const DataTabular: FC<DataTabularModel> = ({
         style={{ backgroundColor: 'white' }}
         columns={columns}
         rows={rows}
-        rowHeight={80}
+        rowHeight={isImageKind ? 100 : 80}
         onRowsChange={(e) => {
           setRows(e);
         }}

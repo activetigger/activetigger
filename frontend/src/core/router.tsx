@@ -8,6 +8,7 @@ import { DocPage } from '../pages/DocPage';
 import { RoleSelector } from '../core/RoleSelector';
 import { HomePage } from '../pages/HomePage';
 import { LoginPage } from '../pages/LoginPage';
+import { MessagesPage } from '../pages/MessagesPage';
 import { MonitorPage } from '../pages/MonitorPage';
 import { NotFound } from '../pages/NotFoundPage';
 import { ProjectExplorePage } from '../pages/ProjectExplorePage';
@@ -20,6 +21,7 @@ import { ProjectSettingsPage } from '../pages/ProjectSettingsPage';
 import { ProjectTagPage } from '../pages/ProjectTagPage';
 import { ProjectValidatePage } from '../pages/ProjectValidatePage';
 import { ProjectsPage } from '../pages/ProjectsPage';
+import { ToolboxPage } from '../pages/ToolboxPage';
 import { UsersPage } from '../pages/UsersPage';
 
 export function getRouter() {
@@ -60,6 +62,14 @@ export function getRouter() {
         </APIMiddlewares>
       ),
     },
+    {
+      path: '/messages',
+      element: (
+        <APIMiddlewares>
+          <MessagesPage />
+        </APIMiddlewares>
+      ),
+    },
     /*{
       path: '/experimental',
       element: (
@@ -68,6 +78,14 @@ export function getRouter() {
         </APIMiddlewares>
       ),
     },*/
+    {
+      path: '/toolbox',
+      element: (
+        <APIMiddlewares>
+          <ToolboxPage />
+        </APIMiddlewares>
+      ),
+    },
     {
       path: '/projects/',
       element: (

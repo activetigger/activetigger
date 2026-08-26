@@ -1,9 +1,10 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import ColumnElement, distinct, func
 from sqlalchemy.orm import Session as SessionType
 from sqlalchemy.orm import sessionmaker
 
-from activetigger.db.models import Monitoring
+from activetigger.db.models import Annotations, Logs, Monitoring
 
 
 class MonitoringService:
@@ -93,38 +94,78 @@ class MonitoringService:
         - for a specific user
         """
         session = self.Session()
-        if kind == "all" and username is None:
-            processes = (
-                session.query(Monitoring)
-                .filter(
-                    Monitoring.duration.isnot(None),
-                )
-                .order_by(Monitoring.time.desc())
-                .limit(limit)
-                .all()
-            )
-        elif username is None:
-            processes = (
-                session.query(Monitoring)
-                .filter(
-                    Monitoring.kind == kind,
-                    Monitoring.duration.isnot(None),
-                )
-                .order_by(Monitoring.time.desc())
-                .limit(limit)
-                .all()
-            )
-        else:
-            processes = (
-                session.query(Monitoring)
-                .filter(
-                    Monitoring.kind == kind,
-                    Monitoring.user_name == username,
-                    Monitoring.duration.isnot(None),
-                )
-                .order_by(Monitoring.time.desc())
-                .limit(limit)
-                .all()
-            )
+        filters: list[ColumnElement[bool]] = [Monitoring.duration.isnot(None)]
+        if kind != "all":
+            filters.append(Monitoring.kind == kind)
+        if username is not None:
+            filters.append(Monitoring.user_name == username)
+        processes = (
+            session.query(Monitoring)
+            .filter(*filters)
+            .order_by(Monitoring.time.desc())
+            .limit(limit)
+            .all()
+        )
         session.close()
         return processes
+
+    def get_hourly_activity_counts(
+        self, days: int = 7, user_name: str | None = None
+    ) -> tuple[dict[datetime, int], dict[datetime, int]]:
+        """
+        Aggregated hourly counts over the last `days` days, computed in SQL so the
+        result set is bounded by ~(days * 24) rows instead of every annotation/log row.
+
+        Returns (annotations_by_hour, distinct_users_by_hour). Hours are UTC,
+        aligned on the hour start. If `user_name` is given, annotation counts are
+        restricted to that user and distinct_users_by_hour is empty.
+        """
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        session = self.Session()
+        try:
+            dialect = session.bind.dialect.name if session.bind is not None else ""
+
+            # Build a portable hour-bucket expression.
+            # Postgres: date_trunc returns a timestamp; SQLite has no date_trunc,
+            # so we use strftime which returns a 'YYYY-MM-DD HH' text token.
+            if dialect == "postgresql":
+                hour_ann = func.date_trunc("hour", Annotations.time)
+                hour_log = func.date_trunc("hour", Logs.time)
+            else:
+                hour_ann = func.strftime("%Y-%m-%d %H", Annotations.time)
+                hour_log = func.strftime("%Y-%m-%d %H", Logs.time)
+
+            annotations_query = session.query(hour_ann.label("h"), func.count().label("c")).filter(
+                Annotations.time >= cutoff
+            )
+            if user_name is not None:
+                annotations_query = annotations_query.filter(Annotations.user_name == user_name)
+            annotations_rows = annotations_query.group_by(hour_ann).all()
+            if user_name is None:
+                logs_rows = (
+                    session.query(
+                        hour_log.label("h"),
+                        func.count(distinct(Logs.user_name)).label("c"),
+                    )
+                    .filter(Logs.time >= cutoff)
+                    .group_by(hour_log)
+                    .all()
+                )
+            else:
+                logs_rows = []
+        finally:
+            session.close()
+
+        def to_utc_hour(h) -> datetime:
+            if isinstance(h, str):
+                # SQLite path: 'YYYY-MM-DD HH'
+                dt = datetime.strptime(h, "%Y-%m-%d %H")
+            else:
+                dt = h
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)
+
+        annotations_by_hour = {to_utc_hour(h): int(c) for h, c in annotations_rows}
+        users_by_hour = {to_utc_hour(h): int(c) for h, c in logs_rows}
+        return annotations_by_hour, users_by_hour

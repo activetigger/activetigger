@@ -31,7 +31,10 @@ from activetigger.app.routers import (
     models,
     monitoring,
     projects,
+    prompts,
     schemes,
+    toolbox,
+    upload,
     users,
 )
 from activetigger.config import config
@@ -43,6 +46,9 @@ from activetigger.datamodels import (
 )
 from activetigger.orchestrator import get_orchestrator
 
+# ensure the static dir exists before the mount below; orchestrator init runs in lifespan
+(Path(config.data_path) / "projects" / "static").mkdir(parents=True, exist_ok=True)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -50,6 +56,9 @@ async def lifespan(app: FastAPI):
     Frame the execution of the api
     """
     orchestrator = get_orchestrator()
+    # If the orchestrator was built at module-import time (no event loop),
+    # its background loops weren't scheduled — start them now.
+    orchestrator.ensure_update_task()
     app.state.orchestrator = orchestrator
     print("Active Tigger starting")
     yield
@@ -119,6 +128,7 @@ async def log_requests(request: Request, call_next):
 
 
 # add static folder
+get_orchestrator()  # fix to create all folders
 app.mount(
     "/static", StaticFiles(directory=Path(config.data_path) / "projects" / "static"), name="static"
 )
@@ -129,6 +139,7 @@ app.include_router(projects.router)
 app.include_router(annotations.router)
 app.include_router(schemes.router)
 app.include_router(features.router)
+app.include_router(prompts.router)
 app.include_router(export.router)
 app.include_router(models.router)
 app.include_router(generation.router)
@@ -136,12 +147,15 @@ app.include_router(files.router)
 app.include_router(bertopic.router)
 app.include_router(messages.router)
 app.include_router(monitoring.router)
+app.include_router(toolbox.router)
+app.include_router(upload.router)
 
 
 # allow multiple servers (avoir CORS error)
 # TODO : Read allowed origins from config: `allow_origins=config.cors_origins`
 # (default to `[]` in prod). Keep `allow_credentials=True` only when origins is an explicit list.
 # Restrict methods/headers to what the frontend actually uses.
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -209,7 +223,7 @@ def login_for_access_token(
         orchestrator = get_orchestrator()
         user = orchestrator.users.authenticate_user(form_data.username, form_data.password)
         access_token = orchestrator.create_access_token(
-            data={"sub": user.username}, expires_min=120
+            data={"sub": user.username}, expires_min=1440
         )
         return TokenModel(access_token=access_token, token_type="bearer", status=user.status)
     except Exception as e:

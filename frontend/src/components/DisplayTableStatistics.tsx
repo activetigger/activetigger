@@ -53,7 +53,7 @@ export const DisplayTableStatistics: FC<DisplayTableStatisticsProps> = ({ scores
     return colIndex === nLabels - 1 || rowIndex === nLabels - 1;
   };
 
-  const displayScore = (score: number | undefined) => {
+  const displayScore = (score: number | null | undefined) => {
     if (typeof score === 'number') {
       if (score === 0) {
         return '0.00';

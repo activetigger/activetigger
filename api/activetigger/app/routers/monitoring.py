@@ -3,7 +3,12 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 
 from activetigger.app.dependencies import ServerAction, test_rights, verified_user
-from activetigger.datamodels import MonitoringMetricsModel, ProjectSummaryModel, UserInDBModel
+from activetigger.datamodels import (
+    MonitoringActivityModel,
+    MonitoringMetricsModel,
+    ProjectSummaryModel,
+    UserInDBModel,
+)
 from activetigger.orchestrator import get_orchestrator
 
 router = APIRouter(tags=["monitoring"])
@@ -43,3 +48,16 @@ def get_all_projects(
     """
     test_rights(ServerAction.MANAGE_SERVER, current_user.username)
     return get_orchestrator().users.get_all_projects(current_user.username)
+
+
+@router.get("/monitoring/activity")
+def get_monitoring_activity(
+    current_user: Annotated[UserInDBModel, Depends(verified_user)],
+    days: int = 7,
+) -> MonitoringActivityModel:
+    """
+    Hourly timeline of the instance activity: annotations made and
+    distinct users acting per hour over the last `days` days.
+    """
+    test_rights(ServerAction.MANAGE_SERVER, current_user.username)
+    return get_orchestrator().monitoring.get_weekly_activity(days=days)

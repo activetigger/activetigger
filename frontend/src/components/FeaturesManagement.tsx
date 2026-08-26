@@ -60,21 +60,41 @@ export const FeaturesManagement: FC = () => {
       >
         <ButtonNewFeature
           projectSlug={projectName || ''}
-          className={cx('model-pill ', isComputing ? 'disabled' : '')}
+          className={cx('model-pill create-pill', isComputing && 'disabled')}
         />
       </ModelsPillDisplay>
       {/* Display computing features */}
-      {Object.entries(project?.features.training).map(([key, element]) => (
-        <div className="card text-bg-light m-3 bg-warning w-75" key={key}>
-          <div className="d-flex m-2 align-items-center justify-content-between">
-            <span>
-              Currently computing {element ? element.name : ''}
-              {element?.progress ? ` (${element.progress}%)` : ''}
-            </span>
-            <StopProcessButton projectSlug={projectName || null} kind="feature" />
+      {Object.entries(project?.features.training).map(([key, element]) =>
+        element?.kind === 'extend_features' ? (
+          <div className="card text-bg-light m-3 bg-info w-75" key={key}>
+            <div className="m-2">
+              <span>
+                The datasets changed (test/validation set imported or dropped): existing features
+                are being recomputed for the new elements
+                {element?.progress != null ? ` (${Math.round(Number(element.progress))}%)` : ''}
+              </span>
+              <div className="progress mt-2">
+                <div
+                  className="progress-bar progress-bar-striped progress-bar-animated"
+                  role="progressbar"
+                  style={{ width: `${Number(element?.progress ?? 0)}%` }}
+                />
+              </div>
+            </div>
           </div>
-        </div>
-      ))}
+        ) : (
+          <div className="card text-bg-light m-3 bg-warning w-75" key={key}>
+            <div className="d-flex m-2 align-items-center justify-content-between">
+              <span>
+                {element?.progress != null
+                  ? `Currently computing ${element.name} (${element.progress}%)`
+                  : `Waiting in queue: ${element ? element.name : ''}`}
+              </span>
+              <StopProcessButton projectSlug={projectName || null} kind="feature" />
+            </div>
+          </div>
+        ),
+      )}
       {featuresInfo &&
         selectedFeature &&
         SimpleTable(featuresInfo[selectedFeature] as FeatureDescriptionModelOut)}

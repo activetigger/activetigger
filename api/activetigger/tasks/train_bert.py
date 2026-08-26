@@ -8,13 +8,15 @@ import shutil
 from collections import Counter
 from logging import Logger
 from pathlib import Path
-from typing import Any, Optional, Tuple
+from typing import Any, Optional, Tuple, cast
 
 import datasets
+import numpy as np
 import pandas as pd
 import torch
 from pandas import DataFrame
 from torch import nn
+from torch.utils.data import Dataset as TorchDataset
 from transformers import (
     AutoModelForSequenceClassification,
     AutoTokenizer,  # ty: ignore[possibly-missing-import]
@@ -23,6 +25,7 @@ from transformers import (
     TrainerControl,
     TrainerState,
     TrainingArguments,
+    set_seed,
 )
 
 from activetigger.config import config
@@ -34,6 +37,7 @@ from activetigger.functions import (
     get_metrics_multilabel,
     logits_to_probs,
     matrix_to_label,
+    release_device_memory,
     split_annotation,
 )
 from activetigger.monitoring import TaskTimer
@@ -56,6 +60,16 @@ class CustomLoggingCallback(TrainerCallback):
         self.event = event
         self.current_path = current_path
         self.logger = logger
+        # Set from trainer.model_accepts_loss_kwargs after the Trainer is built
+        # (see __load_trainer). When the model's forward accepts **kwargs, the
+        # Trainer assumes the loss is normalized via num_items_in_batch and
+        # skips its own division by gradient_accumulation_steps — but our loss
+        # paths (model-internal encoder heads, CustomTrainer) all ignore
+        # num_items_in_batch, so the logged train loss comes out inflated by
+        # gradacc and must be corrected here. When the forward does NOT accept
+        # **kwargs (transformers <= 4.x encoder models), the Trainer already
+        # normalizes and dividing again would deflate the train curve (#1109).
+        self.needs_gradacc_correction = False
 
     def on_step_end(
         self,
@@ -68,10 +82,7 @@ class CustomLoggingCallback(TrainerCallback):
         progress_percentage = (state.global_step / state.max_steps) * 100
         with open(self.current_path.joinpath("progress_train"), "w") as f:
             f.write(str(progress_percentage))
-        # Normalize training loss: HuggingFace Trainer accumulates raw losses
-        # across forward passes but divides only by optimizer steps, inflating
-        # the logged training loss by gradient_accumulation_steps.
-        gradacc = args.gradient_accumulation_steps
+        gradacc = args.gradient_accumulation_steps if self.needs_gradacc_correction else 1
         adjusted_history = []
         for entry in state.log_history:
             if "loss" in entry and "eval_loss" not in entry and gradacc > 1:
@@ -114,7 +125,13 @@ class CustomTrainer(Trainer):
         self._loss_fct = None  # avoid device mismatch
         print("CustomTrainer initialized with class weights:", self.class_weights)
 
-    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):  # ty: ignore[invalid-method-override]
+    def compute_loss(
+        self,
+        model: nn.Module,
+        inputs: dict[str, torch.Tensor | Any],
+        return_outputs: bool = False,
+        num_items_in_batch: torch.Tensor | int | None = None,
+    ) -> torch.Tensor | tuple[torch.Tensor, Any]:
         labels = inputs.pop("labels")
         outputs = model(**inputs)
         logits = outputs.get("logits")
@@ -237,6 +254,15 @@ class TrainBert(BaseTask):
     def __init_logger(self, log_path) -> Logger:
         """Load the logger and set it up"""
         logger = logging.getLogger("train_bert_model")
+        # without an explicit level the logger inherits WARNING and every
+        # logger.info() is dropped — status.log stays empty
+        logger.setLevel(logging.INFO)
+        logger.propagate = False
+        # the logger is a per-process singleton and loky reuses workers:
+        # drop handlers from previous trainings or logs leak across models
+        for handler in logger.handlers[:]:
+            logger.removeHandler(handler)
+            handler.close()
         file_handler = logging.FileHandler(log_path)
         formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
         file_handler.setFormatter(formatter)
@@ -319,9 +345,15 @@ class TrainBert(BaseTask):
                 annotations_to_matrix(df[col_label], list(label2id.keys())).tolist(),
                 dtype=torch.float32,
             )
+        else:
+            raise ValueError(f"Training kind {training_kind} not recognized.")
 
         return datasets.Dataset.from_dict(
-            {"id": ids, "text": texts, "labels": labels}  # ty: ignore[possibly-unresolved-reference]
+            {
+                "id": ids,
+                "text": texts,
+                "labels": labels,
+            }
         ).with_format("torch")
 
     def __load_tokenizer(self, base_model: str):
@@ -336,7 +368,7 @@ class TrainBert(BaseTask):
         original_max_length: int,
         base_model_max_length: int,
         adapt: bool,
-    ) -> Tuple[Any, int]:
+    ) -> Tuple[Any, int, int]:
         """Cap the tokenizer max length and create a tokenizing function"""
 
         # if auto_max_length set max_length to the maximum length of tokenized sentences
@@ -346,9 +378,11 @@ class TrainBert(BaseTask):
 
         if auto_max_length:
             max_length = int(texts.apply(get_n_tokens).dropna().max())
+        else:
+            max_length = original_max_length
 
-        # cap max_length
-        max_length = min(original_max_length, base_model_max_length)
+        # cap max_length to the model's supported maximum
+        max_length = min(max_length, base_model_max_length)
         # evaluate the proportion of elements truncated
         percentage_truncated = int(100 * (texts.apply(get_n_tokens).dropna() > max_length).mean())
 
@@ -373,7 +407,7 @@ class TrainBert(BaseTask):
                     max_length=max_length,
                 )
 
-        return tokenizing_function, percentage_truncated
+        return tokenizing_function, percentage_truncated, max_length
 
     def __load_trainer(
         self,
@@ -396,6 +430,7 @@ class TrainBert(BaseTask):
         eval_steps = max(eval_steps, 1)
 
         # Load the training arguments
+        seed = int(config.random_seed)
         training_args = TrainingArguments(
             # Directories
             output_dir=str(current_path.joinpath("train")),
@@ -412,14 +447,37 @@ class TrainBert(BaseTask):
             # Logging and saving parameters
             eval_strategy="steps" if has_test else "no",
             eval_steps=eval_steps if has_test else None,
-            save_strategy="best" if has_test else "epoch",
+            # save_strategy must be "steps", not "best": on transformers 5.x
+            # SaveStrategy.BEST never sets state.best_model_checkpoint (only
+            # the STEPS/EPOCH branches track best_global_step), so
+            # load_best_model_at_end silently reloads nothing and the saved /
+            # exported model is the last-step one instead of the best (#1116).
+            save_strategy="steps" if has_test else "epoch",
             metric_for_best_model="eval_loss" if has_test else None,
             save_steps=float(eval_steps) if has_test else 500,
+            # Checkpoints are written every eval_steps, which collapses to a
+            # few steps on small labelled sets. Optimizer state (~2/3 of the
+            # checkpoint size) is only needed to resume training, which we
+            # never do — load_best_model_at_end only reloads weights. Without
+            # these caps a camembert-large run writes 3.4GB per save and can
+            # fill the disk (and on slow volumes the saves dominate wall-clock).
+            save_only_model=True,
+            save_total_limit=2,
             logging_steps=int(eval_steps),
             do_eval=has_test,
             greater_is_better=False if has_test else None,
             load_best_model_at_end=params.best if has_test else False,
             use_cpu=config.cpu_only or not bool(params.gpu),  # deactivate gpu
+            # Reproducibility: seed Trainer's model init / DataLoader shuffling
+            # and dataset shuffling. config.random_seed defaults to 42.
+            seed=seed,
+            data_seed=seed,
+            # No auto-attached reporting integrations: with codecarbon installed,
+            # transformers would otherwise add its own CodeCarbonCallback, whose
+            # NVML power query crashes Trainer init on GPUs where energy counters
+            # are restricted (e.g. containers). Emissions are tracked by our
+            # failure-safe EmissionsMonitor instead.
+            report_to=[],
         )
 
         callback = CustomLoggingCallback(self.event, current_path=current_path, logger=self.logger)
@@ -445,6 +503,10 @@ class TrainBert(BaseTask):
         else:
             raise ValueError(f"Loss function {loss} not recognized.")
 
+        # On very old transformers (<4.46) the attribute doesn't exist and the
+        # Trainer always normalizes the logged loss itself: no correction.
+        callback.needs_gradacc_correction = getattr(trainer, "model_accepts_loss_kwargs", False)
+
         return trainer
 
     def __create_save_files(
@@ -455,6 +517,7 @@ class TrainBert(BaseTask):
         df_test_results: pd.DataFrame | None,
         training_data: pd.DataFrame,
         bert_model,
+        tokenizer,
         params_to_save: dict[str, Any],
         metrics_train: MLStatisticsModel,
         metrics_test: MLStatisticsModel | None,
@@ -464,7 +527,7 @@ class TrainBert(BaseTask):
         - predictions of the train set (csv)
         - predictions of the test set  (csv)
         - data used during the training (parquet)
-        - the trained model
+        - the trained model and its tokenizer
         - the parameters used during the training (json)
         - metrics (json)
 
@@ -485,8 +548,10 @@ class TrainBert(BaseTask):
             )
         training_data.to_parquet(current_path.joinpath("training_data.parquet"))
 
-        # save the trained bert model
+        # save the trained bert model with its tokenizer so the exported
+        # archive can be loaded without fetching the base model from the hub
         bert_model.save_pretrained(current_path)
+        tokenizer.save_pretrained(current_path)
 
         # Save parameters
         with open(current_path.joinpath("parameters.json"), "w") as f:
@@ -520,6 +585,14 @@ class TrainBert(BaseTask):
         task_timer = TaskTimer(compulsory_steps=["setup", "train", "evaluate", "save_files"])
         task_timer.start("setup")
 
+        # Seed everything (python random, numpy, torch, torch.cuda) so that
+        # successive runs of the same training produce the same model.
+        # HF Trainer also gets seed via TrainingArguments below; both layers
+        # are needed because operations that run before Trainer.__init__
+        # (datasets shuffle, train_test_split) don't use HF's seed.
+        seed = int(config.random_seed)
+        set_seed(seed)
+
         current_path, log_path = self.__init_paths()
         self.logger = self.__init_logger(log_path)
         device = get_device()
@@ -535,19 +608,22 @@ class TrainBert(BaseTask):
         )
 
         tokenizer = self.__load_tokenizer(self.base_model)
-        tokenizing_function, percentage_truncated = self.__cap_tokenizer_max_length(
-            texts=self.df[self.col_text],
-            tokenizer=tokenizer,
-            auto_max_length=self.auto_max_length,
-            original_max_length=self.max_length,
-            base_model_max_length=retrieve_model_max_length(self.base_model),
-            adapt=self.params.adapt,
+        tokenizing_function, percentage_truncated, effective_max_length = (
+            self.__cap_tokenizer_max_length(
+                texts=self.df[self.col_text],
+                tokenizer=tokenizer,
+                auto_max_length=self.auto_max_length,
+                original_max_length=self.max_length,
+                base_model_max_length=retrieve_model_max_length(self.base_model),
+                adapt=self.params.adapt,
+            )
         )
+        self.max_length = effective_max_length
         self.ds = self.ds.map(tokenizing_function, batched=True)
 
         # Build train/test dataset for dev eval
         if self.test_size > 0:
-            self.ds = self.ds.train_test_split(test_size=self.test_size)
+            self.ds = self.ds.train_test_split(test_size=self.test_size, seed=seed)
         else:
             self.ds = datasets.DatasetDict({"train": self.ds})
         self.logger.info("Train/test dataset created")
@@ -559,6 +635,11 @@ class TrainBert(BaseTask):
             id2label=id2label,
             label2id=label2id,
             trust_remote_code=True,
+            # Some checkpoints (e.g. deberta-v3) store fp16 weights and
+            # transformers>=5 loads them in the checkpoint dtype by default.
+            # fp16 on CPU falls back to extremely slow kernels (and pure-fp16
+            # training is numerically fragile anyway): always fine-tune in fp32.
+            dtype=torch.float32,
             problem_type="multi_label_classification"
             if self.training_kind == "multilabel"
             else "single_label_classification",
@@ -580,21 +661,23 @@ class TrainBert(BaseTask):
 
             # predict on the data (separation validation set and training set)
             task_timer.start("evaluate")
-            predictions_train = trainer.predict(self.ds["train"])  # ty: ignore[invalid-argument-type]
+            # Hoisted so it stays defined for the multiclass branch + final
+            # params save; only meaningful when training_kind == "multilabel".
+            threshold: float = 0.5
+            train_ds = cast(datasets.Dataset, self.ds["train"])
+            predictions_train = trainer.predict(cast(TorchDataset, train_ds))
+            train_label_ids = cast(np.ndarray, predictions_train.label_ids)
+            train_logits = cast(np.ndarray, predictions_train.predictions)
 
             # Compute the metrics
-            df_train_results = self.ds["train"].to_pandas().set_index("id")  # ty: ignore[unresolved-attribute]
+            df_train_results = cast(pd.DataFrame, train_ds.to_pandas()).set_index("id")
 
-            df_train_results["true_label-matrix"] = predictions_train.label_ids.tolist()  # ty: ignore[unresolved-attribute]
+            df_train_results["true_label-matrix"] = train_label_ids.tolist()
             df_train_results["true_label"] = [
-                "|".join(matrix_to_label(row, id2label))  # ty: ignore[invalid-argument-type]
-                for row in predictions_train.label_ids  # ty: ignore[not-iterable]
+                "|".join(matrix_to_label(row, id2label)) for row in train_label_ids
             ]
 
-            y_prob_pred = logits_to_probs(
-                predictions_train.predictions,  # ty: ignore[invalid-argument-type]
-                self.training_kind,
-            )
+            y_prob_pred = logits_to_probs(train_logits, self.training_kind)
 
             if self.training_kind == "multiclass":
                 labels_predicted = activate_probs(
@@ -605,7 +688,6 @@ class TrainBert(BaseTask):
                 #     y_true = predictions_train.label_ids,
                 #     y_prob_pred = y_prob_pred,
                 # )
-                threshold = 0.5  # Force threshold = 0.5
                 labels_predicted = activate_probs(
                     probs=y_prob_pred,
                     strategy="threshold",
@@ -628,32 +710,32 @@ class TrainBert(BaseTask):
                 )
             elif self.training_kind == "multilabel":
                 metrics_train = get_metrics_multilabel(
-                    Y_true=predictions_train.label_ids,  # ty: ignore[invalid-argument-type]
+                    Y_true=train_label_ids,
                     Y_pred=labels_predicted,  # ty: ignore[possibly-unresolved-reference]
                     texts=df_train_results["text"],
                     id2label=id2label,
                 )
 
             if "test" in self.ds:
-                predictions_test = trainer.predict(self.ds["test"])  # ty: ignore[invalid-argument-type]
-                df_test_results = self.ds["test"].to_pandas().set_index("id")  # ty: ignore[unresolved-attribute]
+                test_ds = cast(datasets.Dataset, self.ds["test"])
+                predictions_test = trainer.predict(cast(TorchDataset, test_ds))
+                test_label_ids = cast(np.ndarray, predictions_test.label_ids)
+                test_logits = cast(np.ndarray, predictions_test.predictions)
 
-                df_test_results["true_label-matrix"] = predictions_test.label_ids.tolist()  # ty: ignore[unresolved-attribute]
+                df_test_results = cast(pd.DataFrame, test_ds.to_pandas()).set_index("id")
+
+                df_test_results["true_label-matrix"] = test_label_ids.tolist()
                 df_test_results["true_label"] = [
-                    "|".join(matrix_to_label(row, id2label))  # ty: ignore[invalid-argument-type]
-                    for row in predictions_test.label_ids  # ty: ignore[not-iterable]
+                    "|".join(matrix_to_label(row, id2label)) for row in test_label_ids
                 ]
 
-                y_prob_pred = logits_to_probs(
-                    predictions_test.predictions,  # ty: ignore[invalid-argument-type]
-                    kind=self.training_kind,
-                )
+                y_prob_pred = logits_to_probs(test_logits, kind=self.training_kind)
                 if self.training_kind == "multiclass":
                     y_label_pred = activate_probs(
                         y_prob_pred, strategy="max", force_max_1_per_row=True
                     )
                 else:
-                    y_label_pred = activate_probs(y_prob_pred, threshold, strategy="threshold")  # ty: ignore[possibly-unresolved-reference]
+                    y_label_pred = activate_probs(y_prob_pred, threshold, strategy="threshold")
                 df_test_results["predicted_label-matrix"] = y_prob_pred.tolist()
                 df_test_results["predicted_label"] = [
                     "|".join(matrix_to_label(row, id2label)) for row in y_label_pred
@@ -668,7 +750,7 @@ class TrainBert(BaseTask):
                     )
                 elif self.training_kind == "multilabel":
                     metrics_test = get_metrics_multilabel(
-                        Y_true=predictions_test.label_ids,  # ty: ignore[invalid-argument-type]
+                        Y_true=test_label_ids,
                         Y_pred=y_label_pred,
                         texts=df_test_results["text"],
                         id2label=id2label,
@@ -685,7 +767,6 @@ class TrainBert(BaseTask):
                 {
                     "training_kind": self.training_kind,
                     "test_size": self.test_size,
-                    "threshold": threshold if self.training_kind == "multilabel" else None,  # ty: ignore[possibly-unresolved-reference]
                     "use_dichotomization": self.use_dichotomization,
                     "label_for_dichotomization": self.label_for_dichotomization,
                     "base_model": self.base_model,
@@ -694,11 +775,13 @@ class TrainBert(BaseTask):
                     "device": str(device),
                     "Proportion of elements truncated (%)": percentage_truncated,
                     "loss": self.loss,
-                    "auto context length": self.params.adapt,
+                    "auto context length": self.auto_max_length,
                     "balance classes": self.class_balance,
                     "class_min_freq": self.class_min_freq,
                 }
             )
+            if self.training_kind == "multilabel":
+                params_to_save["threshold"] = threshold
             self.__create_save_files(
                 current_path=current_path,
                 log_path=log_path,
@@ -706,6 +789,7 @@ class TrainBert(BaseTask):
                 df_test_results=df_test_results,
                 training_data=self.df[[self.col_text, self.col_label]],
                 bert_model=bert_model,
+                tokenizer=tokenizer,
                 params_to_save=params_to_save,
                 metrics_train=metrics_train,  # ty: ignore[possibly-unresolved-reference]
                 metrics_test=metrics_test,  # ty: ignore[possibly-unresolved-reference]
@@ -715,6 +799,14 @@ class TrainBert(BaseTask):
         except Exception as e:
             print("Error in training", e)
             shutil.rmtree(current_path)
+            # PyTorch can fail with a cryptic "NVML_SUCCESS == r INTERNAL ASSERT
+            # FAILED at CUDACachingAllocator.cpp" while formatting an OOM error
+            # (see pytorch#157535): both cases are GPU out-of-memory.
+            if isinstance(e, torch.cuda.OutOfMemoryError) or "NVML_SUCCESS" in str(e):
+                raise Exception(
+                    "GPU ran out of memory during training. "
+                    "Reduce the batch size or increase gradient accumulation."
+                ) from e
             raise e
         finally:
             print("Cleaning memory")
@@ -727,10 +819,7 @@ class TrainBert(BaseTask):
                     device,
                     self.event,
                 )
-                if torch.cuda.is_available():
-                    torch.cuda.synchronize()
-                    torch.cuda.empty_cache()
-                    torch.cuda.ipc_collect()
+                release_device_memory()
                 gc.collect()
 
             except Exception as e:

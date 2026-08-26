@@ -1,0 +1,5 @@
+name,priority,comment,parameters,image_size,epochs,lrate,wdecay,batch_effective
+google/vit-large-patch16-384,10,ViT-Large/16 — flagship,304,384,10,1e-4,1e-4,128
+google/vit-base-patch16-224,8,ViT-Base/16 — fast baseline,86,224,10,1e-4,1e-4,256
+facebook/convnext-base-224-22k-1k,7,ConvNeXt-Base — modern CNN,88,224,10,5e-5,1e-2,128
+google/efficientnet-b4,5,EfficientNet-B4 — lightweight,19,380,15,3e-4,1e-4,128

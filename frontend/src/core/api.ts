@@ -1,8 +1,10 @@
 import axios from 'axios';
 import { saveAs } from 'file-saver';
-import { toPairs, values } from 'lodash';
+import { omit, toPairs, values } from 'lodash';
 import createClient, { Middleware } from 'openapi-fetch';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+
+const PROJECTS_REFRESH_EVENT = 'at:refresh-projects';
 
 import streamSaver from 'streamsaver';
 import type { paths } from '../generated/openapi';
@@ -12,18 +14,25 @@ import {
   AnnotationsDataModel,
   AvailableProjectsModel,
   ComputeBertopicModel,
+  ElementOutModel,
   EvalSetDataModel,
   GenModel,
   LoginParams,
+  PrepareSessionModel,
+  PrepareSplitModel,
   ProjectBaseModel,
   ProjectStateModel,
   ProjectUpdateModel,
   ProjectionParametersModel,
+  PromptOutModel,
   QuickModelInModel,
   SelectionConfig,
   SupportedAPI,
   TextDatasetModel,
+  UserCredentialInput,
   newBertModel,
+  newImageModel,
+  newNerModel,
 } from '../types';
 import config from './config';
 import { HttpError, formatApiError } from './HTTPError';
@@ -31,6 +40,7 @@ import { useNotifications } from './notifications';
 import { useAppContext } from './useAppContext';
 import { getAsyncMemoData, useAsyncMemo } from './useAsyncMemo';
 import { getAuthHeaders, useAuth } from './useAuth';
+import { useChunkedUpload } from './useChunkedUpload';
 
 /**
  * API methods
@@ -172,6 +182,14 @@ export function useUserProjects() {
   const { notify } = useNotifications();
   const [fetchTrigger, setFetchTrigger] = useState<boolean>(false);
 
+  // Refetch when other parts of the app (e.g. model deletion) signal that
+  // the projects list / storage usage may have changed.
+  useEffect(() => {
+    const handler = () => setFetchTrigger((f) => !f);
+    window.addEventListener(PROJECTS_REFRESH_EVENT, handler);
+    return () => window.removeEventListener(PROJECTS_REFRESH_EVENT, handler);
+  }, []);
+
   // This method is a GET it retrieves data by querying the API
   // but a hook can not be async it has to be a pure function
   // to handle the query API effect we use useAsyncMemo
@@ -247,35 +265,92 @@ export function useCreateProject() {
 /**
  * Create test set
  */
+// what the eval-set form provides: the API model plus the csv content,
+// which is shipped as a chunked file upload rather than inline JSON
+export type EvalSetDataPayload = Omit<EvalSetDataModel, 'upload_id'> & { csv: string };
+
 export function useCreateValidSet() {
   const { notify } = useNotifications();
   const { authenticatedUser } = useAuth();
-  const [controller, setController] = useState<AbortController | undefined>(undefined);
-  const [progression, setProgression] = useState<{ loaded?: number; total?: number }>({});
+  const { uploadChunked, progression, cancel } = useChunkedUpload();
   const createValidSet = useCallback(
-    async (projectSlug: string, dataset: string, testset: EvalSetDataModel) => {
-      const controller = new AbortController();
-      setController(controller);
+    async (projectSlug: string, dataset: string, testset: EvalSetDataPayload) => {
       const URL = config.api.url.replace(/\/$/, '');
-      const base = {
-        headers: getAuthHeaders(authenticatedUser)?.headers,
-        params: { project_slug: projectSlug, dataset },
-      };
+      const headers = getAuthHeaders(authenticatedUser)?.headers;
       try {
-        await axios.post(`${URL}/projects/evalset/add`, testset, {
-          ...base,
-          signal: controller.signal,
-          onUploadProgress: ({ loaded, total }) => setProgression({ loaded, total }),
-        });
+        // ship the csv content as a chunked upload, referenced by upload_id
+        const csvFile = new File([testset.csv], `evalset-${dataset}.csv`, { type: 'text/csv' });
+        const { uploadId } = await uploadChunked(csvFile);
+        await axios.post(
+          `${URL}/projects/evalset/add`,
+          { ...omit(testset, 'csv'), upload_id: uploadId },
+          {
+            headers,
+            params: { project_slug: projectSlug, dataset },
+          },
+        );
         return true;
       } catch (error: unknown) {
         notify({ type: 'error', message: formatApiError(error) });
         return false;
       }
     },
-    [notify, authenticatedUser],
+    [notify, authenticatedUser, uploadChunked],
   );
-  return { createValidSet, progression, cancel: controller };
+  return { createValidSet, progression, cancel };
+}
+
+/**
+ * Create test/valid set for an image project.
+ */
+export function useCreateValidSetImage() {
+  const { notify } = useNotifications();
+  const { authenticatedUser } = useAuth();
+  const { uploadChunked, progression, cancel } = useChunkedUpload();
+  const createValidSet = useCallback(
+    async (
+      projectSlug: string,
+      dataset: string,
+      params: {
+        zipFile: File;
+        labelsFile?: File;
+        scheme?: string | null;
+        col_id?: string | null;
+        col_label?: string | null;
+        n_eval?: number | null;
+      },
+    ) => {
+      const URL = config.api.url.replace(/\/$/, '');
+      const headers = getAuthHeaders(authenticatedUser)?.headers;
+      try {
+        // chunk-upload the zip (and optional labels file), then reference
+        // them by upload id in the evalset payload
+        const zipStaged = await uploadChunked(params.zipFile);
+        const labelsStaged = params.labelsFile ? await uploadChunked(params.labelsFile) : null;
+        await axios.post(
+          `${URL}/projects/evalset/add`,
+          {
+            upload_id: zipStaged.uploadId,
+            labels_upload_id: labelsStaged ? labelsStaged.uploadId : null,
+            col_id: params.col_id ?? null,
+            col_label: params.col_label ?? null,
+            scheme: params.scheme ?? null,
+            n_eval: params.n_eval ?? null,
+          },
+          {
+            headers,
+            params: { project_slug: projectSlug, dataset },
+          },
+        );
+        return true;
+      } catch (error: unknown) {
+        notify({ type: 'error', message: formatApiError(error) });
+        return false;
+      }
+    },
+    [notify, authenticatedUser, uploadChunked],
+  );
+  return { createValidSet, progression, cancel };
 }
 
 /**
@@ -313,6 +388,7 @@ export function usePredictOnDataset() {
       model_name: string,
       data: TextDatasetModel,
       batchSize?: number,
+      kind: string = 'bert',
     ) => {
       // do the new projects POST call
       const res = await api_withouttimeout.POST('/models/predict', {
@@ -323,7 +399,7 @@ export function usePredictOnDataset() {
             model_name: model_name,
             dataset_type: 'external',
             scheme: scheme,
-            kind: 'bert',
+            kind: kind,
             batch_size: batchSize,
           },
         },
@@ -361,6 +437,64 @@ export function useDeleteProject() {
 }
 
 /**
+ * useDuplicateProject
+ * POST to duplicate an existing project (files + DB rows) under `<slug>-copy`.
+ * Uses raw axios because the openapi types may not yet include the new route.
+ * @returns a function returning the new project slug
+ */
+export function useDuplicateProject() {
+  const { notify } = useNotifications();
+  const { authenticatedUser } = useAuth();
+  const duplicateProject = useCallback(
+    async (projectSlug: string) => {
+      const URL = config.api.url.replace(/\/$/, '');
+      const headers = getAuthHeaders(authenticatedUser)?.headers;
+      try {
+        const res = await axios.post(`${URL}/projects/duplicate`, null, {
+          params: { project_slug: projectSlug },
+          headers,
+        });
+        notify({ type: 'success', message: 'Project duplicated.' });
+        return res.data as string;
+      } catch (error) {
+        notify({ type: 'error', message: formatApiError(error) });
+        throw error;
+      }
+    },
+    [authenticatedUser, notify],
+  );
+  return duplicateProject;
+}
+
+/**
+ * useGetProjectSummary
+ * GET /export/summary — returns the lab-notebook style snapshot as a plain dict.
+ * Uses raw axios because the openapi types may not yet include the new route.
+ */
+export function useGetProjectSummary() {
+  const { notify } = useNotifications();
+  const { authenticatedUser } = useAuth();
+  const getProjectSummary = useCallback(
+    async (projectSlug: string) => {
+      const URL = config.api.url.replace(/\/$/, '');
+      const headers = getAuthHeaders(authenticatedUser)?.headers;
+      try {
+        const res = await axios.get(`${URL}/export/summary`, {
+          params: { project_slug: projectSlug },
+          headers,
+        });
+        return res.data as Record<string, unknown>;
+      } catch (error) {
+        notify({ type: 'error', message: formatApiError(error) });
+        throw error;
+      }
+    },
+    [authenticatedUser, notify],
+  );
+  return getProjectSummary;
+}
+
+/**
  * useStatistics
  * GET the current stats of the project
  * @param projectSlug
@@ -390,6 +524,55 @@ export function useStatistics(projectSlug: string | null, currentScheme: string 
   const reFetch = useCallback(() => setFetchTrigger((f) => !f), []);
 
   return { statistics: getAsyncMemoData(getStatistics), reFetchStatistics: reFetch };
+}
+
+/**
+ * useGetLexicometrics
+ * GET the lexicometry statistics of the project (null if not computed yet)
+ * @param projectSlug
+ */
+export function useGetLexicometrics(projectSlug: string | null) {
+  const [fetchTrigger, setFetchTrigger] = useState<boolean>(false);
+
+  const getLexicometrics = useAsyncMemo(async () => {
+    if (projectSlug) {
+      const res = await api.GET('/projects/{project_slug}/lexicometrics', {
+        params: {
+          path: { project_slug: projectSlug },
+        },
+      });
+      return res.data;
+    }
+    return null;
+  }, [projectSlug, fetchTrigger]);
+
+  const reFetch = useCallback(() => setFetchTrigger((f) => !f), []);
+
+  return { lexicometrics: getAsyncMemoData(getLexicometrics), reFetchLexicometrics: reFetch };
+}
+
+/**
+ * useComputeLexicometrics
+ * POST to launch the computation of lexicometry statistics on the train dataset
+ * @param projectSlug
+ */
+export function useComputeLexicometrics(projectSlug: string | null) {
+  const { notify } = useNotifications();
+
+  const computeLexicometrics = useCallback(async () => {
+    if (projectSlug) {
+      const res = await api.POST('/projects/{project_slug}/lexicometrics/compute', {
+        params: {
+          path: { project_slug: projectSlug },
+        },
+      });
+      if (!res.error) notify({ type: 'info', message: 'Lexicometrics are computing.' });
+      return true;
+    }
+    return false;
+  }, [projectSlug, notify]);
+
+  return computeLexicometrics;
 }
 
 /**
@@ -624,6 +807,49 @@ export function useResetFeatures(projectSlug: string | null) {
 }
 
 /**
+ * Import a pre-computed feature from a file.
+ * Uploads the file with column-mapping form fields as multipart/form-data.
+ */
+export function useImportFeature() {
+  const { notify } = useNotifications();
+  const { authenticatedUser } = useAuth();
+  const { uploadChunked, progression } = useChunkedUpload();
+
+  const importFeature = useCallback(
+    async (
+      projectSlug: string,
+      params: { file: File; name: string; idColumn: string; columns?: string[] | null },
+    ) => {
+      const URL = config.api.url.replace(/\/$/, '');
+      const headers = getAuthHeaders(authenticatedUser)?.headers;
+      try {
+        const { uploadId } = await uploadChunked(params.file);
+        await axios.postForm(
+          `${URL}/features/import`,
+          {
+            name: params.name,
+            id_column: params.idColumn,
+            columns: params.columns && params.columns.length ? params.columns.join(',') : '',
+          },
+          {
+            params: { project_slug: projectSlug, upload_id: uploadId },
+            headers,
+          },
+        );
+        notify({ type: 'success', message: 'Feature imported.' });
+        return true;
+      } catch (error: unknown) {
+        notify({ type: 'error', message: formatApiError(error) });
+        return false;
+      }
+    },
+    [notify, authenticatedUser, uploadChunked],
+  );
+
+  return { importFeature, progression };
+}
+
+/**
  * Get feature info
  */
 export function useGetFeatureInfo(project_slug: string | null, project: unknown) {
@@ -658,6 +884,7 @@ export function useGetFeatureInfo(project_slug: string | null, project: unknown)
 export function useGetNextElementId(
   projectSlug: string | null,
   currentScheme: string | null,
+  projectionName: string | null | undefined,
   selectionConfig: SelectionConfig,
   history: string[],
   phase: string,
@@ -666,7 +893,73 @@ export function useGetNextElementId(
   const { notify } = useNotifications();
   const getNextElementId = useCallback(async () => {
     if (projectSlug && currentScheme) {
+      // prompt_id is not yet in the generated OpenAPI types; the extra field
+      // is kept through a widening cast. Drop the cast once `npm run generate`
+      // picks up the new NextInModel field.
+      const body = {
+        scheme: currentScheme,
+        selection: selectionConfig.mode,
+        sample: selectionConfig.sample,
+        on_labels: selectionConfig.labels,
+        filter: selectionConfig.filter,
+        history: history,
+        frame: selectionConfig.frameSelection ? selectionConfig.frame : null, // only if frame option selected
+        projection_name: selectionConfig.frameSelection ? projectionName : null,
+        dataset: phase,
+        label_prob: selectionConfig.label_prob,
+        on_users: selectionConfig.users,
+        model_active: activeModel,
+        prompt_id: selectionConfig.prompt_id,
+        similarity_range: selectionConfig.similarity_range,
+      };
       const res = await api.POST('/elements/next', {
+        params: { query: { project_slug: projectSlug } },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        body: body as any,
+      });
+      if (res.data?.element_id)
+        return {
+          element_id: res.data?.element_id,
+          n_sample: res.data?.n_sample,
+          selection: res.data?.selection,
+          similarity: res.data?.similarity,
+          rank: res.data?.rank,
+        };
+      else return null;
+    } else {
+      notify({ type: 'error', message: 'Select a project and scheme.' });
+      return null;
+    }
+  }, [
+    projectSlug,
+    currentScheme,
+    projectionName,
+    notify,
+    history,
+    selectionConfig,
+    phase,
+    activeModel,
+  ]);
+
+  return { getNextElementId };
+}
+
+/**
+ * Get the next n elements to annotate in one call (batch).
+ */
+export function useGetNextElementsBatch(
+  projectSlug: string | null,
+  currentScheme: string | null,
+  projectionName: string | null | undefined,
+  selectionConfig: SelectionConfig,
+  history: string[],
+  phase: string,
+  activeModel: ActiveModel | null,
+) {
+  const getNextElementsBatch = useCallback(
+    async (n: number): Promise<ElementOutModel[] | null> => {
+      if (!projectSlug || !currentScheme) return null;
+      const res = await api.POST('/elements/next/batch', {
         params: { query: { project_slug: projectSlug } },
         body: {
           scheme: currentScheme,
@@ -675,23 +968,24 @@ export function useGetNextElementId(
           on_labels: selectionConfig.labels,
           filter: selectionConfig.filter,
           history: history,
-          frame: selectionConfig.frameSelection ? selectionConfig.frame : null, // only if frame option selected
+          frame: selectionConfig.frameSelection ? selectionConfig.frame : null,
+          projection_name: selectionConfig.frameSelection ? projectionName : null,
           dataset: phase,
           label_prob: selectionConfig.label_prob,
           on_users: selectionConfig.users,
           model_active: activeModel,
+          prompt_id: selectionConfig.prompt_id,
+          similarity_range: selectionConfig.similarity_range,
+          n: n,
         },
       });
-      if (res.data?.element_id)
-        return { element_id: res.data?.element_id, n_sample: res.data?.n_sample };
-      else return null;
-    } else {
-      notify({ type: 'error', message: 'Select a project and scheme.' });
-      return null;
-    }
-  }, [projectSlug, currentScheme, notify, history, selectionConfig, phase, activeModel]);
+      if (res.error || !res.data) return null;
+      return res.data;
+    },
+    [projectSlug, currentScheme, projectionName, selectionConfig, history, phase, activeModel],
+  );
 
-  return { getNextElementId };
+  return { getNextElementsBatch };
 }
 
 /**
@@ -727,6 +1021,66 @@ export function useGetElementById() {
   );
 
   return { getElementById };
+}
+
+/**
+ * Fetch an image (imagexp) as an authenticated object URL.
+ * The endpoint requires auth headers, so a plain <img src> won't work.
+ */
+export function useGetImageImagexp() {
+  const { authenticatedUser } = useAuth();
+
+  const getImageImagexp = useCallback(
+    async (projectSlug: string, elementId: string): Promise<string | null> => {
+      if (!authenticatedUser?.access_token) return null;
+      const base = config.api.url.replace(/\/$/, '');
+      const url = `${base}/projects/${projectSlug}/image_imagexp/${encodeURIComponent(elementId)}`;
+      try {
+        const res = await fetch(url, {
+          headers: {
+            Authorization: `Bearer ${authenticatedUser.access_token}`,
+            username: authenticatedUser.username,
+          },
+        });
+        if (!res.ok) return null;
+        const blob = await res.blob();
+        return URL.createObjectURL(blob);
+      } catch {
+        return null;
+      }
+    },
+    [authenticatedUser],
+  );
+
+  return { getImageImagexp };
+}
+
+export function useGetThumbnailImagexp() {
+  const { authenticatedUser } = useAuth();
+
+  const getThumbnailImagexp = useCallback(
+    async (projectSlug: string, elementId: string): Promise<string | null> => {
+      if (!authenticatedUser?.access_token) return null;
+      const base = config.api.url.replace(/\/$/, '');
+      const url = `${base}/projects/${projectSlug}/thumbnail_imagexp/${encodeURIComponent(elementId)}`;
+      try {
+        const res = await fetch(url, {
+          headers: {
+            Authorization: `Bearer ${authenticatedUser.access_token}`,
+            username: authenticatedUser.username,
+          },
+        });
+        if (!res.ok) return null;
+        const blob = await res.blob();
+        return URL.createObjectURL(blob);
+      } catch {
+        return null;
+      }
+    },
+    [authenticatedUser],
+  );
+
+  return { getThumbnailImagexp };
 }
 
 /**
@@ -1268,7 +1622,10 @@ export function useDeleteBertModel(projectSlug: string | null) {
             },
           },
         });
-        if (!res.error) notify({ type: 'success', message: 'Model deleted.' });
+        if (!res.error) {
+          notify({ type: 'success', message: 'Model deleted.' });
+          window.dispatchEvent(new Event(PROJECTS_REFRESH_EVENT));
+        }
         return true;
       }
       return null;
@@ -1277,6 +1634,174 @@ export function useDeleteBertModel(projectSlug: string | null) {
   );
 
   return { deleteBertModel };
+}
+
+/**
+ * Train a NER (token-classification) model for a span scheme.
+ * Experimental feature — only callable when developmentMode is enabled.
+ */
+export function useTrainNerModel(projectSlug: string | null, scheme: string | null) {
+  const { notify } = useNotifications();
+  const trainNerModel = useCallback(
+    async (dataForm: newNerModel) => {
+      if (projectSlug && scheme && dataForm) {
+        const res = await api.POST('/models/ner/train', {
+          params: { query: { project_slug: projectSlug } },
+          body: {
+            project_slug: projectSlug,
+            scheme: scheme,
+            base_model: dataForm.base,
+            name: dataForm.name || '',
+            test_size: dataForm.test_size ?? 0.2,
+            params: dataForm.parameters,
+            max_length: dataForm.max_length || 512,
+          },
+        });
+        if (!res.error) notify({ type: 'warning', message: 'NER model training.' });
+        return true;
+      }
+      return null;
+    },
+    [projectSlug, notify, scheme],
+  );
+  return { trainNerModel };
+}
+
+export function useDeleteNerModel(projectSlug: string | null) {
+  const { notify } = useNotifications();
+  const deleteNerModel = useCallback(
+    async (model_name: string) => {
+      if (projectSlug) {
+        const res = await api.POST('/models/ner/delete', {
+          params: { query: { project_slug: projectSlug, ner_name: model_name } },
+        });
+        if (!res.error) {
+          notify({ type: 'success', message: 'NER model deleted.' });
+          window.dispatchEvent(new Event(PROJECTS_REFRESH_EVENT));
+        }
+        return true;
+      }
+      return null;
+    },
+    [projectSlug, notify],
+  );
+  return { deleteNerModel };
+}
+
+export function useRenameNerModel(projectSlug: string | null) {
+  const { notify } = useNotifications();
+  const renameNerModel = useCallback(
+    async (former_model_name: string, new_model_name: string) => {
+      if (projectSlug) {
+        const res = await api.POST('/models/ner/rename', {
+          params: {
+            query: {
+              project_slug: projectSlug,
+              former_name: former_model_name,
+              new_name: new_model_name,
+            },
+          },
+        });
+        if (!res.error) notify({ type: 'success', message: 'NER model renamed.' });
+        return true;
+      }
+      return null;
+    },
+    [projectSlug, notify],
+  );
+  return { renameNerModel };
+}
+
+/**
+ * Train an image-classification model on an image project.
+ */
+export function useTrainImageModel(projectSlug: string | null, scheme: string | null) {
+  const { notify } = useNotifications();
+  const trainImageModel = useCallback(
+    async (dataForm: newImageModel) => {
+      if (projectSlug && scheme && dataForm) {
+        const res = await api.POST('/models/image/train', {
+          params: {
+            query: { project_slug: projectSlug },
+          },
+          body: {
+            project_slug: projectSlug,
+            scheme: scheme,
+            base_model: dataForm.base,
+            name: dataForm.name || '',
+            test_size: dataForm.test_size ?? 0.2,
+            params: dataForm.parameters,
+            class_balance: dataForm.class_balance || false,
+            loss: dataForm.loss || 'cross_entropy',
+            class_min_freq: dataForm.class_min_freq || 1,
+            exclude_labels: dataForm.exclude_labels || [],
+            fp16: dataForm.fp16,
+          },
+        });
+        if (!res.error) notify({ type: 'warning', message: 'Image model training.' });
+        return true;
+      }
+      return null;
+    },
+    [projectSlug, notify, scheme],
+  );
+
+  return { trainImageModel };
+}
+
+/**
+ * Rename image-classification model
+ */
+export function useRenameImageModel(projectSlug: string | null) {
+  const { notify } = useNotifications();
+  const renameImageModel = useCallback(
+    async (former_model_name: string, new_model_name: string) => {
+      if (projectSlug) {
+        const res = await api.POST('/models/image/rename', {
+          params: {
+            query: {
+              project_slug: projectSlug,
+              former_name: former_model_name,
+              new_name: new_model_name,
+            },
+          },
+        });
+        if (!res.error) notify({ type: 'success', message: 'Model renamed.' });
+        return true;
+      }
+      return null;
+    },
+    [projectSlug, notify],
+  );
+
+  return { renameImageModel };
+}
+
+/**
+ * Delete image-classification model
+ */
+export function useDeleteImageModel(projectSlug: string | null) {
+  const { notify } = useNotifications();
+  const deleteImageModel = useCallback(
+    async (model_name: string) => {
+      if (projectSlug) {
+        const res = await api.POST('/models/image/delete', {
+          params: {
+            query: {
+              project_slug: projectSlug,
+              image_name: model_name,
+            },
+          },
+        });
+        if (!res.error) notify({ type: 'success', message: 'Model deleted.' });
+        return true;
+      }
+      return null;
+    },
+    [projectSlug, notify],
+  );
+
+  return { deleteImageModel };
 }
 
 /**
@@ -1381,12 +1906,13 @@ export function useGetFeaturesFile(projectSlug: string | null) {
 export function useGetProjectionFile(projectSlug: string | null) {
   const { notify } = useNotifications();
   const getProjectionFile = useCallback(
-    async (format: string) => {
-      if (projectSlug) {
+    async (format: string, projectionName: string) => {
+      if (projectSlug && projectionName) {
         const res = await api.GET('/export/projection', {
           params: {
             query: {
               project_slug: projectSlug,
+              projection_name: projectionName,
               format: format,
             },
           },
@@ -1395,7 +1921,7 @@ export function useGetProjectionFile(projectSlug: string | null) {
 
         if (!res.error) {
           notify({ type: 'success', message: 'Exporting the vizualisation.' });
-          saveAs(res.data, `projection_${projectSlug}.${format}`);
+          saveAs(res.data, `projection_${projectionName}.${format}`);
         }
         return true;
       }
@@ -1447,7 +1973,13 @@ export function useGetAnnotationsFile(projectSlug: string | null) {
 export function useGetPredictionsFile(projectSlug: string | null) {
   const { notify } = useNotifications();
   const getPredictionsFile = useCallback(
-    async (model: string, format: string, dataset: string = 'all', scheme: string = '') => {
+    async (
+      model: string,
+      format: string,
+      dataset: string = 'all',
+      scheme: string = '',
+      kind: string = 'bert',
+    ) => {
       if (projectSlug) {
         const res = await api.GET('/export/prediction', {
           params: {
@@ -1456,6 +1988,7 @@ export function useGetPredictionsFile(projectSlug: string | null) {
               name: model,
               format: format,
               dataset: dataset,
+              kind: kind,
             },
           },
           parseAs: 'blob',
@@ -1556,6 +2089,27 @@ export function useDropGeneratedElements(projectSlug: string | null, username: s
   return dropGeneratedElements;
 }
 
+// StreamSaver relies on a service worker registered from a third-party
+// iframe, which Safari blocks (and its streaming responses are unreliable
+// in WebKit anyway), so buffer the stream into a blob there instead.
+const isSafari =
+  typeof navigator !== 'undefined' && /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+
+async function saveStreamAs(stream: ReadableStream<Uint8Array>, fileName: string) {
+  if (!isSafari && window.WritableStream && stream.pipeTo) {
+    await stream.pipeTo(streamSaver.createWriteStream(fileName));
+  } else {
+    const reader = stream.getReader();
+    const chunks: BlobPart[] = [];
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) chunks.push(value as BlobPart);
+    }
+    saveAs(new Blob(chunks), fileName);
+  }
+}
+
 /**
  * Get model file
  */
@@ -1564,7 +2118,6 @@ export function useGetModelFile(projectSlug: string | null | undefined) {
 
   const getModelFile = useCallback(
     async (model: string | null) => {
-      const fileStream = streamSaver.createWriteStream(model + 'tar.gz');
       if (model && projectSlug) {
         const res = await api.GET('/export/bert', {
           params: {
@@ -1581,11 +2134,11 @@ export function useGetModelFile(projectSlug: string | null | undefined) {
           notify({ type: 'error', message: 'Error downloading the model.' });
           return null;
         }
-        // more optimized
-        if (window.WritableStream && readableStream.pipeTo) {
-          await readableStream.pipeTo(fileStream);
+        try {
+          await saveStreamAs(readableStream, model + '.tar.gz');
           notify({ type: 'success', message: 'Model downloaded.' });
-        } else {
+        } catch (e) {
+          console.error(e);
           notify({ type: 'error', message: 'Error downloading the model.' });
         }
       }
@@ -1605,7 +2158,6 @@ export function useGetRawDataFile(projectSlug: string | null | undefined) {
 
   const getRawDataFile = useCallback(async () => {
     if (projectSlug) {
-      const fileStream = streamSaver.createWriteStream(projectSlug + '_dataset.parquet');
       const res = await api.GET('/export/raw', {
         params: {
           query: {
@@ -1617,15 +2169,15 @@ export function useGetRawDataFile(projectSlug: string | null | undefined) {
 
       const readableStream = res.data;
       if (!readableStream) {
-        notify({ type: 'error', message: 'Error downloading the model.' });
+        notify({ type: 'error', message: 'Error downloading the dataset.' });
         return null;
       }
-      // more optimized
-      if (window.WritableStream && readableStream.pipeTo) {
-        await readableStream.pipeTo(fileStream);
-        notify({ type: 'success', message: 'Model downloaded.' });
-      } else {
-        notify({ type: 'error', message: 'Error downloading the model.' });
+      try {
+        await saveStreamAs(readableStream, projectSlug + '_dataset.parquet');
+        notify({ type: 'success', message: 'Dataset downloaded.' });
+      } catch (e) {
+        console.error(e);
+        notify({ type: 'error', message: 'Error downloading the dataset.' });
       }
     }
     return true;
@@ -1708,6 +2260,7 @@ export function useUpdateProjection(
             },
           },
           body: {
+            name: formData.name,
             method: formData.method,
             features: formData.features,
             parameters: formData.parameters,
@@ -1715,6 +2268,7 @@ export function useUpdateProjection(
           },
         });
         if (!res.error) notify({ type: 'warning', message: 'Computing visualization.' });
+        else notify({ type: 'error', message: 'Error computing visualization.' });
       }
       return true;
     },
@@ -1725,22 +2279,45 @@ export function useUpdateProjection(
 }
 
 /**
- * Get projection data
+ * Delete a named projection
+ */
+export function useDeleteProjection(projectSlug: string | null | undefined) {
+  const { notify } = useNotifications();
+  const deleteProjection = useCallback(
+    async (projectionName: string | null) => {
+      if (projectSlug && projectionName) {
+        const res = await api.POST('/elements/projection/delete', {
+          params: {
+            query: { project_slug: projectSlug, projection_name: projectionName },
+          },
+        });
+        if (!res.error) notify({ type: 'success', message: 'Projection deleted.' });
+      }
+    },
+    [projectSlug, notify],
+  );
+  return deleteProjection;
+}
+
+/**
+ * Get projection data for a named projection
  */
 export function useGetProjectionData(
   projectSlug: string | undefined | null,
   scheme: string | undefined | null,
+  projectionName: string | undefined | null,
   activeModel: ActiveModel | null,
 ) {
   const [fetchTrigger, setFetchTrigger] = useState<boolean>(false);
 
   const getProjectionData = useAsyncMemo(async () => {
-    if (scheme && projectSlug) {
+    if (scheme && projectSlug && projectionName) {
       const res = await api.GET('/elements/projection', {
         params: {
           query: {
             project_slug: projectSlug,
             scheme: scheme,
+            projection_name: projectionName,
             model_name: activeModel ? activeModel.value : null,
             model_type: activeModel ? activeModel.type : null,
           },
@@ -1752,7 +2329,7 @@ export function useGetProjectionData(
       }
     }
     return null;
-  }, [fetchTrigger, scheme]);
+  }, [fetchTrigger, scheme, projectionName]);
 
   const reFetch = useCallback(() => setFetchTrigger((f) => !f), []);
 
@@ -1908,6 +2485,7 @@ export async function getProjectGenModels(
       // Transform null to undefined
       endpoint: model.endpoint || undefined,
       credentials: model.credentials || undefined,
+      saved_credentials: model.saved_credentials || undefined,
     }));
 }
 
@@ -1948,6 +2526,30 @@ export async function fetchOllamaModels(
   return res.json();
 }
 
+export async function fetchOpenAICompatibleModels(
+  endpoint?: string,
+  credentials?: string,
+  savedCredentials?: string,
+): Promise<Array<{ slug: string; name: string }>> {
+  const baseUrl = config.api.url.replace(/\/+$/, '');
+  const params = new URLSearchParams();
+  if (endpoint) params.append('endpoint', endpoint);
+  if (credentials) params.append('credentials', credentials);
+  if (savedCredentials) params.append('saved_credentials', savedCredentials);
+  const url = `${baseUrl}/generate/openai/models?${params.toString()}`;
+  const auth = JSON.parse(localStorage.getItem('activeTigger.auth') || '{}');
+  const res = await fetch(url, {
+    headers: {
+      ...(auth.access_token ? { Authorization: `Bearer ${auth.access_token}` } : {}),
+    },
+  });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => null);
+    throw new Error(detail?.detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
 /**
  * Post generate data
  */
@@ -1961,6 +2563,7 @@ export function useGenerate(
   dataset: string | null,
   token?: string,
   promptName?: string,
+  n_workers?: number | null,
 ) {
   const { notify } = useNotifications();
   const generate = useCallback(async () => {
@@ -1975,6 +2578,7 @@ export function useGenerate(
           model_id: modelId,
           prompt: prompt,
           n_batch: n_batch,
+          n_workers: n_workers && n_workers > 0 ? n_workers : 1,
           token: token,
           scheme: currentScheme,
           mode: mode,
@@ -1991,6 +2595,7 @@ export function useGenerate(
     modelId,
     prompt,
     n_batch,
+    n_workers,
     currentScheme,
     mode,
     dataset,
@@ -2127,6 +2732,56 @@ export function useChangeEmail() {
   );
 
   return { changeEmail };
+}
+
+/**
+ * Saved endpoint/credentials of the current user (secrets stay in the backend)
+ */
+export function useUserCredentials(refreshKey: unknown = 0) {
+  const result = useAsyncMemo(async () => {
+    const res = await api.GET('/users/credentials', {});
+    if (res.data && !res.error) return res.data;
+    return [];
+  }, [refreshKey]);
+  return { userCredentials: getAsyncMemoData(result) };
+}
+
+export function useAddUserCredentials() {
+  const { notify } = useNotifications();
+  const addUserCredentials = useCallback(
+    async (credential: UserCredentialInput) => {
+      const res = await api.POST('/users/credentials', {
+        body: credential,
+      });
+      if (res.error) {
+        notify({ type: 'error', message: formatApiError(res.error) });
+        return false;
+      }
+      notify({ type: 'success', message: 'Credentials saved.' });
+      return true;
+    },
+    [notify],
+  );
+  return { addUserCredentials };
+}
+
+export function useDeleteUserCredentials() {
+  const { notify } = useNotifications();
+  const deleteUserCredentials = useCallback(
+    async (name: string) => {
+      const res = await api.POST('/users/credentials/delete', {
+        params: { query: { name } },
+      });
+      if (res.error) {
+        notify({ type: 'error', message: formatApiError(res.error) });
+        return false;
+      }
+      notify({ type: 'success', message: 'Credentials deleted.' });
+      return true;
+    },
+    [notify],
+  );
+  return { deleteUserCredentials };
 }
 
 /**
@@ -2280,24 +2935,35 @@ export function useStopProcesses(projectSlug: string | null) {
   return { stopProcesses };
 }
 
+// what the annotations-import form provides: the API model with the csv
+// content in place of the upload_id the backend expects
+export type AnnotationsDataPayload = Omit<AnnotationsDataModel, 'upload_id'> & { csv: string };
+
 /**
  * Post annotation file
+ * The csv content is shipped as a chunked file upload, then referenced
+ * by upload_id in the (small) JSON payload.
  */
 export function usePostAnnotationsFile(projectSlug: string | null) {
   const { notify } = useNotifications();
+  const { uploadChunked } = useChunkedUpload();
   const postAnnotationsFile = useCallback(
-    async (annotationsset: AnnotationsDataModel) => {
+    async (annotationsset: AnnotationsDataPayload) => {
       if (!projectSlug) return;
+      // always a .csv name: the content is re-serialized csv even when the
+      // original file was parquet/xlsx, and the backend only accepts .csv here
+      const csvFile = new File([annotationsset.csv], 'annotations.csv', { type: 'text/csv' });
+      const { uploadId } = await uploadChunked(csvFile);
       const res = await api.POST('/annotation/file', {
         params: {
           query: { project_slug: projectSlug },
         },
-        body: annotationsset,
+        body: { ...omit(annotationsset, 'csv'), upload_id: uploadId },
       });
       if (!res.error) notify({ type: 'success', message: 'Annotations set uploaded.' });
       else throw new Error(formatApiError(res.error));
     },
-    [notify, projectSlug],
+    [notify, projectSlug, uploadChunked],
   );
   return postAnnotationsFile;
 }
@@ -2418,6 +3084,79 @@ export function useDeletePrompts(projectSlug: string | null) {
   return deletePrompts;
 }
 
+/**
+ * Multimodal prompt-based image selection hooks.
+ * These call /prompts/* which is not yet in the generated OpenAPI types,
+ * so we drop to raw fetch (same pattern as fetchOllamaModels).
+ * See docs/multimodal-prompt-selection.md.
+ */
+
+function _authHeaders(): Record<string, string> {
+  const auth = JSON.parse(localStorage.getItem('activeTigger.auth') || '{}');
+  return auth.access_token ? { Authorization: `Bearer ${auth.access_token}` } : {};
+}
+
+export function useAddImagePrompt(projectSlug: string | null) {
+  const { notify } = useNotifications();
+  const addPrompt = useCallback(
+    async (text: string, featureName: string) => {
+      if (!projectSlug || !text || !featureName) return null;
+      const baseUrl = config.api.url.replace(/\/+$/, '');
+      const url = `${baseUrl}/prompts/add?project_slug=${encodeURIComponent(projectSlug)}`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ..._authHeaders() },
+        body: JSON.stringify({ text, feature_name: featureName }),
+      });
+      if (!res.ok) {
+        const detail = await res.json().catch(() => null);
+        notify({ type: 'error', message: detail?.detail || `HTTP ${res.status}` });
+        return null;
+      }
+      notify({ type: 'info', message: 'Prompt is computing.' });
+      return (await res.json()) as { unique_id: string };
+    },
+    [projectSlug, notify],
+  );
+  return addPrompt;
+}
+
+export function useListImagePrompts(projectSlug: string | null) {
+  const [fetchTrigger, setFetchTrigger] = useState<boolean>(false);
+  const prompts = useAsyncMemo(async () => {
+    if (!projectSlug) return [] as PromptOutModel[];
+    const baseUrl = config.api.url.replace(/\/+$/, '');
+    const url = `${baseUrl}/prompts/list?project_slug=${encodeURIComponent(projectSlug)}`;
+    const res = await fetch(url, { headers: _authHeaders() });
+    if (!res.ok) return [] as PromptOutModel[];
+    return (await res.json()) as PromptOutModel[];
+  }, [projectSlug, fetchTrigger]);
+  const reFetch = useCallback(() => setFetchTrigger((f) => !f), []);
+  return { prompts: getAsyncMemoData(prompts) || [], reFetchImagePrompts: reFetch };
+}
+
+export function useDeleteImagePrompt(projectSlug: string | null) {
+  const { notify } = useNotifications();
+  const deletePrompt = useCallback(
+    async (promptId: string) => {
+      if (!projectSlug || !promptId) return false;
+      const baseUrl = config.api.url.replace(/\/+$/, '');
+      const url = `${baseUrl}/prompts/delete?project_slug=${encodeURIComponent(
+        projectSlug,
+      )}&prompt_id=${encodeURIComponent(promptId)}`;
+      const res = await fetch(url, { method: 'POST', headers: _authHeaders() });
+      if (!res.ok) {
+        notify({ type: 'error', message: `HTTP ${res.status}` });
+        return false;
+      }
+      notify({ type: 'success', message: 'Prompt deleted.' });
+      return true;
+    },
+    [projectSlug, notify],
+  );
+  return deletePrompt;
+}
+
 /***** MANAGE Files ******/
 
 /**
@@ -2449,107 +3188,6 @@ export async function getProjectStatus(projectSlug: string) {
   });
 
   return res.data;
-}
-
-/**
- * Add file for project creation
- */
-export function useAddProjectFile() {
-  const { authenticatedUser } = useAuth();
-
-  // state to monitor progression
-  const [progression, setProgression] = useState<{ loaded?: number; total?: number }>({});
-  // state to allow user top cancel operation
-  const [controller, setController] = useState<AbortController | undefined>(undefined);
-
-  // main callback to upload to API
-  const addProjectFile = useCallback(
-    async (project_name: string, file: File) => {
-      try {
-        // create a new controller
-        const controller = new AbortController();
-        // update state
-        setController(controller);
-        // use axios instead of openapi fetch to follow progression
-        const url = config.api.url.replace(/\/$/, '');
-        await axios.postForm(
-          `${url}/files/add/project`,
-          { file },
-          {
-            // signal to abort
-            signal: controller.signal,
-            params: {
-              project_name,
-            },
-            // add auth
-            headers: getAuthHeaders(authenticatedUser)?.headers,
-            // update progression state
-            onUploadProgress: (progressEvent) => {
-              const { loaded, total } = progressEvent;
-              setProgression({ loaded, total });
-            },
-          },
-        );
-      } finally {
-        // reset internal state
-        setProgression({});
-        setController(undefined);
-      }
-    },
-    [authenticatedUser, setController],
-  );
-
-  return {
-    addProjectFile,
-    progression,
-    cancel: controller,
-  };
-}
-
-/**
- * Add external dataset (TODO : merge with previous function)
- */
-export function useAddFile() {
-  const { notify } = useNotifications();
-  const { authenticatedUser } = useAuth();
-  const [progression, setProgression] = useState<{ loaded?: number; total?: number }>({});
-  const [controller, setController] = useState<AbortController | undefined>(undefined);
-  const addFile = useCallback(
-    async (project_slug: string, file: File) => {
-      try {
-        const controller = new AbortController();
-        setController(controller);
-        const url = config.api.url.replace(/\/$/, '');
-        await axios.postForm(
-          `${url}/files/add/dataset`,
-          { file },
-          {
-            signal: controller.signal,
-            params: {
-              project_slug,
-            },
-            headers: getAuthHeaders(authenticatedUser)?.headers,
-            onUploadProgress: (progressEvent) => {
-              const { loaded, total } = progressEvent;
-              setProgression({ loaded, total });
-            },
-          },
-        );
-        notify({ type: 'success', message: 'File uploaded' });
-      } finally {
-        // reset internal state
-        setProgression({});
-        setController(undefined);
-      }
-    },
-    [notify, authenticatedUser, setController],
-  );
-
-  return {
-    addFile,
-    progression,
-    cancel: controller,
-  };
 }
 
 /**
@@ -2842,19 +3480,64 @@ export function useSendResetMail() {
 export function useSendMessage() {
   const { notify } = useNotifications();
   const sendMessage = useCallback(
-    async (content: string, kind: string) => {
+    async (
+      content: string,
+      kind: string,
+      opts?: { for_user?: string | null; for_project?: string | null },
+    ) => {
       const res = await api.POST('/messages', {
         body: {
           content: content,
           kind: kind,
+          for_user: opts?.for_user ?? null,
+          for_project: opts?.for_project ?? null,
         },
       });
       if (!res.error) notify({ type: 'success', message: 'Message sent' });
+      return !res.error;
     },
     [notify],
   );
 
   return { sendMessage };
+}
+
+/**
+ * Inbox: DMs + project-distribution copies addressed to the caller.
+ */
+export function useGetInbox() {
+  const [fetchTrigger, setFetchTrigger] = useState<boolean>(false);
+
+  const getInbox = useAsyncMemo(async () => {
+    const res = await api.GET('/messages/inbox', {});
+    return res.data;
+  }, [fetchTrigger]);
+
+  const reFetch = useCallback(() => setFetchTrigger((f) => !f), []);
+
+  return { inbox: getAsyncMemoData(getInbox), reFetchInbox: reFetch };
+}
+
+/**
+ * Project messages still owned by the caller, for the Codebook page.
+ */
+export function useGetCodebookMessages(projectSlug: string | null) {
+  const [fetchTrigger, setFetchTrigger] = useState<boolean>(false);
+
+  const getCodebookMessages = useAsyncMemo(async () => {
+    if (!projectSlug) return [];
+    const res = await api.GET('/messages/codebook', {
+      params: { query: { project_slug: projectSlug } },
+    });
+    return res.data;
+  }, [projectSlug, fetchTrigger]);
+
+  const reFetch = useCallback(() => setFetchTrigger((f) => !f), []);
+
+  return {
+    codebookMessages: getAsyncMemoData(getCodebookMessages),
+    reFetchCodebookMessages: reFetch,
+  };
 }
 
 /**
@@ -2997,6 +3680,22 @@ export function useGetAllProjects() {
   return { allProjects: getAsyncMemoData(getAllProjects) || null, reFetchAllProjects: reFetch };
 }
 
+export function useGetMonitoringActivity(days: number = 7) {
+  const [fetchTrigger, setFetchTrigger] = useState<boolean>(false);
+
+  const getMonitoringActivity = useAsyncMemo(async () => {
+    const res = await api.GET('/monitoring/activity', { params: { query: { days } } });
+    if (res.data && !res.error) return res.data;
+    return null;
+  }, [fetchTrigger, days]);
+  const reFetch = useCallback(() => setFetchTrigger((f) => !f), []);
+
+  return {
+    activity: getAsyncMemoData(getMonitoringActivity) || null,
+    reFetchActivity: reFetch,
+  };
+}
+
 export function useAddSelfAsManager(reFetchAllProjects: () => void) {
   const { notify } = useNotifications();
   const { authenticatedUser } = useAuth();
@@ -3018,4 +3717,100 @@ export function useAddSelfAsManager(reFetchAllProjects: () => void) {
     [authenticatedUser, notify, reFetchAllProjects],
   );
   return { addSelfAsManager };
+}
+
+/**
+ * Dataset preparation tool : upload a file and get back the session with columns + preview
+ */
+export function useUploadPrepareFile() {
+  const { authenticatedUser } = useAuth();
+  const { uploadChunked, progression, cancel } = useChunkedUpload();
+
+  const uploadPrepareFile = useCallback(
+    async (file: File): Promise<PrepareSessionModel> => {
+      const url = config.api.url.replace(/\/$/, '');
+      const { uploadId } = await uploadChunked(file);
+      const res = await axios.post<PrepareSessionModel>(`${url}/toolbox/upload`, null, {
+        params: { upload_id: uploadId },
+        headers: getAuthHeaders(authenticatedUser)?.headers,
+      });
+      return res.data;
+    },
+    [authenticatedUser, uploadChunked],
+  );
+
+  return { uploadPrepareFile, progression, cancel };
+}
+
+/**
+ * Dataset preparation tool : launch the split task
+ */
+export function usePrepareSplit() {
+  const { notify } = useNotifications();
+  const prepareSplit = useCallback(
+    async (params: PrepareSplitModel) => {
+      const res = await api.POST('/toolbox/split', { body: params });
+      if (res.error) {
+        notify({ type: 'error', message: formatApiError(res.error) });
+        return null;
+      }
+      return res.data.task_id;
+    },
+    [notify],
+  );
+  return { prepareSplit };
+}
+
+/**
+ * Dataset preparation tool : stop a running split task
+ */
+export function useStopPrepareTask() {
+  const { notify } = useNotifications();
+  const stopPrepareTask = useCallback(
+    async (taskId: string) => {
+      const res = await api.POST('/toolbox/stop', {
+        params: { query: { task_id: taskId } },
+      });
+      if (res.error) {
+        notify({ type: 'error', message: formatApiError(res.error) });
+        return null;
+      }
+      return true;
+    },
+    [notify],
+  );
+  return { stopPrepareTask };
+}
+
+/**
+ * Dataset preparation tool : status of the split task as a function
+ */
+export async function getPrepareStatus(sessionId: string, taskId: string) {
+  const res = await api.GET('/toolbox/status', {
+    params: { query: { session_id: sessionId, task_id: taskId } },
+  });
+  return res.data;
+}
+
+/**
+ * Dataset preparation tool : download the prepared dataset
+ */
+export function useGetPreparedFile() {
+  const { notify } = useNotifications();
+  const getPreparedFile = useCallback(
+    async (sessionId: string, format: string) => {
+      const res = await api.GET('/toolbox/export', {
+        params: { query: { session_id: sessionId, format } },
+        parseAs: 'blob',
+      });
+      if (res.error) {
+        notify({ type: 'error', message: 'Could not download the prepared dataset' });
+        return null;
+      }
+      saveAs(res.data, `prepared_dataset.${format}`);
+      return true;
+    },
+    [notify],
+  );
+  return { getPreparedFile };
 }

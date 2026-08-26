@@ -15,6 +15,7 @@ export function useAnnotationSessionHistory() {
       label: string | undefined | null,
       comment?: string,
       skip?: boolean,
+      durationMs?: number,
     ) => {
       if (currentProject?.params.project_slug && currentScheme) {
         const historyPoint: ElementHistoryPoint = {
@@ -27,6 +28,7 @@ export function useAnnotationSessionHistory() {
           comment: comment,
           time: new Date().toISOString(),
           skip: skip,
+          durationMs: durationMs,
         };
         setAppContext((prev) => ({
           ...prev,

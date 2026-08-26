@@ -3,7 +3,7 @@ import { ChangeEvent, Dispatch, FC, SetStateAction, useEffect, useMemo, useState
 import { FaMapMarkedAlt } from 'react-icons/fa';
 import { GiTigerHead } from 'react-icons/gi';
 import { HiOutlineQuestionMarkCircle } from 'react-icons/hi';
-import { LuRefreshCw } from 'react-icons/lu';
+import { LuMaximize, LuMessageSquare, LuRefreshCw } from 'react-icons/lu';
 import { MdDisplaySettings } from 'react-icons/md';
 import Select from 'react-select';
 import { Tooltip } from 'react-tooltip';
@@ -13,6 +13,7 @@ import { useDebounceValue } from 'usehooks-ts';
 import { useGetQuickModel, useStatistics } from '../../core/api';
 import { useAppContext } from '../../core/useAppContext';
 import { isValidRegex } from '../../core/utils';
+import type { PromptsProjectStateModel } from '../../types';
 import { AnnotationTagFilterSelect } from './AnnotationTagFilterSelect';
 
 interface AnnotationModeFormProps {
@@ -20,6 +21,8 @@ interface AnnotationModeFormProps {
   setActiveMenu: Dispatch<SetStateAction<boolean>>;
   setShowDisplayViz: Dispatch<SetStateAction<boolean>>;
   setShowDisplayConfig: Dispatch<SetStateAction<boolean>>;
+  setShowFocusMode: Dispatch<SetStateAction<boolean>>;
+  setShowPromptsModal?: Dispatch<SetStateAction<boolean>>;
   nSample: number | null;
   statistics: ReturnType<typeof useStatistics>['statistics'];
 }
@@ -37,6 +40,8 @@ export const AnnotationModeForm: FC<AnnotationModeFormProps> = ({
   setActiveMenu,
   setShowDisplayViz,
   setShowDisplayConfig,
+  setShowFocusMode,
+  setShowPromptsModal,
   nSample,
   statistics,
 }) => {
@@ -48,6 +53,7 @@ export const AnnotationModeForm: FC<AnnotationModeFormProps> = ({
       activeModel,
       phase,
       currentProjection,
+      developmentMode,
     },
     setAppContext,
   } = useAppContext();
@@ -109,6 +115,16 @@ export const AnnotationModeForm: FC<AnnotationModeFormProps> = ({
           ? project?.next.methods.filter((m) => m !== 'maxprob')
           : project?.next.methods_min) || []
       ).map((mode) => ({ mode, label_prob: undefined }));
+      // Prompt selection doesn't need an active model — surface it whenever
+      // the backend exposes it (embedding feature + saved prompt), but only
+      // in experimental (development) mode.
+      if (
+        developmentMode &&
+        (project?.next.methods || []).includes('prompt') &&
+        !modes.some((m) => m.mode === 'prompt')
+      ) {
+        modes.push({ mode: 'prompt', label_prob: undefined });
+      }
       const probLabels =
         phase === 'train' && activeModel
           ? availableLabels
@@ -125,12 +141,20 @@ export const AnnotationModeForm: FC<AnnotationModeFormProps> = ({
               ])
           : [];
       return [...modes, ...probLabels].map((o) => ({ ...o, value: optionValue(o) }));
-    }, [phase, activeModel, project?.next.methods, project?.next.methods_min, availableLabels]);
+    }, [
+      phase,
+      activeModel,
+      project?.next.methods,
+      project?.next.methods_min,
+      availableLabels,
+      developmentMode,
+    ]);
 
   // reset selection mode to "fixed" when the active model is deactivated
-  // and the current mode requires a model (e.g. maxprob, active)
+  // and the current mode requires a model (e.g. maxprob, active).
+  // "prompt" is model-independent, so it survives deactivation.
   useEffect(() => {
-    if (!activeModel && !['fixed', 'random'].includes(selectionConfig.mode)) {
+    if (!activeModel && !['fixed', 'random', 'prompt'].includes(selectionConfig.mode)) {
       const availableModes = project?.next.methods_min || [];
       if (!availableModes.includes(selectionConfig.mode)) {
         setAppContext((prev) => ({
@@ -144,6 +168,35 @@ export const AnnotationModeForm: FC<AnnotationModeFormProps> = ({
       }
     }
   }, [activeModel, selectionConfig.mode, project?.next.methods_min, setAppContext]);
+
+  // If the user turns experimental mode off while "prompt" is the active
+  // selection mode, fall back to "fixed" — otherwise the dropdown shows an
+  // orphaned value that is no longer in its options list.
+  useEffect(() => {
+    if (!developmentMode && selectionConfig.mode === 'prompt') {
+      setAppContext((prev) => ({
+        ...prev,
+        selectionConfig: {
+          ...prev.selectionConfig,
+          mode: 'fixed',
+          prompt_id: undefined,
+          similarity_range: undefined,
+          label_prob: undefined,
+        },
+      }));
+    }
+  }, [developmentMode, selectionConfig.mode, setAppContext]);
+
+  // "wrong predictions" sample requires an active model on the train phase;
+  // reset it to "all" when those conditions no longer hold.
+  useEffect(() => {
+    if (selectionConfig.sample === 'wrong' && (!activeModel || phase !== 'train')) {
+      setAppContext((prev) => ({
+        ...prev,
+        selectionConfig: { ...prev.selectionConfig, sample: 'all' },
+      }));
+    }
+  }, [activeModel, phase, selectionConfig.sample, setAppContext]);
 
   return (
     <form className="annotation-mode">
@@ -200,10 +253,12 @@ export const AnnotationModeForm: FC<AnnotationModeFormProps> = ({
             )}
             getOptionLabel={(o) =>
               o.mode === 'maxprob' && o.label_prob
-                ? `max pred ${o.label_prob}`
+                ? `max ${o.label_prob}`
                 : o.mode === 'active' && o.label_prob
                   ? `active ${o.label_prob}`
-                  : o.mode
+                  : o.mode === 'prompt'
+                    ? 'prompt (embedding)'
+                    : o.mode
             }
             onChange={(option) => {
               if (option !== null) {
@@ -213,12 +268,96 @@ export const AnnotationModeForm: FC<AnnotationModeFormProps> = ({
                     ...prev.selectionConfig,
                     mode: option.mode,
                     label_prob: option.label_prob,
+                    // Clear prompt_id when leaving prompt mode.
+                    prompt_id:
+                      option.mode === 'prompt' ? prev.selectionConfig.prompt_id : undefined,
                   },
                 }));
               }
             }}
           />
         </div>
+
+        {setShowPromptsModal && developmentMode && (
+          <div className="at-input-group">
+            <label className="small-gray">Prompts</label>
+            <div className="d-flex align-items-center gap-2">
+              <button
+                type="button"
+                className="button"
+                onClick={() => setShowPromptsModal(true)}
+                title="Manage prompts for embedding-based selection (experimental)"
+              >
+                <LuMessageSquare
+                  size={28}
+                  style={{
+                    color: selectionConfig.prompt_id ? 'green' : 'grey',
+                    cursor: 'pointer',
+                  }}
+                />
+              </button>
+              {selectionConfig.mode === 'prompt' &&
+                (() => {
+                  const promptsState = (
+                    project as unknown as { prompts?: PromptsProjectStateModel | null } | undefined
+                  )?.prompts;
+                  const available = promptsState?.available ?? [];
+                  if (available.length === 0) {
+                    return <small className="text-muted">No prompts — click to add one</small>;
+                  }
+                  return (
+                    <select
+                      className="form-select form-select-sm"
+                      style={{ maxWidth: '220px' }}
+                      value={selectionConfig.prompt_id ?? ''}
+                      onChange={(e) =>
+                        setAppContext((prev) => ({
+                          ...prev,
+                          selectionConfig: {
+                            ...prev.selectionConfig,
+                            prompt_id: e.target.value || undefined,
+                          },
+                        }))
+                      }
+                    >
+                      <option value="">— select a prompt —</option>
+                      {available.map((p) => (
+                        <option key={p.prompt_id} value={p.prompt_id}>
+                          {p.text.length > 40 ? p.text.slice(0, 40) + '…' : p.text}
+                        </option>
+                      ))}
+                    </select>
+                  );
+                })()}
+            </div>
+          </div>
+        )}
+        {selectionConfig.mode === 'prompt' && selectionConfig.prompt_id && (
+          <div className="at-input-group">
+            <label className="small-gray">
+              Max similarity: {(selectionConfig.similarity_range?.[1] ?? 1).toFixed(2)}
+            </label>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.01}
+              value={selectionConfig.similarity_range?.[1] ?? 1}
+              onChange={(e) => {
+                const hi = Number(e.target.value);
+                setAppContext((prev) => ({
+                  ...prev,
+                  selectionConfig: {
+                    ...prev.selectionConfig,
+                    similarity_range: hi >= 1 ? undefined : [0, hi],
+                  },
+                }));
+              }}
+              style={{ minWidth: 220 }}
+              title="Filter prompt selection to elements with similarity at most this value"
+            />
+          </div>
+        )}
       </div>
       {/* CONTENT */}
       <div>
@@ -230,29 +369,38 @@ export const AnnotationModeForm: FC<AnnotationModeFormProps> = ({
         {
           // input validated on deselect
         }
-        <div className="at-input-group">
-          <label htmlFor="select_regex" className=" small-gray">
-            Filter by content
-            <HiOutlineQuestionMarkCircle id="regex-tooltip" />
-          </label>
-          <input
-            className={classNames(
-              'searchhelp',
-              filterDebounced && !isValidRegex(filterDebounced) ? 'is-invalid' : '',
-            )}
-            type="text"
-            id="select_regex"
-            placeholder="Enter a regex"
-            defaultValue={selectionConfig.filter}
-            onChange={(e) => {
-              setFilter(e.target.value);
-            }}
-          />
-          <div className="invalid-feedback">Regex not valid</div>
-          <Tooltip anchorSelect="#regex-tooltip">
-            Use CONTEXT= or QUERY= for specific requests
-          </Tooltip>
-        </div>
+        {project?.params?.kind !== 'image' && (
+          <div className="at-input-group">
+            <label htmlFor="select_regex" className=" small-gray">
+              Filter by content
+              <HiOutlineQuestionMarkCircle id="regex-tooltip" />
+            </label>
+            <input
+              className={classNames(
+                'searchhelp',
+                filterDebounced && !isValidRegex(filterDebounced) ? 'is-invalid' : '',
+              )}
+              type="text"
+              id="select_regex"
+              placeholder="Enter a regex"
+              defaultValue={selectionConfig.filter}
+              onChange={(e) => {
+                setFilter(e.target.value);
+              }}
+            />
+            <div className="invalid-feedback">Regex not valid</div>
+            <Tooltip anchorSelect="#regex-tooltip">
+              Use CONTEXT= or QUERY= for specific requests
+            </Tooltip>
+          </div>
+        )}
+        {/*
+         * Image projects (experimental): regex input is hidden above, and
+         * UMAP click-to-select reuses the existing projection explorer
+         * rendered below (ProjectionExplorer branches on kind to show an
+         * image preview instead of the text snippet). No parallel selection
+         * panel is needed — see docs/image-projects-strategy.md.
+         */}
         {currentProjection && (
           <div>
             {/* LOCK on UMAP */}
@@ -307,6 +455,17 @@ export const AnnotationModeForm: FC<AnnotationModeFormProps> = ({
           <Tooltip anchorSelect=".getelement" place="top">
             Get next element with the selection mode
           </Tooltip>
+        </button>
+
+        <button
+          type="button"
+          className="btn-secondary-action"
+          onClick={() => {
+            setShowFocusMode(true);
+          }}
+          title="Focus mode: annotate in a distraction-free fullscreen view"
+        >
+          <LuMaximize size={20} />
         </button>
 
         <button

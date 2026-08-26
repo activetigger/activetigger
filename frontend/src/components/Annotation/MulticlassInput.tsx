@@ -87,7 +87,7 @@ export const MulticlassInput: FC<MulticlassInputProps> = ({
       if (activeModel && ev.code === 'KeyP') {
         postAnnotation(element?.predict.label || '', elementId, comment);
       }
-      if (ev.code === 'KeyS' && skipAnnotation) {
+      if ((ev.code === 'KeyS' || ev.key === 'ArrowRight') && skipAnnotation) {
         skipAnnotation();
       }
       if (ev.code === 'Delete') {
@@ -213,7 +213,7 @@ export const MulticlassInput: FC<MulticlassInputProps> = ({
             skipAnnotation();
           }}
         >
-          Skip <span className="badge hotkey">S</span>
+          Skip <span className="badge hotkey">→</span>
         </button>
       )}
 

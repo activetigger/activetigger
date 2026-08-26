@@ -1,4 +1,5 @@
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from pandas import DataFrame, Series
@@ -38,6 +39,7 @@ class GenerateCall(BaseTask):
         cols_context: list[str],
         dataset: str,
         prompt_name: str,
+        n_workers: int = 1,
     ):
         super().__init__()
         if path_process is None:
@@ -51,6 +53,7 @@ class GenerateCall(BaseTask):
         self.cols_context = cols_context
         self.dataset = dataset
         self.prompt_name = prompt_name
+        self.n_workers = max(1, int(n_workers))
 
     def _write_progress(self, progress: int):
         """
@@ -87,81 +90,86 @@ class GenerateCall(BaseTask):
 
         return callback
 
+    def _make_client(self) -> GenerationModelClient:
+        """
+        Build the generation client matching the configured API.
+        """
+        if self.model.api == "Ollama":
+            if self.model.endpoint is None:
+                raise Exception("You need to give an endpoint for the Ollama model")
+            return Ollama(self.model.endpoint)
+        if self.model.api == "OpenAI":
+            if self.model.credentials is None:
+                raise Exception("You need to give your API key to call an OpenAI model")
+            return OpenAI(self.model.credentials)
+        if self.model.api == "HuggingFace":
+            return HuggingFace(credentials=self.model.credentials, endpoint=self.model.endpoint)
+        if self.model.api == "OpenRouter":
+            return OpenRouter(credentials=self.model.credentials)
+        if self.model.api == "OpenAICompatible":
+            if not self.model.endpoint:
+                raise Exception("You need to provide an endpoint for the OpenAI-compatible model")
+            return OpenAPI(endpoint=self.model.endpoint, credentials=self.model.credentials)
+        raise Exception(f"Unknown model API: {self.model.api}")
+
     def __call__(self):
         """
-        Generate call for api
+        Manage batch generation request. Returns the list of GenerationResult.
+        Calls are issued through a thread pool sized by n_workers (1 = sequential).
         """
-        """
-        Manage batch generation request
-        Return table of results
-        """
-        # errors
         errors: list[Exception] = []
         results: list[GenerationResult] = []
         batch = f"{self.dataset}_{self.prompt_name}_{self.unique_id}"
         last_flushed = 0
         progress_path = self.path_process.joinpath(self.unique_id)
 
+        gen_model = self._make_client()
+        rows = list(self.df.iterrows())
+        total = len(rows)
+
+        def process_row(index, row) -> GenerationResult:
+            prompt_with_text = self.__replace_tags_with_text(row, self.prompt, self.cols_context)
+            response = gen_model.generate(prompt_with_text, self.model.slug)
+            return GenerationResult(
+                user=self.username,
+                project_slug=self.project_slug,
+                model_id=self.model.id,
+                element_id=str(index),
+                prompt=prompt_with_text,
+                answer=response,
+            )
+
         try:
-            # loop on all elements
-            c = 0
             self._write_progress(0)
-            for _index, row in self.df.iterrows():
-                # test for interruption
-                if self.event is not None:
-                    if self.event.is_set():
-                        if len(results) > last_flushed:
+            completed = 0
+            interrupted = False
+            with ThreadPoolExecutor(max_workers=self.n_workers) as executor:
+                futures = [executor.submit(process_row, idx, row) for idx, row in rows]
+                try:
+                    for future in as_completed(futures):
+                        if self.event is not None and self.event.is_set():
+                            interrupted = True
+                            for f in futures:
+                                f.cancel()
+                            break
+                        try:
+                            results.append(future.result())
+                        except Exception as e:
+                            errors.append(e)
+                        completed += 1
+                        self._write_progress(int((completed / total) * 100))
+                        if len(results) - last_flushed >= FLUSH_EVERY:
                             self._flush_to_jsonl(results[last_flushed:], batch)
-                        raise Exception("Process was interrupted")
+                            last_flushed = len(results)
+                except Exception:
+                    for f in futures:
+                        f.cancel()
+                    raise
 
-                prompt_with_text = self.__replace_tags_with_text(
-                    row, self.prompt, self.cols_context
-                )
-
-                # Get configured model
-
-                # make request to the client
-                gen_model: GenerationModelClient
-                if self.model.api == "Ollama":
-                    if self.model.endpoint is None:
-                        raise Exception("You need to give an endpoint for the Ollama model")
-                    gen_model = Ollama(self.model.endpoint)
-                elif self.model.api == "OpenAI":
-                    if self.model.credentials is None:
-                        raise Exception("You need to give your API key to call an OpenAI model")
-                    gen_model = OpenAI(self.model.credentials)
-                elif self.model.api == "HuggingFace":
-                    gen_model = HuggingFace(
-                        credentials=self.model.credentials, endpoint=self.model.endpoint
-                    )
-                elif self.model.api == "OpenRouter":
-                    gen_model = OpenRouter(credentials=self.model.credentials)
-                elif self.model.api == "ilaas":
-                    gen_model = OpenAPI(
-                        endpoint="https://llm.ilaas.fr/v1/chat/completions",
-                        credentials=self.model.credentials,
-                    )
-                else:
-                    errors.append(Exception("Model does not exist"))
-                    continue
-
-                response = gen_model.generate(prompt_with_text, self.model.slug)
-                results.append(
-                    GenerationResult(
-                        user=self.username,
-                        project_slug=self.project_slug,
-                        model_id=self.model.id,
-                        element_id=str(_index),
-                        prompt=prompt_with_text,
-                        answer=response,
-                    )
-                )
-                self._write_progress(int((c / len(self.df)) * 100))
-                c += 1
-
-                if c - last_flushed >= FLUSH_EVERY:
-                    self._flush_to_jsonl(results[last_flushed:c], batch)
-                    last_flushed = c
+            if interrupted:
+                if len(results) > last_flushed:
+                    self._flush_to_jsonl(results[last_flushed:], batch)
+                raise Exception("Process was interrupted")
 
             return results
         finally:

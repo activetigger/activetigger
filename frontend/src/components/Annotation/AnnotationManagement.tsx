@@ -11,7 +11,7 @@ import {
   useStatistics,
 } from '../../core/api';
 import { useAppContext } from '../../core/useAppContext';
-import { ElementOutModel } from '../../types';
+import { ElementOutModel, PromptsProjectStateModel, SelectionConfig } from '../../types';
 
 import MDEditor from '@uiw/react-md-editor';
 import classNames from 'classnames';
@@ -23,11 +23,45 @@ import { TagDisplayParameters } from '../TagDisplayParameters';
 import { DisplayProjection } from '../vizualisation/DisplayProjection';
 import { AnnotationHistoryList } from './AnnotationHistoryList';
 import { AnnotationModeForm } from './AnnotationMode';
+import { ImageClassificationPanelImagexp } from './ImageClassificationPanelImagexp';
+import { ImageGridAnnotationImagexp } from './ImageGridAnnotationImagexp';
 import { MulticlassInput } from './MulticlassInput';
 import { MultilabelInput } from './MultilabelInput';
+import { PromptsPanel } from './PromptsPanel';
 import { SelectActiveLearning } from './SelectActiveLearning';
 import { TextClassificationPanel } from './TextClassificationPanel';
 import { TextSpanPanel } from './TextSpanPanel';
+
+/**
+ * Drop references to labels that no longer exist in the scheme (after a label
+ * rename/merge, a label deletion or a scheme switch) from the persisted
+ * selection config
+ */
+const sanitizeSelectionConfig = (
+  config: SelectionConfig,
+  availableLabels: string[],
+): SelectionConfig => {
+  // no labels means the scheme/project is not loaded yet: don't touch anything
+  if (availableLabels.length === 0) return config;
+  const keptLabels = config.labels?.filter((label) => availableLabels.includes(label));
+  const labelsStale =
+    config.labels !== undefined &&
+    keptLabels !== undefined &&
+    keptLabels.length !== config.labels.length;
+  const labelProbStale =
+    config.label_prob !== undefined && !availableLabels.includes(config.label_prob);
+  if (!labelsStale && !labelProbStale) return config;
+  const sanitized = { ...config };
+  if (labelsStale) {
+    sanitized.labels = keptLabels && keptLabels.length > 0 ? keptLabels : undefined;
+  }
+  if (labelProbStale) {
+    // maxprob requires a target label; active without a label falls back to entropy
+    sanitized.label_prob = undefined;
+    if (config.mode === 'maxprob') sanitized.mode = 'fixed';
+  }
+  return sanitized;
+};
 
 export const AnnotationManagement: FC = () => {
   const { notify } = useNotifications();
@@ -43,6 +77,8 @@ export const AnnotationManagement: FC = () => {
     history,
     selectionHistory,
     phase,
+    currentProjectionName,
+    developmentMode,
   } = appContext;
 
   const navigate = useNavigate();
@@ -61,9 +97,32 @@ export const AnnotationManagement: FC = () => {
   const [element, setElement] = useState<ElementOutModel | null>(null); //state for the current element
   const [nSample, setNSample] = useState<number | null>(null); // specific info
 
+  // timestamp at which the current element was displayed, used to compute
+  // mean annotation duration in the status notch.
+  const elementDisplayedAtRef = useRef<{ id: string; at: number } | null>(null);
+
+  // Metadata returned by /elements/next (selection mode, prompt similarity/rank)
+  // is keyed by element_id so it survives the navigation + getElementById round-
+  // trip and gets merged onto the displayed element. Stored in a ref because
+  // updates here should not trigger re-renders.
+  const nextSelectionMeta = useRef<
+    Record<
+      string,
+      {
+        selection?: string | null;
+        similarity?: number | null;
+        rank?: number | null;
+      }
+    >
+  >({});
+
   const [showDisplayConfig, setShowDisplayConfig] = useState<boolean>(false);
   const [showDisplayViz, setShowDisplayViz] = useState<boolean>(false);
+  // focus mode: render the annotation block alone in a fullscreen modal.
+  // Deliberately not persisted so a reload always comes back to the normal page.
+  const [showFocusMode, setShowFocusMode] = useState<boolean>(false);
   const [showCodebook, setShowCodebook] = useState<boolean>(false);
+  const [showPromptsModal, setShowPromptsModal] = useState<boolean>(false);
   const { codebook } = useGetSchemeCodebook(projectName || null, currentScheme || null);
   const [selectFirstModelTrained, setSelectFirstModelTrained] = useState<boolean>(false);
   const [authorizeRetraining, setAuthorizeRetraining] = useState<boolean>(false);
@@ -78,12 +137,44 @@ export const AnnotationManagement: FC = () => {
     }
   };
 
+  // labels of the current scheme
+  const availableLabels =
+    currentScheme && project && project.schemes.available[currentScheme]
+      ? project.schemes.available[currentScheme].labels
+      : [];
+  // keyed off label *content*: the project polling rebuilds the array
+  // reference every ~2s even when the labels are unchanged
+  const availableLabelsKey = availableLabels.join('|');
+
+  // selection config with stale label references removed; used for every
+  // /elements/next call so a label rename/merge or deletion can never send a
+  // filter on a label that no longer exists
+  const sanitizedSelectionConfig = useMemo(
+    () => sanitizeSelectionConfig(selectionConfig, availableLabels),
+    // availableLabels is read but tracked via availableLabelsKey (content-stable)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selectionConfig, availableLabelsKey],
+  );
+
+  // write the sanitized config back to the context so the UI
+  useEffect(() => {
+    if (sanitizedSelectionConfig !== selectionConfig) {
+      setAppContext((prev) => ({
+        ...prev,
+        selectionConfig: sanitizeSelectionConfig(prev.selectionConfig, availableLabels),
+      }));
+    }
+    // availableLabels is read but tracked via sanitizedSelectionConfig (memo above)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sanitizedSelectionConfig, selectionConfig, setAppContext]);
+
   // hooks to manage element
   const historyIds = useMemo(() => history.map((h) => h.element_id), [history]);
   const { getNextElementId } = useGetNextElementId(
     projectName || null,
     currentScheme || null,
-    selectionConfig,
+    currentProjectionName || null,
+    sanitizedSelectionConfig,
     historyIds,
     effectivePhase,
     activeModel || null,
@@ -101,15 +192,34 @@ export const AnnotationManagement: FC = () => {
   const { addElementInAnnotationSessionHistory } = useAnnotationSessionHistory();
 
   // define parameters for configuration panels
-  const availableLabels =
-    currentScheme && project && project.schemes.available[currentScheme]
-      ? project.schemes.available[currentScheme].labels
-      : [];
   const [kindScheme] = useState<string>(
     currentScheme && project && project.schemes.available[currentScheme]
       ? project.schemes.available[currentScheme].kind || 'multiclass'
       : 'multiclass',
   );
+
+  // experimental image grid batch annotation: image projects, multiclass
+  // schemes, train dataset, experimental mode only
+  const imageGridActive =
+    !!displayConfig.imageGridMode &&
+    project?.params?.kind === 'image' &&
+    kindScheme === 'multiclass' &&
+    developmentMode &&
+    effectivePhase === 'train';
+
+  // turn the grid mode off when experimental mode is disabled or the current
+  // project is not an image project (same pattern as the prompt selection mode)
+  useEffect(() => {
+    if (
+      displayConfig.imageGridMode &&
+      (!developmentMode || (project?.params && project.params.kind !== 'image'))
+    ) {
+      setAppContext((prev) => ({
+        ...prev,
+        displayConfig: { ...prev.displayConfig, imageGridMode: false },
+      }));
+    }
+  }, [developmentMode, displayConfig.imageGridMode, project?.params, setAppContext]);
 
   // get statistics to display
   const { statistics, reFetchStatistics } = useStatistics(
@@ -120,6 +230,11 @@ export const AnnotationManagement: FC = () => {
   // react to URL param change
   useEffect(() => {
     resetScroll();
+    // the grid annotation mode manages its own batch fetching: don't fetch
+    // or navigate to a single next element while it is active
+    if (imageGridActive) {
+      return;
+    }
     if (elementId === 'noelement') {
       return;
     }
@@ -127,11 +242,19 @@ export const AnnotationManagement: FC = () => {
       getNextElementId().then((res) => {
         if (res && res.n_sample) setNSample(res.n_sample);
         if (res && res.element_id) {
+          // stash the prompt similarity/rank info so we can merge it onto the
+          // element after getElementById resolves (that endpoint doesn't carry
+          // the selection-time metadata).
+          nextSelectionMeta.current[res.element_id] = {
+            selection: res.selection,
+            similarity: res.similarity,
+            rank: res.rank,
+          };
           setAppContext((prev) => ({
             ...prev,
             selectionHistory: {
               ...prev.selectionHistory,
-              [res.element_id]: JSON.stringify(selectionConfig),
+              [res.element_id]: JSON.stringify(sanitizedSelectionConfig),
             },
           }));
           // redirect to the next element page replacing history
@@ -145,9 +268,21 @@ export const AnnotationManagement: FC = () => {
       // only if id changed compared to the previous one (otherwise, a change in phase would trigger a reload)
       if (element?.element_id !== elementId) {
         getElementById(elementId, effectivePhase)
-          .then((element) => {
-            if (element) setElement(element);
-            else {
+          .then((fetched) => {
+            if (fetched) {
+              const meta = nextSelectionMeta.current[fetched.element_id];
+              if (meta) {
+                // overlay selection-time metadata coming from /elements/next
+                setElement({
+                  ...fetched,
+                  selection: meta.selection ?? fetched.selection,
+                  similarity: meta.similarity ?? fetched.similarity,
+                  rank: meta.rank ?? fetched.rank,
+                });
+              } else {
+                setElement(fetched);
+              }
+            } else {
               navigate(`/projects/${projectName}/tag/noelement`);
               setElement(null);
             }
@@ -166,20 +301,40 @@ export const AnnotationManagement: FC = () => {
     effectivePhase,
     projectName,
     reFetchStatistics,
-    selectionConfig,
+    sanitizedSelectionConfig,
     setAppContext,
     notify,
     element,
+    imageGridActive,
   ]);
+
+  // mark the moment the current element became visible to the user
+  useEffect(() => {
+    if (element?.element_id && element.element_id !== 'noelement') {
+      elementDisplayedAtRef.current = { id: element.element_id, at: Date.now() };
+    }
+  }, [element?.element_id]);
 
   const postAnnotation = useCallback(
     async (label: string | null, elementId: string, comment?: string) => {
       if (elementId === 'noelement') return; // forbid annotation on noelement
       if (elementId) {
+        const displayedInfo = elementDisplayedAtRef.current;
+        const durationMs =
+          displayedInfo && displayedInfo.id === elementId
+            ? Date.now() - displayedInfo.at
+            : undefined;
         await addAnnotation(elementId, label, comment || null, selectionHistory[elementId]);
         const newElement = await getElementById(elementId, effectivePhase);
         if (newElement) {
-          addElementInAnnotationSessionHistory(elementId, newElement.text, label, comment);
+          addElementInAnnotationSessionHistory(
+            elementId,
+            newElement.text,
+            label,
+            comment,
+            undefined,
+            durationMs,
+          );
           setElement(newElement);
           // wait for 500ms before fetch new element to see new button state
           setTimeout(() => {
@@ -259,7 +414,7 @@ export const AnnotationManagement: FC = () => {
   useEffect(() => {
     // fetch next element in the new phase
     // only if there is one current element to avoid triggering fetchnext at page load
-    if (element !== null) {
+    if (element !== null && !imageGridActive) {
       fetchNextElement();
     }
     // disabling echaustive deps as we only want to track phase to avoid unnecessary fetchNext
@@ -267,7 +422,7 @@ export const AnnotationManagement: FC = () => {
   }, [effectivePhase]);
 
   useEffect(() => {
-    if (element !== null) {
+    if (element !== null && !imageGridActive) {
       fetchNextElement();
     }
     // disabling echaustive deps as we only want to track phase to avoid unnecessary fetchNext
@@ -280,19 +435,11 @@ export const AnnotationManagement: FC = () => {
     (hp) => hp.dataset === 'train' && hp.project_slug === projectName && !hp.skip,
   );
 
-  return (
+  // The annotation area (element + tag inputs) is built once and rendered
+  // either in place or inside the focus-mode modal — never both: the tag
+  // inputs attach document-level keyboard shortcuts that must stay unique.
+  const annotationArea = (
     <>
-      {/**
-       * Annotation mode form
-       **/}
-      <AnnotationModeForm
-        fetchNextElement={fetchNextElement}
-        setActiveMenu={setActiveMenu}
-        setShowDisplayViz={setShowDisplayViz}
-        setShowDisplayConfig={setShowDisplayConfig}
-        nSample={nSample}
-        statistics={statistics}
-      />
       {elementId === 'noelement' && (
         <div className="alert horizontal center">
           No element available
@@ -309,27 +456,42 @@ export const AnnotationManagement: FC = () => {
           'annotation-block',
           (displayConfig.forceOneColumnLayout || kindScheme == 'multilabel') &&
             'force-one-column-layout',
+          project?.params?.kind === 'image' &&
+            kindScheme === 'multilabel' &&
+            'image-multilabel-wide',
         )} // add class to force bottom if settings OR multiclass label
         style={
           {
-            '--text-width': `${displayConfig.textFrameWidth}%`,
+            '--text-width': showFocusMode
+              ? `${displayConfig.focusTextWidth ?? 70}%`
+              : `${displayConfig.textFrameWidth}%`,
           } as CSSProperties
         }
       >
         {elementId !== 'noelement' &&
           (kindScheme !== 'span' ? (
             <>
-              <TextClassificationPanel
-                element={element as ElementOutModel}
-                displayConfig={displayConfig}
-                textInFrame={textInFrame}
-                textOutFrame={textOutFrame}
-                validHighlightText={validHighlightText}
-                elementId={elementId as string}
-                lastTag={lastTag as string}
-                phase={effectivePhase}
-                frameRef={frameRef as unknown as HTMLDivElement}
-              />
+              {project?.params?.kind === 'image' ? (
+                <ImageClassificationPanelImagexp
+                  element={element as ElementOutModel}
+                  displayConfig={displayConfig}
+                  elementId={elementId as string}
+                  projectSlug={project.params.project_slug}
+                  frameRef={frameRef as unknown as HTMLDivElement}
+                />
+              ) : (
+                <TextClassificationPanel
+                  element={element as ElementOutModel}
+                  displayConfig={displayConfig}
+                  textInFrame={textInFrame}
+                  textOutFrame={textOutFrame}
+                  validHighlightText={validHighlightText}
+                  elementId={elementId as string}
+                  lastTag={lastTag as string}
+                  phase={effectivePhase}
+                  frameRef={frameRef as unknown as HTMLDivElement}
+                />
+              )}
             </>
           ) : (
             <>
@@ -367,6 +529,37 @@ export const AnnotationManagement: FC = () => {
           </>
         )}
       </div>
+    </>
+  );
+
+  return (
+    <>
+      {/**
+       * Annotation mode form
+       **/}
+      <AnnotationModeForm
+        fetchNextElement={fetchNextElement}
+        setActiveMenu={setActiveMenu}
+        setShowDisplayViz={setShowDisplayViz}
+        setShowDisplayConfig={setShowDisplayConfig}
+        setShowPromptsModal={setShowPromptsModal}
+        setShowFocusMode={setShowFocusMode}
+        nSample={nSample}
+        statistics={statistics}
+      />
+      {imageGridActive && project?.params?.project_slug ? (
+        <ImageGridAnnotationImagexp
+          projectSlug={project.params.project_slug}
+          scheme={currentScheme}
+          selectionConfig={sanitizedSelectionConfig}
+          phase={effectivePhase}
+          availableLabels={availableLabels}
+          gridSize={displayConfig.imageGridSize ?? 3}
+          onValidated={reFetchStatistics}
+        />
+      ) : (
+        !showFocusMode && annotationArea
+      )}
 
       <div>
         {displayConfig.displayHistory ? (
@@ -423,6 +616,61 @@ export const AnnotationManagement: FC = () => {
           </div>
         </Modal.Body>
       </Modal>
+      <Modal
+        show={showFocusMode}
+        onHide={() => setShowFocusMode(false)}
+        fullscreen={true}
+        id="focus-modal"
+      >
+        <Modal.Header closeButton>
+          <Modal.Title>Focus</Modal.Title>
+          <div className="focus-modal-controls">
+            <label>
+              <span className="small-gray">Text size {displayConfig.focusFontSize ?? 100}%</span>
+              <input
+                type="range"
+                min={60}
+                max={200}
+                step={10}
+                value={displayConfig.focusFontSize ?? 100}
+                onChange={(e) =>
+                  setAppContext((prev) => ({
+                    ...prev,
+                    displayConfig: {
+                      ...prev.displayConfig,
+                      focusFontSize: Number(e.target.value),
+                    },
+                  }))
+                }
+              />
+            </label>
+            <label>
+              <span className="small-gray">Width {displayConfig.focusTextWidth ?? 70}%</span>
+              <input
+                type="range"
+                min={40}
+                max={100}
+                step={5}
+                value={displayConfig.focusTextWidth ?? 70}
+                onChange={(e) =>
+                  setAppContext((prev) => ({
+                    ...prev,
+                    displayConfig: {
+                      ...prev.displayConfig,
+                      focusTextWidth: Number(e.target.value),
+                    },
+                  }))
+                }
+              />
+            </label>
+          </div>
+        </Modal.Header>
+        <Modal.Body
+          style={{ '--focus-font-size': displayConfig.focusFontSize ?? 100 } as CSSProperties}
+        >
+          {!imageGridActive && annotationArea}
+        </Modal.Body>
+      </Modal>
       <Modal show={showDisplayConfig} onHide={handleCloseConfig} size="sm" id="config-modal">
         <Modal.Header closeButton>
           <Modal.Title>Configuration</Modal.Title>
@@ -437,6 +685,25 @@ export const AnnotationManagement: FC = () => {
         </Modal.Header>
         <Modal.Body data-color-mode="light">
           <MDEditor.Markdown source={codebook || ''} style={{ backgroundColor: 'transparent' }} />
+        </Modal.Body>
+      </Modal>
+      <Modal
+        show={showPromptsModal}
+        onHide={() => setShowPromptsModal(false)}
+        size="lg"
+        id="prompts-modal"
+      >
+        <Modal.Header closeButton>
+          <Modal.Title>Prompts for embedding-based selection</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          {project?.params?.project_slug && (
+            <PromptsPanel
+              projectSlug={project.params.project_slug}
+              state={(project as unknown as { prompts?: PromptsProjectStateModel | null }).prompts}
+              currentText={project.params.kind !== 'image' ? element?.text ?? undefined : undefined}
+            />
+          )}
         </Modal.Body>
       </Modal>
     </>

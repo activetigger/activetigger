@@ -42,6 +42,46 @@ class MessagesService:
         session.commit()
         session.close()
 
+    def add_messages_bulk(
+        self,
+        user_name: str,
+        content: str,
+        kind: str,
+        recipients: list[str],
+        for_project: str | None = None,
+        property: dict | None = None,
+    ) -> int:
+        """
+        Insert one message row per recipient in a single transaction.
+        Used by both project-distribution (N rows) and DM (1 row) flows.
+        Returns the number of rows inserted.
+        """
+        if not recipients:
+            return 0
+        if not property:
+            property = {}
+        now = datetime.now(timezone.utc)
+        session = self.Session()
+        try:
+            session.add_all(
+                [
+                    Messages(
+                        created_by=user_name,
+                        time=now,
+                        content=content,
+                        kind=kind,
+                        property=property,
+                        for_project=for_project,
+                        for_user=recipient,
+                    )
+                    for recipient in recipients
+                ]
+            )
+            session.commit()
+            return len(recipients)
+        finally:
+            session.close()
+
     def delete_message(self, id: int):
         """
         Delete a message by its ID.
@@ -52,6 +92,27 @@ class MessagesService:
             session.delete(message)
             session.commit()
         session.close()
+
+    def delete_message_for_user(self, id: int, user_name: str) -> bool:
+        """
+        Delete a message only if it is addressed to the given user
+        (i.e. row.for_user == user_name). Returns False if no such row
+        exists, so the caller can map that to a 403/404.
+        """
+        session = self.Session()
+        try:
+            message = (
+                session.query(Messages)
+                .filter(Messages.id == id, Messages.for_user == user_name)
+                .first()
+            )
+            if message is None:
+                return False
+            session.delete(message)
+            session.commit()
+            return True
+        finally:
+            session.close()
 
     def get_messages_system(self, from_user: str | None = None) -> list[Messages]:
         """
@@ -97,3 +158,43 @@ class MessagesService:
         )
         session.close()
         return messages
+
+    def get_inbox_for_user(self, user_name: str) -> list[Messages]:
+        """
+        Inbox for a user: every message row addressed to them, whether it is a
+        direct message (kind='user') or a project-distribution copy
+        (kind='project'). Ordered by time desc.
+        """
+        session = self.Session()
+        try:
+            return (
+                session.query(Messages)
+                .filter(
+                    Messages.for_user == user_name,
+                    Messages.kind.in_(("user", "project")),
+                )
+                .order_by(Messages.time.desc())
+                .all()
+            )
+        finally:
+            session.close()
+
+    def get_codebook_messages(self, user_name: str, project_slug: str) -> list[Messages]:
+        """
+        Project-distribution copies still owned by `user_name` for a given
+        project. Used to surface project messages on the Codebook page.
+        """
+        session = self.Session()
+        try:
+            return (
+                session.query(Messages)
+                .filter(
+                    Messages.kind == "project",
+                    Messages.for_project == project_slug,
+                    Messages.for_user == user_name,
+                )
+                .order_by(Messages.time.desc())
+                .all()
+            )
+        finally:
+            session.close()

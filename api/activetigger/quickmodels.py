@@ -1,14 +1,14 @@
 import os
 import pickle
 import shutil
-import time
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
+from fastapi.responses import FileResponse
 from pandas import DataFrame
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
@@ -17,8 +17,10 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.preprocessing import StandardScaler
 
 from activetigger.config import config
+from activetigger.data import Data
 from activetigger.datamodels import (
     KnnParams,
+    LMComputingOutModel,
     LogisticL1Params,
     LogisticL2Params,
     ModelDescriptionModel,
@@ -30,13 +32,18 @@ from activetigger.datamodels import (
     QuickModelComputing,
     QuickModelsProjectStateModel,
     RandomforestParams,
+    TextDatasetModel,
 )
 from activetigger.db.languagemodels import ModelsService
 from activetigger.db.manager import DatabaseManager
-from activetigger.functions import get_model_metrics
+from activetigger.functions import concat_text_columns, get_model_metrics
 from activetigger.queue_manager import Queue
 from activetigger.tasks.predict_ml import PredictMLMultiClass
+from activetigger.tasks.predict_with_features import PredictWithFeatures
 from activetigger.tasks.train_ml import TrainMLMultiClass
+
+if TYPE_CHECKING:
+    from activetigger.features import Features
 
 
 class QuickModels:
@@ -53,6 +60,7 @@ class QuickModels:
     computing: list
     loaded: dict
     language_models_service: ModelsService
+    features: "Features | None"
 
     def __init__(
         self,
@@ -61,9 +69,15 @@ class QuickModels:
         queue: Queue,
         computing: list,
         db_manager: DatabaseManager,
+        features: "Features | None" = None,
     ) -> None:
         """
-        Init Quickmodels class
+        Init Quickmodels class.
+
+        `features` is the project-level `Features` manager. It is only
+        required by `predict_on_dataset`, which delegates to it to build
+        the per-feature compute specs and to source the text/paths
+        series for the dataset being predicted on.
         """
         self.path: Path = path.joinpath("quickmodels")
         if not self.path.exists():
@@ -72,6 +86,7 @@ class QuickModels:
         self.language_models_service = db_manager.language_models_service
         self.computing = computing
         self.queue = queue
+        self.features = features
 
         # Models and default parameters
         self.available_models = {
@@ -202,7 +217,7 @@ class QuickModels:
             "exclude_labels": exclude_labels,
             "test_size": test_size,
         }
-        unique_id = self.queue.add_task("train_quickmodel", project_slug, TrainMLMultiClass(**args))  # ty: ignore[invalid-argument-type]
+        unique_id = self.queue.add_task("train_quickmodel", project_slug, TrainMLMultiClass(**args))
         del args
 
         req = QuickModelComputing(
@@ -252,9 +267,10 @@ class QuickModels:
         existing = self.language_models_service.available_models(self.project_slug, "quickmodel")
         r: dict[str, list[ModelDescriptionModel]] = {}
         for m in existing:
-            if m.scheme not in r:
-                r[m.scheme] = []
-            r[m.scheme].append(m)
+            # quickmodels are always attached to a scheme
+            if m.scheme is None:
+                continue
+            r.setdefault(m.scheme, []).append(m)
         return r
 
     def get(self, name: str) -> QuickModelComputed:
@@ -270,10 +286,6 @@ class QuickModels:
             path = self.path.joinpath(name)
             if not path.exists():
                 raise Exception("The model path does not exist")
-            if not (path / "model.pkl").exists():
-                # wait until the model is available if still writing
-                print("Waiting for model file to be available...")
-                time.sleep(1)
             with open(path / "model.pkl", "rb") as file:
                 sm: QuickModelComputed = pickle.load(file)
             return sm
@@ -305,11 +317,24 @@ class QuickModels:
             entropy=None if np.isnan(predicted_entropy) else predicted_entropy,
         )
 
-    def training(self) -> dict[str, list[str]]:
+    def training(self) -> dict[str, LMComputingOutModel]:
         """
-        Currently under training
+        Currently under training / predicting. Returns one entry per user
+        so the frontend can render a progress bar for either kind of
+        quickmodel process (train_quickmodel or predict_with_features).
         """
-        return {e.user: [e.scheme] for e in self.computing if e.kind == "train_quickmodel"}
+        kinds = {"train_quickmodel", "predict_with_features", "predict_quickmodel"}
+        r: dict[str, LMComputingOutModel] = {}
+        for e in self.computing:
+            if getattr(e, "kind", None) not in kinds:
+                continue
+            get_progress = getattr(e, "get_progress", None)
+            r[e.user] = LMComputingOutModel(
+                name=getattr(e, "name", ""),
+                status=getattr(e, "status", "training"),
+                progress=get_progress() if get_progress else None,
+            )
+        return r
 
     def exists(self, name: str) -> bool:
         """
@@ -320,7 +345,7 @@ class QuickModels:
 
     def transform_data(
         self, data, col_label, col_predictors, standardize
-    ) -> tuple[DataFrame, DataFrame, list]:
+    ) -> tuple[DataFrame, pd.Series, list]:
         """
         Load data
         """
@@ -383,6 +408,47 @@ class QuickModels:
             return output, headers
         else:
             raise ValueError("Format not supported")
+
+    def export_prediction_file(
+        self,
+        name: str,
+        dataset: str = "all",
+        format: str = "parquet",
+        col_id: str | None = None,
+    ) -> FileResponse:
+        """
+        Serve the prediction parquet produced by `predict_on_dataset`.
+        """
+        file_name = f"predict_{dataset}.parquet"
+        path = self.path.joinpath(name).joinpath(file_name)
+        if not path.exists():
+            raise FileNotFoundError(
+                f"The file {file_name} does not exist for this model, please run prediction again."
+            )
+
+        if format not in ("parquet", "csv", "xlsx"):
+            raise ValueError("Format not supported")
+
+        if format == "parquet":
+            return FileResponse(path=path, filename=file_name)
+
+        ext = "csv" if format == "csv" else "xlsx"
+        out_name = f"{file_name}.{ext}"
+        out_path = self.path.joinpath(name).joinpath(out_name)
+        if not out_path.exists() or out_path.stat().st_mtime < path.stat().st_mtime:
+            df = pd.read_parquet(path)
+            target_col = col_id.removeprefix("dataset_") if col_id else "id_external"
+            df = df.reset_index()
+            first_col = df.columns[0]
+            if first_col != target_col:
+                df.rename(columns={first_col: target_col}, inplace=True)
+            df = df[[target_col] + [c for c in df.columns if c != target_col]]
+            if format == "csv":
+                df.to_csv(out_path, index=False)
+            else:
+                df.to_excel(out_path, index=False)
+
+        return FileResponse(path=out_path, filename=out_name)
 
     def state(self) -> QuickModelsProjectStateModel:
         return QuickModelsProjectStateModel(
@@ -463,6 +529,178 @@ class QuickModels:
             )
         )
         print("Predicting process started")
+
+    def predict_on_dataset(
+        self,
+        name: str,
+        username: str,
+        dataset: str = "all",
+    ) -> str:
+        """
+        Enqueue a `PredictWithFeatures` task that (re)computes the
+        features the quickmodel was trained on for the requested dataset
+        and applies the model to them. The proba DataFrame is saved to
+        `<quickmodel_dir>/predict_<dataset>.parquet` and can be served
+        by `export_prediction_file`.
+        """
+        sm = self._get_sm_for_predict(name)
+        data = self._dataset_texts(dataset)
+        return self._enqueue_predict_with_features(sm, username, dataset, data)
+
+    def predict_on_external_dataset(
+        self,
+        name: str,
+        username: str,
+        external_dataset: TextDatasetModel,
+    ) -> str:
+        """
+        Enqueue a `PredictWithFeatures` task on an uploaded external
+        dataset. Mirrors the BERT flow: the file lives under the
+        project's dataset dir, `cols_text` are concatenated into a
+        single text column, and the resulting proba DataFrame is saved
+        to `<quickmodel_dir>/predict_external.parquet`.
+        """
+        sm = self._get_sm_for_predict(name)
+        assert self.features is not None  # invariant enforced above
+
+        if not external_dataset.cols_text:
+            raise ValueError("At least one text column must be selected")
+        if not external_dataset.id:
+            raise ValueError("An id column must be selected")
+        if not external_dataset.filename:
+            raise ValueError("No data file associated with the external dataset")
+
+        path_data = self.features.data.get_path(external_dataset.filename)
+        if not path_data.exists():
+            raise FileNotFoundError(
+                f"External dataset file '{external_dataset.filename}' not found. Upload it first."
+            )
+
+        df = Data.read_dataset(path_data)
+        missing = [
+            c for c in [*external_dataset.cols_text, external_dataset.id] if c not in df.columns
+        ]
+        if missing:
+            raise ValueError(f"Columns not found in file: {missing}")
+
+        texts = concat_text_columns(df, external_dataset.cols_text)
+        texts.index = df[external_dataset.id].apply(str)
+        texts.index.name = None
+        texts = texts.dropna()
+        if texts.index.duplicated().any():
+            raise ValueError(
+                f"Duplicate values in id column '{external_dataset.id}' — ids must be unique"
+            )
+
+        return self._enqueue_predict_with_features(sm, username, "external", texts)
+
+    def mark_prediction_done(self, name: str, dataset: str) -> None:
+        """
+        Persist a `predicted_<dataset>` flag on the quickmodel row so
+        the Prediction tab can warn before overwriting and the Export
+        panel can gate the download button. Only tracked for datasets
+        that ship a persistent file (`all` and `external`).
+        """
+        if dataset not in ("all", "external"):
+            return
+        try:
+            self.language_models_service.set_model_params(
+                self.project_slug, name, flag=f"predicted_{dataset}", value=True
+            )
+        except Exception as e:
+            print(f"Could not set predicted_{dataset} flag for {name}: {e}")
+
+    def _get_sm_for_predict(self, name: str) -> QuickModelComputed:
+        if self.features is None:
+            raise RuntimeError(
+                "QuickModels was instantiated without a Features manager; "
+                "prediction pipelines need it to build the compute specs."
+            )
+        sm = self.get(name)
+        if not sm.features:
+            raise ValueError(f"Quickmodel '{name}' has no features attached")
+        return sm
+
+    def _enqueue_predict_with_features(
+        self,
+        sm: QuickModelComputed,
+        username: str,
+        dataset: str,
+        data: pd.Series,
+    ) -> str:
+        """
+        Shared queue-insertion path for `predict_on_dataset` and
+        `predict_on_external_dataset`. Builds the PredictWithFeatures
+        task, wires the progress callable, and registers a
+        `QuickModelComputing` entry so the frontend can render a bar.
+        """
+        assert self.features is not None
+        specs = self.features.build_compute_specs(sm.features, data)
+
+        task = PredictWithFeatures(
+            specs=specs,
+            path_process=self.features.path_all.parent,
+            path_models=self.features.path_models,
+            language=self.features.lang,
+            quickmodel=sm,
+            path_output=self.path.joinpath(sm.name),
+            file_name=f"predict_{dataset}.parquet",
+        )
+        unique_id = self.queue.add_task(
+            "predict_with_features", self.project_slug, task, queue="cpu"
+        )
+
+        progress_path = self.features.path_all.parent.joinpath(unique_id)
+
+        def get_progress() -> float | None:
+            try:
+                if not progress_path.exists():
+                    return None
+                raw = progress_path.read_text().strip()
+                return float(raw) if raw else 0.0
+            except (OSError, ValueError):
+                return None
+
+        self.computing.append(
+            QuickModelComputing(
+                user=username,
+                unique_id=unique_id,
+                time=datetime.now(timezone.utc),
+                kind="predict_with_features",
+                status="predicting",
+                name=sm.name,
+                dataset=dataset,
+                features=sm.features,
+                scheme=sm.scheme,
+                model_type=sm.model_type,
+                model_params=sm.model_params,
+                labels=sm.labels,
+                get_progress=get_progress,
+            )
+        )
+        return unique_id
+
+    def _dataset_texts(self, dataset: str) -> pd.Series:
+        """
+        Assemble the input series consumed by feature computation for
+        the requested dataset.
+
+        For "all" we read `path_data_all` directly and index the series
+        by `id_external` so the saved prediction parquet carries a
+        meaningful row id (the CSV/xlsx exporter then promotes it to a
+        first-position column named after `col_id`, matching the shape
+        of the BERT prediction export).
+        """
+        assert self.features is not None
+        if dataset == "all":
+            df = pd.read_parquet(self.features.path_all, columns=["id_external", "text"])
+            series = df["text"]
+            series.index = df["id_external"].astype(str)
+            series.index.name = "id_external"
+            return series
+        if dataset == "annotable":
+            return self.features.concat_split_column("text", dataset="all")
+        return self.features.concat_split_column("text", dataset=dataset)
 
     def get_informations(self, model_name) -> ModelInformationsModel:
         """

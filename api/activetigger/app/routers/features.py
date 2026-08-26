@@ -4,6 +4,7 @@ import pandas as pd
 from fastapi import (
     APIRouter,
     Depends,
+    Form,
     HTTPException,
     Query,
 )
@@ -21,8 +22,11 @@ from activetigger.datamodels import (
 )
 from activetigger.orchestrator import get_orchestrator
 from activetigger.project import Project
+from activetigger.uploads import get_upload_staging
 
 router = APIRouter(tags=["features"])
+
+_ALLOWED_IMPORT_EXTENSIONS = (".csv", ".parquet", ".xlsx")
 
 
 @router.post("/features/add", dependencies=[Depends(verified_user)])
@@ -97,6 +101,64 @@ def reset_features(
     try:
         project.features.reset_features_file()
         get_orchestrator().log_action(current_user.username, "RESET FEATURES", project.name)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/features/import", dependencies=[Depends(verified_user)])
+def import_feature(
+    project: Annotated[Project, Depends(get_project)],
+    current_user: Annotated[UserInDBModel, Depends(verified_user)],
+    upload_id: str,
+    name: str = Form(...),
+    id_column: str = Form(...),
+    columns: str | None = Form(None),
+) -> None:
+    """
+    Import a pre-computed feature from a staged upload (chunked-upload
+    protocol, see activetigger.uploads). All target columns must be numeric.
+    The stored feature is named `imported-<name>`.
+    """
+    test_rights(ProjectAction.ADD, current_user.username, project.name)
+
+    staging = get_upload_staging()
+    staged_path, filename = staging.claim(
+        current_user.username, upload_id, _ALLOWED_IMPORT_EXTENSIONS
+    )
+
+    try:
+        lower = filename.lower()
+        if lower.endswith(".csv"):
+            df = pd.read_csv(staged_path, sep=None, engine="python")
+        elif lower.endswith(".parquet"):
+            df = pd.read_parquet(staged_path)
+        else:
+            df = pd.read_excel(staged_path)
+
+        selected = (
+            [c.strip() for c in columns.split(",") if c.strip()]
+            if columns is not None and columns.strip() != ""
+            else None
+        )
+
+        full_name = project.features.import_from_dataframe(
+            name=name,
+            id_column=id_column,
+            df=df,
+            columns=selected,
+            username=current_user.username,
+            source_file=filename,
+        )
+        get_orchestrator().log_action(
+            current_user.username, f"IMPORT FEATURE: {full_name}", project.name
+        )
+        # the staged file is consumed only on success so a failed import
+        # can be retried without re-uploading
+        staging.discard(current_user.username, upload_id)
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

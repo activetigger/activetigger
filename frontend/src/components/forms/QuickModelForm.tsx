@@ -3,7 +3,7 @@ import { Controller, SubmitHandler, useForm } from 'react-hook-form';
 import Select from 'react-select';
 import { useTrainQuickModel } from '../../core/api';
 import { useNotifications } from '../../core/notifications';
-import { getRandomName } from '../../core/utils';
+import { getRandomName, pickDefaultQuickModelFeature } from '../../core/utils';
 import { QuickModelInModel } from '../../types';
 import { ButtonNewFeature } from '../ButtonNewFeature';
 
@@ -16,12 +16,6 @@ interface QuickModelFormProps {
   baseQuickModels: Record<string, Record<string, number>>;
   setDisplayNewModel: (display: boolean) => void;
 }
-
-// build default features selected
-type Feature = {
-  label: string;
-  value: string;
-};
 
 export const QuickModelForm: FC<QuickModelFormProps> = ({
   projectSlug,
@@ -37,27 +31,12 @@ export const QuickModelForm: FC<QuickModelFormProps> = ({
   // hooks to update
   const { trainQuickModel } = useTrainQuickModel(projectSlug, currentScheme);
 
-  const filterFeatures = (features: Feature[]) => {
-    const filtered = features.filter((e) =>
-      /sentence-embeddings|embeddings|fasttext/i.test(e.label),
-    );
-    const predictFeature = features.find((e) => /predict/i.test(e.label)); // Trouve le premier "predict"
-    const embeddingsFeature = features.find((e) => /sentence-embeddings|embeddings/i.test(e.label)); // Trouve le premier "sentence-embeddings"
-
-    if (embeddingsFeature) {
-      filtered.push(embeddingsFeature);
-    } else if (predictFeature) {
-      filtered.push(predictFeature);
-    }
-
-    return filtered;
-  };
   const existingLabels = Object.entries(availableLabels).map(([key, value]) => ({
     value: key,
     label: value,
   }));
-  const predictions = filterFeatures(features);
-  const defaultFeatures = predictions.length > 0 ? [predictions[predictions.length - 1]] : [];
+  const defaultFeature = pickDefaultQuickModelFeature(features.map((f) => f.value));
+  const defaultFeatures = defaultFeature ? [defaultFeature] : [];
 
   const createDefaultValues = () => ({
     name: getRandomName('QuickModel'),
@@ -75,7 +54,7 @@ export const QuickModelForm: FC<QuickModelFormProps> = ({
     cv10: false,
     test_size: 0.2,
     dichotomize: kindScheme == 'multilabel' ? availableLabels[0] : undefined,
-    features: defaultFeatures.map((e) => e.value),
+    features: defaultFeatures,
   });
 
   // create form
@@ -104,9 +83,7 @@ export const QuickModelForm: FC<QuickModelFormProps> = ({
     setDisplayNewModel(false);
   };
 
-  const [formSelectedFeatures, setFormSelectedFeatures] = useState<string[]>(
-    defaultFeatures.map((e) => e.value),
-  );
+  const [formSelectedFeatures, setFormSelectedFeatures] = useState<string[]>(defaultFeatures);
 
   const selectedFeaturesContainsBERTFeatures = () => {
     return formSelectedFeatures

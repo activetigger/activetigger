@@ -139,7 +139,7 @@ export const QuickModelManagement: FC<QuickModelManagementProps> = ({
             setDisplayNewModel(true);
             setCurrentQuickModelName(null);
           }}
-          className={cx('model-pill ', isComputing ? 'disabled' : '')}
+          className={cx('model-pill create-pill', isComputing && 'disabled')}
           id="create-new"
         >
           <FaPlusCircle size={20} /> Create new model

@@ -6,9 +6,10 @@ import { Controller, SubmitHandler, useForm, useWatch } from 'react-hook-form';
 import { omit } from 'lodash';
 import { FaCloudDownloadAlt } from 'react-icons/fa';
 import Select from 'react-select';
-import { useAddFile, useGetPredictionsFile, usePredictOnDataset } from '../../core/api';
+import { useGetPredictionsFile, usePredictOnDataset } from '../../core/api';
 import { formatUploadError } from '../../core/HTTPError';
 import { useNotifications } from '../../core/notifications';
+import { useChunkedUpload } from '../../core/useChunkedUpload';
 import { loadFile } from '../../core/utils';
 import { TextDatasetModel } from '../../types';
 import { UploadProgressBar } from '../UploadProgressBar';
@@ -26,6 +27,9 @@ export interface ImportPredictionDatasetProps {
   modelName: string;
   availablePredictionExternal?: boolean;
   batchSize?: number;
+  // Defaults to "bert" for back-compat; pass "ner" to route the external
+  // prediction through the NER model endpoints.
+  kind?: string;
 }
 
 // component
@@ -35,6 +39,7 @@ export const ImportPredictionDataset: FC<ImportPredictionDatasetProps> = ({
   modelName,
   availablePredictionExternal,
   batchSize,
+  kind = 'bert',
 }) => {
   const maxSizeMB = 300;
   const maxSize = maxSizeMB * 1024 * 1024; // 100 MB in bytes
@@ -47,7 +52,7 @@ export const ImportPredictionDataset: FC<ImportPredictionDatasetProps> = ({
   >({
     defaultValues: { cols_text: [] },
   });
-  const { addFile, progression, cancel } = useAddFile();
+  const { uploadChunked, progression, cancel } = useChunkedUpload();
   const predict = usePredictOnDataset(); // API call
   const { notify } = useNotifications();
   const [importingDataset, setImportingDataset] = useState<boolean>(false); // state for the data
@@ -97,9 +102,9 @@ export const ImportPredictionDataset: FC<ImportPredictionDatasetProps> = ({
       setPhase('uploading');
       let uploaded = false;
       try {
-        // first upload file — if this fails we must NOT call predict, otherwise
-        // the backend returns a misleading 404 because the file is not on disk.
-        await addFile(projectSlug, file);
+        // chunk-upload the file first — if this fails we must NOT call
+        // predict; the staged upload is referenced by id in the payload
+        const { uploadId } = await uploadChunked(file);
         uploaded = true;
         setPhase('queuing');
         await predict(
@@ -108,9 +113,10 @@ export const ImportPredictionDataset: FC<ImportPredictionDatasetProps> = ({
           modelName,
           {
             ...omit(formData, 'files'),
-            filename: data.filename,
+            upload_id: uploadId,
           },
           batchSize,
+          kind,
         );
         setData(null);
         reset();
@@ -154,7 +160,7 @@ export const ImportPredictionDataset: FC<ImportPredictionDatasetProps> = ({
               href="#"
               onClick={(e) => {
                 e.preventDefault();
-                getPredictionsFile(modelName, 'csv', 'external', scheme);
+                getPredictionsFile(modelName, 'csv', 'external', scheme, kind);
               }}
               className="text-blue-600 hover:underline"
             >

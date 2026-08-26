@@ -1,8 +1,9 @@
-import { FC, useEffect, useState } from 'react';
+import { FC, useEffect, useMemo, useState } from 'react';
 import Tab from 'react-bootstrap/Tab';
 import Tabs from 'react-bootstrap/Tabs';
 import DataGrid, { Column } from 'react-data-grid';
 import Select from 'react-select';
+import { VictoryAxis, VictoryBar, VictoryChart, VictoryTheme, VictoryTooltip } from 'victory';
 import { SendMessage } from '../components/forms/SendMessage';
 import { PageLayout } from '../components/layout/PageLayout';
 import { ManageMessages } from '../components/ManageMessages';
@@ -10,6 +11,7 @@ import {
   useAddSelfAsManager,
   useGetAllProjects,
   useGetLogs,
+  useGetMonitoringActivity,
   useGetMonitoringData,
   useGetMonitoringMetrics,
   useGetServer,
@@ -71,14 +73,26 @@ type ApiResponse = Record<
     n: number;
     mean: number;
     std: number;
+    total?: number;
   }
 >;
 
+const STATS_LABELS: Record<string, string> = {
+  gpu: 'GPU use (Gb·s)',
+  emissions: 'Emissions (g CO₂eq)',
+};
+
 function normalizeStats(data: ApiResponse): ModelStats[] {
-  return Object.entries(data).map(([name, stats]) => ({
-    name,
-    ...stats,
-  }));
+  return Object.entries(data).map(([name, stats]) => {
+    // Backend reports emissions in kg; display in grams for readability.
+    const scale = name === 'emissions' ? 1000 : 1;
+    return {
+      name: STATS_LABELS[name] ?? name,
+      n: stats.n,
+      mean: stats.mean * scale,
+      std: stats.std * scale,
+    };
+  });
 }
 
 type ProcessEvent = {
@@ -159,6 +173,108 @@ export function ProcessTable({ rows }: Props) {
   );
 }
 
+type ActivityPoint = {
+  hour: string;
+  annotations: number;
+  active_users: number;
+};
+
+function ActivityTimeline({ points }: { points: ActivityPoint[] }) {
+  if (!points || points.length === 0) {
+    return <div className="alert alert-info m-3">No activity in the selected period.</div>;
+  }
+
+  const data = points.map((p, i) => ({
+    i,
+    date: new Date(p.hour),
+    annotations: p.annotations,
+    active_users: p.active_users,
+  }));
+
+  // One tick per day (every 24 hours), labelled with the day boundary
+  const dayTickValues = data.filter((d) => d.date.getUTCHours() === 0).map((d) => d.i);
+  const dayTickFormat = (i: number) => {
+    const d = data[i]?.date;
+    return d ? `${d.getUTCMonth() + 1}/${d.getUTCDate()}` : '';
+  };
+
+  const annotationsTotal = data.reduce((s, d) => s + d.annotations, 0);
+  const activeUsersPeak = data.reduce((m, d) => Math.max(m, d.active_users), 0);
+
+  return (
+    <div>
+      <div className="mb-2">
+        <span className="badge bg-primary me-2">Annotations (7d): {annotationsTotal}</span>
+        <span className="badge bg-success">Peak distinct users / hour: {activeUsersPeak}</span>
+      </div>
+
+      <div>
+        <h3 className="subtitle mt-1 mb-0">Annotations per hour</h3>
+        <VictoryChart
+          theme={VictoryTheme.material}
+          domainPadding={{ x: 5 }}
+          width={1000}
+          height={170}
+          padding={{ top: 10, bottom: 35, left: 55, right: 15 }}
+        >
+          <VictoryAxis
+            tickValues={dayTickValues}
+            tickFormat={dayTickFormat}
+            style={{ tickLabels: { fontSize: 10 } }}
+          />
+          <VictoryAxis
+            dependentAxis
+            label="Annotations"
+            style={{ axisLabel: { padding: 40, fontSize: 12 }, tickLabels: { fontSize: 10 } }}
+          />
+          <VictoryBar
+            data={data}
+            x="i"
+            y="annotations"
+            style={{ data: { fill: '#0072B2' } }}
+            labels={({ datum }) =>
+              `${datum.date.toISOString().slice(0, 13)}:00\nAnnotations: ${datum.annotations}`
+            }
+            labelComponent={<VictoryTooltip />}
+          />
+        </VictoryChart>
+      </div>
+
+      <div>
+        <h3 className="subtitle mt-1 mb-0">Active users per hour</h3>
+        <VictoryChart
+          theme={VictoryTheme.material}
+          domainPadding={{ x: 5 }}
+          width={1000}
+          height={170}
+          padding={{ top: 10, bottom: 35, left: 55, right: 15 }}
+        >
+          <VictoryAxis
+            tickValues={dayTickValues}
+            tickFormat={dayTickFormat}
+            style={{ tickLabels: { fontSize: 10 } }}
+          />
+          <VictoryAxis
+            dependentAxis
+            label="Active users"
+            style={{ axisLabel: { padding: 40, fontSize: 12 }, tickLabels: { fontSize: 10 } }}
+          />
+          <VictoryBar
+            data={data}
+            x="i"
+            y="active_users"
+            style={{ data: { fill: '#D55E00' } }}
+            labels={({ datum }) =>
+              `${datum.date.toISOString().slice(0, 13)}:00\nUsers: ${datum.active_users}`
+            }
+            labelComponent={<VictoryTooltip />}
+          />
+        </VictoryChart>
+      </div>
+    </div>
+  );
+}
+
 /**
  * MonitorPage component displays server monitoring information including logs, resources, active projects, and user statistics.
  */
@@ -174,6 +290,7 @@ export const MonitorPage: FC = () => {
   const { metrics } = useGetMonitoringMetrics();
   const { data } = useGetMonitoringData('all');
   const { allProjects, reFetchAllProjects } = useGetAllProjects();
+  const { activity } = useGetMonitoringActivity(7);
   const { addSelfAsManager } = useAddSelfAsManager(reFetchAllProjects);
   useEffect(() => {
     reFetchStatistics();
@@ -207,6 +324,56 @@ export const MonitorPage: FC = () => {
     },
   ];
 
+  type ProjectSortKey = 'name' | 'slug' | 'created_at' | 'size' | 'last_activity';
+  const [projectSort, setProjectSort] = useState<{ key: ProjectSortKey; dir: 'asc' | 'desc' }>({
+    key: 'created_at',
+    dir: 'desc',
+  });
+  const toggleProjectSort = (key: ProjectSortKey) =>
+    setProjectSort((prev) =>
+      prev.key === key
+        ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
+        : {
+            key,
+            dir: key === 'created_at' || key === 'last_activity' || key === 'size' ? 'desc' : 'asc',
+          },
+    );
+  const sortedProjects = useMemo(() => {
+    const list = (allProjects || []).slice();
+    const { key, dir } = projectSort;
+    const factor = dir === 'asc' ? 1 : -1;
+    const getValue = (p: (typeof list)[number]): string | number | null | undefined => {
+      switch (key) {
+        case 'name':
+          return p.parameters?.project_name;
+        case 'slug':
+          return p.project_slug;
+        case 'created_at':
+          return p.created_at;
+        case 'size':
+          return p.size;
+        case 'last_activity':
+          return p.last_activity;
+      }
+    };
+    list.sort((a, b) => {
+      const av = getValue(a);
+      const bv = getValue(b);
+      // Push nullish to the bottom regardless of sort direction so empty rows
+      // don't dominate the visible area.
+      const aNull = av === null || av === undefined || av === '';
+      const bNull = bv === null || bv === undefined || bv === '';
+      if (aNull && bNull) return 0;
+      if (aNull) return 1;
+      if (bNull) return -1;
+      if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * factor;
+      return String(av).localeCompare(String(bv)) * factor;
+    });
+    return list;
+  }, [allProjects, projectSort]);
+  const sortArrow = (key: ProjectSortKey) =>
+    projectSort.key === key ? (projectSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+
   if (authenticatedUser?.username !== 'root') {
     return (
       <div className="d-flex flex-column align-items-center justify-content-center vh-100 bg-light text-center">
@@ -227,7 +394,11 @@ export const MonitorPage: FC = () => {
       <div className="container-fluid">
         <div className="row">
           <div className="col-12">
-            <Tabs id="panel2" className="mt-3" defaultActiveKey="active">
+            <Tabs id="panel2" className="mt-3" defaultActiveKey="activity">
+              <Tab eventKey="activity" title="Activity">
+                <h2 className="subtitle">Instance activity — last 7 days (hourly)</h2>
+                <ActivityTimeline points={(activity?.activity as ActivityPoint[]) || []} />
+              </Tab>
               <Tab eventKey="active" title="Active Projects">
                 <h2 className="subtitle">Monitor active projects</h2>
 
@@ -286,20 +457,47 @@ export const MonitorPage: FC = () => {
                 <table className="table-statistics">
                   <thead>
                     <tr>
-                      <th>Name</th>
-                      <th>Slug</th>
+                      <th
+                        onClick={() => toggleProjectSort('name')}
+                        style={{ cursor: 'pointer', userSelect: 'none' }}
+                      >
+                        Name{sortArrow('name')}
+                      </th>
+                      <th>Type</th>
+                      <th
+                        onClick={() => toggleProjectSort('slug')}
+                        style={{ cursor: 'pointer', userSelect: 'none' }}
+                      >
+                        Slug{sortArrow('slug')}
+                      </th>
                       <th>Creator</th>
-                      <th>Created at</th>
-                      <th>Size (MB)</th>
-                      <th>Last activity</th>
+                      <th
+                        onClick={() => toggleProjectSort('created_at')}
+                        style={{ cursor: 'pointer', userSelect: 'none' }}
+                      >
+                        Created{sortArrow('created_at')}
+                      </th>
+                      <th
+                        onClick={() => toggleProjectSort('size')}
+                        style={{ cursor: 'pointer', userSelect: 'none' }}
+                      >
+                        Size (MB){sortArrow('size')}
+                      </th>
+                      <th
+                        onClick={() => toggleProjectSort('last_activity')}
+                        style={{ cursor: 'pointer', userSelect: 'none' }}
+                      >
+                        Last activity{sortArrow('last_activity')}
+                      </th>
                       <th>My rights</th>
                       <th>Action</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {(allProjects || []).map((p) => (
+                    {sortedProjects.map((p) => (
                       <tr key={p.project_slug}>
                         <td>{p.parameters?.project_name}</td>
+                        <td>{p.parameters?.kind ?? 'text'}</td>
                         <td>{p.project_slug}</td>
                         <td>{p.created_by}</td>
                         <td>{p.created_at}</td>
@@ -324,6 +522,12 @@ export const MonitorPage: FC = () => {
                 </table>
               </Tab>
               <Tab eventKey="statistics" title="Statistics">
+                {metrics?.emissions && metrics.emissions.n > 0 && (
+                  <div className="alert alert-info my-2 py-2">
+                    Cumulative emissions on the last {metrics.emissions.n} GPU/compute processes:{' '}
+                    <strong>{(metrics.emissions.total * 1000).toFixed(2)} g CO₂eq</strong>
+                  </div>
+                )}
                 {<ModelStatsTable rows={normalizeStats(metrics || {})} />}
                 {<ProcessTable rows={data as unknown as ProcessRow[]} />}
               </Tab>

@@ -4,6 +4,8 @@ import ClipLoader from 'react-spinners/ClipLoader';
 interface UploadProgressBarProps {
   progression: { loaded?: number; total?: number };
   cancel?: AbortController;
+  // alternative to cancel for processes that are not stopped through an AbortController
+  onCancel?: () => void;
   statusMessage?: string;
   showProgress?: boolean;
 }
@@ -11,6 +13,7 @@ interface UploadProgressBarProps {
 export const UploadProgressBar: FC<UploadProgressBarProps> = ({
   progression,
   cancel,
+  onCancel,
   statusMessage = 'Uploading dataset',
   showProgress = true,
 }) => {
@@ -33,11 +36,12 @@ export const UploadProgressBar: FC<UploadProgressBarProps> = ({
             <progress id="upload-progress" value={progression.loaded} max={progression.total} />
           </div>
         )}
-        {cancel && (
+        {(cancel || onCancel) && (
           <button
             className="btn-submit-danger"
             onClick={() => {
-              cancel.abort();
+              if (onCancel) onCancel();
+              else cancel?.abort();
             }}
           >
             Cancel

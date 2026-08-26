@@ -1,9 +1,9 @@
 demo/
-docs/
 data/
 models/
 notebooks/
 projects/
+prepare/
 activetigger/log
 log
 Réflexions.md
@@ -38,12 +38,19 @@ api/activetigger/.dmypy.json
 api/embeddings.yaml
 api/.coverage
 api/test-data
+embeddings.yaml
+QUALITY_REPORT.md
+SECURITY_REPORT.md
+api/users_parameters.yaml
+api/generative.yaml
 
 # DOCKER
 docker/api/projects/
 docker/api/venv/
 docker/api/models/
 docker/api/postgresql/
+
+docker/api/users_parameters.yaml
 
 api/.coverage
 api/.env
@@ -54,8 +61,10 @@ api/.venv
 api/htmlcov
 api/test-data
 
+
 ## CLAUDE
 CLAUDE.md
+docs/
 .claude/
 
 frontend/src/assets/at-tuna.png

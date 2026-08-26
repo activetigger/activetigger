@@ -12,13 +12,19 @@ import pandas as pd
 import torch
 from pandas import DataFrame
 from scipy.stats import entropy
+from tqdm import tqdm
 from transformers import (
     AutoModelForSequenceClassification,
     AutoTokenizer,  # ty: ignore[possibly-missing-import]
 )
 
 from activetigger.data import Data
-from activetigger.datamodels import MLStatisticsModel, ReturnTaskPredictModel, TextDatasetModel
+from activetigger.datamodels import (
+    EventsModel,
+    MLStatisticsModel,
+    ReturnTaskPredictModel,
+    TextDatasetModel,
+)
 from activetigger.functions import (
     activate_probs,
     annotations_to_matrix,
@@ -28,7 +34,9 @@ from activetigger.functions import (
     get_metrics_multiclass,
     get_metrics_multilabel,
     logits_to_probs,
+    release_device_memory,
 )
+from activetigger.monitoring import TaskTimer
 from activetigger.tasks.base_task import BaseTask
 
 
@@ -86,26 +94,20 @@ class PredictBertMultiClass(BaseTask):
             external_dataset.id if dataset == "external" and external_dataset else None
         )
 
-        if self.df is None and path_data is not None:
-            self.df = self.__load_external_file(path_data, external_dataset)
+        # when only a path is given, loading and validation are deferred to
+        # __call__ (worker side) so the large file is never pickled into the
+        # task object sent to the worker process
+        self.path_data = path_data
+        self.external_dataset = external_dataset
 
-        if self.df is None:
-            raise ValueError("Dataframe must be provided for prediction")
-
-        if col_text not in self.df.columns:
-            raise ValueError(f"Column text {col_text} not in dataframe")
-
-        if col_label is not None and col_label not in self.df.columns:
-            raise ValueError(f"Column label {col_label} not in dataframe")
-
-        if col_datasets is not None and col_datasets not in self.df.columns:
-            raise ValueError(f"Column datasets {col_datasets} not in dataframe")
-
-        if col_id_external is not None and col_id_external not in self.df.columns:
-            raise ValueError(f"Column id {col_id_external} not in dataframe")
+        if self.df is None and path_data is None:
+            raise ValueError("A dataframe or a data file path must be provided for prediction")
 
         if statistics is not None and col_label is None:
             raise ValueError("Column label must be provided to compute statistics")
+
+        if self.df is not None:
+            self.__validate_dataframe(self.df)
 
         self.training_kind = training_kind
         self.scheme_labels = scheme_labels
@@ -125,6 +127,22 @@ class PredictBertMultiClass(BaseTask):
                 pass  # we don't need it
             else:
                 raise ValueError("Threshold not found in config.json while required for multilabel")
+
+    def __validate_dataframe(self, df: DataFrame) -> None:
+        """
+        Check that the dataframe has the expected columns
+        """
+        if self.col_text not in df.columns:
+            raise ValueError(f"Column text {self.col_text} not in dataframe")
+
+        if self.col_label is not None and self.col_label not in df.columns:
+            raise ValueError(f"Column label {self.col_label} not in dataframe")
+
+        if self.col_datasets is not None and self.col_datasets not in df.columns:
+            raise ValueError(f"Column datasets {self.col_datasets} not in dataframe")
+
+        if self.col_id_external is not None and self.col_id_external not in df.columns:
+            raise ValueError(f"Column id {self.col_id_external} not in dataframe")
 
     def __load_external_file(
         self, path_data: Path, external_dataset: TextDatasetModel | None
@@ -188,10 +206,16 @@ class PredictBertMultiClass(BaseTask):
         """
         Load the model and tokenizer from the path
         """
-        # load the tokenizer and model
-        tokenizer = AutoTokenizer.from_pretrained(self.modeltype, trust_remote_code=True)
+        # models trained before the tokenizer was saved alongside the weights
+        # only have the base model name, so fall back to the hub for those
+        if (self.path / "tokenizer_config.json").exists():
+            tokenizer = AutoTokenizer.from_pretrained(str(self.path), trust_remote_code=True)
+        else:
+            tokenizer = AutoTokenizer.from_pretrained(self.modeltype, trust_remote_code=True)
+        # fp32 upcast: models fine-tuned from fp16 checkpoints (e.g. deberta-v3)
+        # are saved in fp16, and fp16 inference on CPU is extremely slow.
         model = AutoModelForSequenceClassification.from_pretrained(
-            self.path, trust_remote_code=True
+            self.path, trust_remote_code=True, dtype=torch.float32
         )
 
         return tokenizer, model, self.max_length
@@ -344,10 +368,16 @@ class PredictBertMultiClass(BaseTask):
         """
         Main process to predict
         """
-        print(f"start predicting ({self.training_kind})")
+        print(f"start predicting ({self.training_kind})", flush=True)
+        task_timer = TaskTimer(compulsory_steps=["setup", "predict", "save_files"])
+        task_timer.start("setup")
 
         if self.df is None:
-            raise ValueError("Dataframe is required for prediction")
+            if self.path_data is None:
+                raise ValueError("Dataframe is required for prediction")
+            print(f"Loading dataset from {self.path_data}", flush=True)
+            self.df = self.__load_external_file(self.path_data, self.external_dataset)
+            self.__validate_dataframe(self.df)
 
         # load the model
         tokenizer, model, max_length = self.__load_model()
@@ -355,8 +385,9 @@ class PredictBertMultiClass(BaseTask):
 
         # select device
         device = get_device()
-        print(f"Using {device} for prediction")
+        print(f"Using {device} for prediction", flush=True)
         model.to(device)
+        print(f"Model moved to {device}", flush=True)
         try:
             models_id2label = model.config.id2label
             num_labels = len(models_id2label)
@@ -370,11 +401,21 @@ class PredictBertMultiClass(BaseTask):
                 f"from the labels used during training. Will use {list(models_id2label.values())} "
                 f"instead."
             )
+        task_timer.stop("setup")
 
         try:
+            task_timer.start("predict")
             # prediction by batches
+            n_rows = self.df.shape[0]
+            n_batches = (n_rows + self.batch - 1) // self.batch
+            print(f"Predicting {n_rows} rows in {n_batches} batches", flush=True)
             proba_predictions = np.zeros((0, num_labels))
-            for i in range(0, self.df.shape[0], self.batch):
+            for i in tqdm(
+                range(0, self.df.shape[0], self.batch),
+                total=n_batches,
+                desc="Predicting",
+                unit="batch",
+            ):
                 self.__listen_stop_event()
                 chunk = tokenizer(
                     list(self.df[self.col_text][i : i + self.batch]),
@@ -389,8 +430,10 @@ class PredictBertMultiClass(BaseTask):
                 logits = outputs[0].detach().cpu().numpy()
                 proba = logits_to_probs(logits, kind=self.training_kind)
                 proba_predictions = np.append(proba_predictions, proba, axis=0)
-                self.__write_progress(100 * (i + self.batch) / self.df.shape[0])
+                self.__write_progress(100 * (i + self.batch) / n_rows)
+            task_timer.stop("predict")
 
+            task_timer.start("save_files")
             # transform predictions to clean dataframe
             pred = self.__transform_to_dataframe(proba_predictions, id2label=models_id2label)
             # save the prediction to file
@@ -405,6 +448,7 @@ class PredictBertMultiClass(BaseTask):
                 metrics = self.__compute_statistics(pred, id2label)
             else:
                 metrics = None
+            task_timer.stop("save_files")
 
         except Exception as e:
             print("Error in prediction", e)
@@ -416,10 +460,15 @@ class PredictBertMultiClass(BaseTask):
             # clean memory
             self.df = None
             self.event = None
+            try:
+                del model, tokenizer
+            except Exception:
+                pass
             gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
-                torch.cuda.empty_cache()
-                torch.cuda.ipc_collect()
+            release_device_memory()
 
-        return ReturnTaskPredictModel(path=str(self.path.joinpath(self.file_name)), metrics=metrics)
+        return ReturnTaskPredictModel(
+            path=str(self.path.joinpath(self.file_name)),
+            metrics=metrics,
+            events=EventsModel(events=task_timer.get_events()),
+        )

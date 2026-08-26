@@ -1,6 +1,10 @@
 import secrets
-from datetime import datetime, timezone
+import time
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from statistics import median
+from threading import Lock
 
 import yaml
 
@@ -11,14 +15,42 @@ from activetigger.datamodels import (
     NewUserModel,
     ProjectModel,
     ProjectSummaryModel,
+    UserActivityPointModel,
+    UserCredentialInput,
+    UserCredentialPublic,
     UserInDBModel,
     UserModel,
     UsersStateModel,
     UserStatistics,
 )
 from activetigger.db.manager import DatabaseManager
-from activetigger.functions import compare_to_hash, get_dir_size, get_hash
+from activetigger.functions import compare_to_hash, decrypt, encrypt, get_dir_size, get_hash
 from activetigger.messages import Messages
+
+USERS_PARAMETERS_FILE = "users_parameters.yaml"
+DEFAULT_USERS_PARAMETERS = {"root": {"limit": 100}}
+
+# Recursive disk scans for project sizes dominate the cost of the admin
+# "all projects" listing; cache them with a short TTL so refreshes are cheap.
+_DIR_SIZE_TTL_SECONDS = 300
+_DIR_SIZE_CACHE: dict[str, tuple[float, float]] = {}
+_DIR_SIZE_CACHE_LOCK = Lock()
+
+
+def _cached_dir_size(slug: str, path: str) -> float | None:
+    now = time.monotonic()
+    with _DIR_SIZE_CACHE_LOCK:
+        cached = _DIR_SIZE_CACHE.get(slug)
+        if cached is not None and now - cached[0] < _DIR_SIZE_TTL_SECONDS:
+            return cached[1]
+    try:
+        size = round(get_dir_size(path), 1)
+    except Exception as e:
+        print(e)
+        return None
+    with _DIR_SIZE_CACHE_LOCK:
+        _DIR_SIZE_CACHE[slug] = (now, size)
+    return size
 
 
 class Users:
@@ -26,8 +58,14 @@ class Users:
     Managers users
     """
 
+    # parameters for per-user statistics
+    ANNOTATION_GAP_CAP_SECONDS = 600  # gaps above this are session breaks
+    ANNOTATION_GAP_MIN_SECONDS = 1.0  # gaps below this are batch/import writes
+    ANNOTATION_TIMES_LIMIT = 5000  # bound the timestamps query on large tables
+    ACTIVITY_DAYS = 7
+
     db_manager: DatabaseManager
-    users: dict
+    users_parameters: dict
     failed_attemps: dict[str, list[datetime]]
     messages: Messages
 
@@ -35,20 +73,33 @@ class Users:
         self,
         db_manager: DatabaseManager,
         messages: Messages,
-        file_users: str = "users.yaml",
     ):
         """
-        Init users references
+        Init users references.
+
+        Per-user parameters are loaded once from ``users_parameters.yaml``
+        located in ``config.data_path``. The file maps a username to a dict
+        of parameters; the ``limit`` key is the user's storage quota in GB.
+        If the file does not exist, it is created with a default ``root``
+        entry (100 GB).
         """
         self.db_manager = db_manager
         self.messages = messages
-
-        # add specific users parameters if they exist
-        self.users = {}
-        if Path(file_users).exists():
-            with open(file_users) as f:
-                self.users = yaml.safe_load(f)
+        self.users_parameters = self._load_users_parameters()
         self.failed_attemps: dict = {}
+
+    @staticmethod
+    def _load_users_parameters() -> dict:
+        path = Path(config.data_path) / USERS_PARAMETERS_FILE
+        if not path.exists():
+            with open(path, "w") as f:
+                yaml.safe_dump(DEFAULT_USERS_PARAMETERS, f)
+            return dict(DEFAULT_USERS_PARAMETERS)
+        with open(path) as f:
+            content = yaml.safe_load(f) or {}
+        if not isinstance(content, dict):
+            return {}
+        return content
 
     def log_failed_login_attempt(self, username: str) -> None:
         """
@@ -95,8 +146,6 @@ class Users:
         """
         Delete user auth
         """
-        if username == "root":
-            raise Exception("Can't delete root user auth")
         self.get_user(username)
         self.db_manager.projects_service.delete_auth(project_slug, username)
 
@@ -175,7 +224,11 @@ class Users:
         if name not in self.existing_users():
             raise Exception("Username doesn't exist or is deactivated")
         user = self.db_manager.users_service.get_user(name)
-        return UserInDBModel(username=name, hashed_password=user.key, status=user.description)
+        return UserInDBModel(
+            username=name,
+            hashed_password=user.key,
+            status=(user.informations or {}).get("status"),
+        )
 
     def authenticate_user(self, username: str, password: str) -> UserInDBModel:
         """
@@ -243,6 +296,59 @@ class Users:
         user = self.db_manager.users_service.get_user(username)
         return user.contact or ""
 
+    def list_credentials(self, username: str) -> list[UserCredentialPublic]:
+        """
+        List saved endpoint/credentials entries, without the secrets
+        """
+        informations = self.db_manager.users_service.get_informations(username)
+        return [
+            UserCredentialPublic(
+                name=name, api=entry.get("api", ""), endpoint=entry.get("endpoint")
+            )
+            for name, entry in informations.get("credentials", {}).items()
+        ]
+
+    def add_credentials(self, username: str, credential: UserCredentialInput) -> None:
+        """
+        Save an endpoint/credentials entry in the user informations.
+        The secret is encrypted and never sent back to the client.
+        An existing entry with the same name is replaced.
+        """
+        if credential.name.strip() == "":
+            raise Exception("You should provide a name")
+        informations = self.db_manager.users_service.get_informations(username)
+        credentials = dict(informations.get("credentials", {}))
+        credentials[credential.name.strip()] = {
+            "api": credential.api,
+            "endpoint": credential.endpoint,
+            "credentials": encrypt(credential.credentials, config.secret_key),
+        }
+        informations["credentials"] = credentials
+        self.db_manager.users_service.update_informations(username, informations)
+
+    def delete_credentials(self, username: str, name: str) -> None:
+        """
+        Delete a saved endpoint/credentials entry
+        """
+        informations = self.db_manager.users_service.get_informations(username)
+        credentials = dict(informations.get("credentials", {}))
+        if name not in credentials:
+            raise Exception(f"Credentials {name} not found")
+        del credentials[name]
+        informations["credentials"] = credentials
+        self.db_manager.users_service.update_informations(username, informations)
+
+    def resolve_credentials(self, username: str, name: str) -> tuple[str | None, str]:
+        """
+        Get the (endpoint, decrypted secret) of a saved entry.
+        Backend use only: never expose the result in a route.
+        """
+        informations = self.db_manager.users_service.get_informations(username)
+        entry = informations.get("credentials", {}).get(name)
+        if entry is None:
+            raise Exception(f"Credentials {name} not found")
+        return entry.get("endpoint"), decrypt(entry["credentials"], config.secret_key)
+
     def force_change_password(self, username: str, password: str) -> None:
         """
         Force change password for a user (no old password needed)
@@ -265,13 +371,97 @@ class Users:
 
     def get_statistics(self, username: str) -> UserStatistics:
         """
-        Get statistics for specific user
+        Get statistics for specific user: authorized projects, total
+        annotations, recent hourly activity, median annotation time and
+        GPU/compute time of completed processes.
         """
         try:
             projects = {i[0]: i[1] for i in self.get_auth_projects(username)}
-            return UserStatistics(username=username, projects=projects)
+            total_annotations = self.db_manager.users_service.count_annotations(username)
+            times = self.db_manager.users_service.get_annotation_times(
+                username, limit=self.ANNOTATION_TIMES_LIMIT
+            )
+            gpu_time, compute_time = self._compute_process_times(username)
+            return UserStatistics(
+                username=username,
+                projects=projects,
+                total_annotations=total_annotations,
+                gpu_time_seconds=gpu_time,
+                compute_time_seconds=compute_time,
+                median_annotation_time_seconds=self._median_annotation_gap(times),
+                annotation_activity=self._build_hourly_activity(username, self.ACTIVITY_DAYS),
+            )
         except Exception as e:
             raise Exception(f"Error in getting statistics for {username}") from e
+
+    def _median_annotation_gap(self, times: list[datetime]) -> float | None:
+        """
+        Median gap in seconds between consecutive annotations, ignoring
+        session breaks (gaps above ANNOTATION_GAP_CAP_SECONDS) and
+        batch/import writes (gaps below ANNOTATION_GAP_MIN_SECONDS).
+        None if not enough data.
+        """
+        if len(times) < 2:
+            return None
+        ordered = sorted(times)
+        gaps = [
+            gap
+            for previous, current in zip(ordered, ordered[1:])
+            if self.ANNOTATION_GAP_MIN_SECONDS
+            <= (gap := (current - previous).total_seconds())
+            <= self.ANNOTATION_GAP_CAP_SECONDS
+        ]
+        if len(gaps) < 2:
+            return None
+        return float(median(gaps))
+
+    def _compute_process_times(self, username: str) -> tuple[float, float]:
+        """
+        (gpu_time_seconds, compute_time_seconds) over the user's completed
+        processes. GPU time sums the durations of processes whose events
+        report GPU usage; compute time sums all durations.
+        """
+        processes = self.db_manager.monitoring_service.get_completed_processes(
+            kind="all", username=username, limit=1000
+        )
+        gpu_time = 0.0
+        compute_time = 0.0
+        for process in processes:
+            if process.duration is None:
+                continue
+            compute_time += float(process.duration)
+            events = process.events if isinstance(process.events, dict) else {}
+            gpu_event = events.get("gpu")
+            try:
+                max_used_gb = (
+                    float(gpu_event.get("max_used_gb") or 0.0)
+                    if isinstance(gpu_event, dict)
+                    else 0.0
+                )
+            except (TypeError, ValueError):
+                max_used_gb = 0.0
+            if max_used_gb > 0:
+                gpu_time += float(process.duration)
+        return gpu_time, compute_time
+
+    def _build_hourly_activity(self, username: str, days: int) -> list[UserActivityPointModel]:
+        """
+        Zero-filled hourly annotation counts for the user over the last `days`
+        days (same series construction as Monitoring._compute_weekly_activity).
+        """
+        annotations_by_hour, _ = self.db_manager.monitoring_service.get_hourly_activity_counts(
+            days=days, user_name=username
+        )
+        total_hours = days * 24
+        now_hour = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+        start_hour = now_hour - timedelta(hours=total_hours - 1)
+        return [
+            UserActivityPointModel(
+                hour=(start_hour + timedelta(hours=i)).isoformat(),
+                annotations=annotations_by_hour.get(start_hour + timedelta(hours=i), 0),
+            )
+            for i in range(total_hours)
+        ]
 
     def get_storage(self, username: str) -> float:
         """
@@ -285,16 +475,12 @@ class Users:
 
     def get_storage_limit(self, username: str) -> float:
         """
-        Get storage limit for user
-        TODO : add a list of exceptions
+        Get storage limit (GB) for user from `users_parameters.yaml`,
+        falling back to `config.user_hdd_max` if the user has no entry.
         """
-        # case of root
-        if username == "root":
-            return 500.0
-        # derogation for specific users
-        if username in self.users:
-            return float(self.users[username]["storage_limit"])
-        # default value
+        params = self.users_parameters.get(username)
+        if params and "limit" in params:
+            return float(params["limit"])
         return config.user_hdd_max
 
     def state(self, project_slug: str) -> UsersStateModel:
@@ -341,10 +527,9 @@ class Users:
                 size = round(get_dir_size(config.data_path + "/projects/" + i[0]), 1)
             except Exception as e:
                 print(e)
-                size = 0.0
+                size = None
             last_activity = self.db_manager.logs_service.get_last_activity_project(i[0])
 
-            # create the project summary model
             projects.append(
                 ProjectSummaryModel(
                     project_slug=project_slug,
@@ -363,32 +548,28 @@ class Users:
         Get all existing projects regardless of auth (admin view).
         user_right reflects the given user's auth on each project, or "none".
         """
-        slugs = self.db_manager.projects_service.existing_projects()
+        rows = self.db_manager.projects_service.existing_projects_with_meta()
+        last_activity_map = self.db_manager.logs_service.get_last_activity_all_projects()
+        auths_map = self.db_manager.projects_service.get_user_auths_all_projects(username)
+
+        slugs = [r["project_slug"] for r in rows]
+        projects_root = config.data_path + "/projects/"
+        # Disk scans are I/O bound; threads parallelize them well even under the GIL.
+        with ThreadPoolExecutor(max_workers=min(16, max(4, len(slugs)))) as pool:
+            sizes = list(pool.map(lambda s: _cached_dir_size(s, projects_root + s), slugs))
+
         projects = []
-        for slug in slugs:
-            project = self.db_manager.projects_service.get_project(slug)
-            if project is None:
-                continue
-            parameters = ProjectModel(**project["parameters"])
-            created_by = project["user_name"]
-            created_at = project["time_created"].strftime("%Y-%m-%d %H:%M:%S")
-            try:
-                size = round(get_dir_size(config.data_path + "/projects/" + slug), 1)
-            except Exception as e:
-                print(e)
-                size = 0.0
-            last_activity = self.db_manager.logs_service.get_last_activity_project(slug)
-            auth = self.db_manager.projects_service.get_user_auth(username, slug)
-            user_right = auth[0][1] if auth else "none"
+        for row, size in zip(rows, sizes):
+            slug = row["project_slug"]
             projects.append(
                 ProjectSummaryModel(
                     project_slug=slug,
-                    user_right=user_right,
-                    parameters=parameters,
-                    created_by=created_by,
-                    created_at=created_at,
+                    user_right=auths_map.get(slug, "none"),
+                    parameters=ProjectModel(**row["parameters"]),
+                    created_by=row["user_name"],
+                    created_at=row["time_created"].strftime("%Y-%m-%d %H:%M:%S"),
                     size=size,
-                    last_activity=last_activity,
+                    last_activity=last_activity_map.get(slug),
                 )
             )
         projects.sort(key=lambda p: p.created_at, reverse=True)

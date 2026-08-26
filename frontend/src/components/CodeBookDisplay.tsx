@@ -1,13 +1,18 @@
 import { FC, useEffect, useState } from 'react';
 
 import { marked } from 'marked';
-import { useGetSchemeCodebook, usePostSchemeCodebook } from '../core/api';
+import {
+  useDeleteMessage,
+  useGetCodebookMessages,
+  useGetSchemeCodebook,
+  usePostSchemeCodebook,
+} from '../core/api';
 
 import { CodebookManagement } from '../components/CodeBookManagement';
 
 import MDEditor from '@uiw/react-md-editor';
 import { Modal } from 'react-bootstrap';
-import { FaBookOpen, FaCloudDownloadAlt } from 'react-icons/fa';
+import { FaBookOpen, FaCloudDownloadAlt, FaRegTrashAlt } from 'react-icons/fa';
 import { MdDriveFileRenameOutline } from 'react-icons/md';
 
 interface CodebookDisplayProps {
@@ -26,6 +31,14 @@ export const CodebookDisplay: FC<CodebookDisplayProps> = ({
     projectSlug || null,
     currentScheme || null,
   );
+
+  // project messages addressed to the current user
+  const { codebookMessages, reFetchCodebookMessages } = useGetCodebookMessages(projectSlug || null);
+  const { deleteMessage } = useDeleteMessage();
+  const onDeleteMessage = async (id: number) => {
+    await deleteMessage(id);
+    reFetchCodebookMessages();
+  };
   // hooks and states to modify the codebook
   const { postCodebook } = usePostSchemeCodebook(projectSlug || null, currentScheme || null);
   const [modifiedCodebook, setModifiedCodebook] = useState<string | undefined>(undefined);
@@ -103,6 +116,48 @@ export const CodebookDisplay: FC<CodebookDisplayProps> = ({
             </div>
           )}
         </div>
+
+        {(codebookMessages || []).length > 0 && (
+          <div id="project-messages" style={{ margin: '0.5rem 0 1rem 0' }}>
+            {(codebookMessages || []).map((m) => (
+              <div
+                key={m.id}
+                style={{
+                  background: '#f8f9fa',
+                  border: '1px solid #e9ecef',
+                  borderLeft: '4px solid #6f9bd1',
+                  borderRadius: '0.5rem',
+                  padding: '0.5rem 0.75rem',
+                  marginBottom: '0.5rem',
+                }}
+              >
+                <div className="d-flex justify-content-between align-items-start gap-2">
+                  <div style={{ fontSize: '0.75rem', color: '#666' }}>
+                    From <span className="fw-bold">{m.created_by}</span>
+                    {m.time && (
+                      <>
+                        {' · '}
+                        <span style={{ color: '#999' }}>{new Date(m.time).toLocaleString()}</span>
+                      </>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-link p-0 text-muted"
+                    title="Delete this message"
+                    onClick={() => onDeleteMessage(m.id)}
+                  >
+                    <FaRegTrashAlt />
+                  </button>
+                </div>
+                <div
+                  style={{ fontSize: '0.9rem', color: '#333', lineHeight: '1.5' }}
+                  dangerouslySetInnerHTML={{ __html: marked.parse(m.content) as string }}
+                />
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Corps du codebook avec scroll */}
         <div id="content" data-color-mode="light">

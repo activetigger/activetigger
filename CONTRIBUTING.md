@@ -1,6 +1,11 @@
 # Contributing to ActiveTigger
 
-Thank you for your interest in contributing to ActiveTigger! To keep the project organized and avoid wasted effort, please follow the workflow below. We are a scientific software, so we would like to take some thoughts on what we put on our code.
+ActiveTigger is a community tool and all help and good will is welcomed.
+
+To keep the project organized and focus our efforts, we try to follow a few guidelines. We are a scientific software, so we would like to take some thoughts on what we put on our code.
+
+> [!NOTE]  
+> To develop ActiveTigger, we sometime use generative tools such as Claude Code for some parts of the implementation. However, all code is reviewed before being merged into the repository. Likewise, you are free to use whatever tools you prefer, but we ask that you review your code and keep it readable for a human reviewer. All pull requests will be reviewed and may be discussed, so you need to be able to justify the choices you make.
 
 ## 1. Start with an issue
 
@@ -38,6 +43,9 @@ Reference the issue number in the PR description (e.g. "Closes #42").
 - Do not introduce new dependencies without discussing it in the issue first.
 - Make sure the application starts and the feature you changed works before submitting.
 
+> [!NOTE]  
+> Please explain the changes you intend to make, and the important choices you made in the implementation to be able to understand the big picture.
+
 ## 5. Review process
 
 - A maintainer will review your PR and may request changes.
@@ -52,6 +60,11 @@ When reporting a bug, include:
 - Expected vs. actual behavior.
 - Your environment (OS, browser, Docker or local install, Python version).
 - Relevant logs or screenshots if available.
+
+## General
+
+- Make sure that the app starts and works before submitting
+
 
 ## Questions?
 

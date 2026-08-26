@@ -14,7 +14,7 @@ import time
 import traceback
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pandas as pd
 import psutil
@@ -26,11 +26,19 @@ from activetigger.config import config
 from activetigger.datamodels import DatasetModel, LMComputing, ProjectBaseModel, ServerStateModel
 from activetigger.db import DBException
 from activetigger.db.manager import DatabaseManager
-from activetigger.functions import get_dir_size, get_gpu_memory_info, slugify
+from activetigger.functions import (
+    get_dir_size,
+    get_gpu_memory_info,
+    sanitize_uploaded_filename,
+    slugify,
+)
 from activetigger.messages import Messages
 from activetigger.monitoring import Monitoring
 from activetigger.project import Project
 from activetigger.queue_manager import Queue
+from activetigger.tasks.duplicate_project import DuplicateProject
+from activetigger.toolbox import Toolbox
+from activetigger.uploads import get_upload_staging
 from activetigger.users import Users
 
 
@@ -55,6 +63,7 @@ class Orchestrator:
     max_projects: int
     project_creation_ongoing: dict[str, Project]
     monitoring: Monitoring
+    toolbox: Toolbox
 
     def __init__(self) -> None:
         """
@@ -78,7 +87,8 @@ class Orchestrator:
             (self.path.joinpath("static")).mkdir(parents=True, exist_ok=True)
             self.path_models.mkdir(exist_ok=True)
             self.path_toy_datasets.mkdir(exist_ok=True)
-        except PermissionError as e:
+        except Exception as e:
+            print(e)
             raise PermissionError(
                 f"Cannot create directory: {e}. "
                 f"Please ensure the data directory '{config.data_path}' is writable "
@@ -95,12 +105,17 @@ class Orchestrator:
         self.messages = Messages(self.db_manager)
         self.users = Users(self.db_manager, self.messages)
         self.monitoring = Monitoring(self.db_manager)
+        self.toolbox = Toolbox(self.queue)
 
         # projects in memory
         self.projects = {}
 
         # projects in creation
         self.project_creation_ongoing = {}
+
+        # projects being duplicated (filesystem copy in the queue + pending
+        # DB clone in the main process).
+        self.project_duplication_ongoing: dict[str, dict[str, Any]] = {}
 
         # store creation errors so they survive project cleanup
         self.creation_errors: dict[str, str] = {}
@@ -110,9 +125,12 @@ class Orchestrator:
         self._heavy_stats_last_update = 0.0
         self._heavy_stats_cache: dict = self._collect_heavy_stats()
 
-        # update the projects asynchronously
+        # update the projects asynchronously; if no loop is running yet
+        # (module-import-time init from main.py), defer to ensure_update_task()
+        # which the FastAPI lifespan will call once the loop is up.
         self._running = True
-        self._update_task = asyncio.create_task(self._update(timeout=config.update_timeout))
+        self._update_task: asyncio.Task | None = None
+        self.ensure_update_task()
 
         # create the demo project if not existing at startup
         try:
@@ -121,6 +139,21 @@ class Orchestrator:
         except Exception as e:
             print(f"Error while creating demo project: {e}")
         self.server_state = self.get_server_state()
+
+    def ensure_update_task(self) -> None:
+        """
+        Schedule the background _update loop if it isn't already running.
+        Safe to call repeatedly. Used by the FastAPI lifespan to (re)start
+        the loop when the orchestrator was instantiated outside one
+        (module-import-time init, tests).
+        """
+        self.queue.ensure_update_task()
+        if self._update_task is not None and not self._update_task.done():
+            return
+        try:
+            self._update_task = asyncio.create_task(self._update(timeout=config.update_timeout))
+        except RuntimeError:
+            self._update_task = None
 
     def __del__(self):
         """
@@ -140,14 +173,19 @@ class Orchestrator:
         self.queue.restart()
         self.projects = {}
         self.project_creation_ongoing = {}
+        self.project_duplication_ongoing = {}
 
     def starting_project_creation(self, project: ProjectBaseModel, username: str) -> str:
         """
         Start the project creation
         """
         project_slug = self.check_project_name(project.project_name)
-        if project_slug in ["new", "demo", "logs"]:
+        if project_slug in ["new", "logs"]:
             raise Exception("This project name is not valid - reserved word")
+        # the upload endpoint sanitized the filename on disk; resolve the
+        # client-provided name to the same form or the task won't find the file
+        if project.filename is not None:
+            project.filename = sanitize_uploaded_filename(project.filename)
         self.project_creation_ongoing[project_slug] = Project(
             project_slug,
             self.queue,
@@ -156,11 +194,19 @@ class Orchestrator:
             users=self.users,
             messages=self.messages,
         )
-        self.project_creation_ongoing[project_slug].start_project_creation(
-            params=project,
-            username=username,
-            path=self.path,
-        )
+        # dispatch on kind before enqueuing (see docs/image-projects-strategy.md)
+        if getattr(project, "kind", "text") == "image":
+            self.project_creation_ongoing[project_slug].start_project_creation_imagexp(
+                params=project,
+                username=username,
+                path=self.path,
+            )
+        else:
+            self.project_creation_ongoing[project_slug].start_project_creation(
+                params=project,
+                username=username,
+                path=self.path,
+            )
         return project_slug
 
     def _sync_update_processes(self, project_lifetime: int) -> None:
@@ -211,8 +257,20 @@ class Orchestrator:
         for p in to_del:
             self.project_creation_ongoing.pop(p, None)
 
+        # finalize in-flight project duplications (copy task → DB clone)
+        try:
+            self._sync_finish_duplications()
+        except Exception as e:
+            print(f"Error while finishing duplications: {e}")
+
         # Reap terminal/stuck tasks last, after results have been consumed.
         self.queue.clean_old_processes(timeout=4)
+
+        # drop abandoned chunked-upload staging sessions
+        try:
+            get_upload_staging().clean_old()
+        except Exception as e:
+            print(f"Error while cleaning staged uploads: {e}")
 
     def _collect_heavy_stats(self) -> dict:
         """
@@ -222,7 +280,9 @@ class Orchestrator:
         cpu = psutil.cpu_percent()
         cpu_count = psutil.cpu_count()
         memory_info = psutil.virtual_memory()
-        disk_info = psutil.disk_usage("/")
+        # measure the filesystem holding the data (external volume in Docker),
+        # not the container root
+        disk_info = psutil.disk_usage(config.data_path)
         at_memory = get_dir_size(config.data_path + "/projects")
         gpu = get_gpu_memory_info()
         return {
@@ -367,6 +427,12 @@ class Orchestrator:
         # add it in the database as active
         self.db_manager.projects_service.add_token(encoded_jwt, "active")
 
+        # logins are rare enough to piggyback the tokens-table cleanup here
+        try:
+            self.db_manager.projects_service.prune_old_tokens()
+        except Exception as e:
+            print(f"Error while pruning old tokens: {e}")
+
         return encoded_jwt
 
     def revoke_access_token(self, token) -> None:
@@ -457,9 +523,24 @@ class Orchestrator:
 
         # define the processes to kill
         if kind == "all":
-            kind = ["train_bert", "predict_bert", "generation", "feature", "bertopic"]
+            kind = [
+                "train_bert",
+                "predict_bert",
+                "train_image",
+                "predict_image",
+                "generation",
+                "feature",
+                "bertopic",
+                "train_quickmodel",
+                "predict_quickmodel",
+                "predict_with_features",
+            ]
         if kind == "bert":
             kind = ["train_bert", "predict_bert"]
+        if kind == "image":
+            kind = ["train_image", "predict_image"]
+        if kind in ("quick", "quickmodel"):
+            kind = ["train_quickmodel", "predict_quickmodel", "predict_with_features"]
         if kind is None:
             kind = "all"
         if isinstance(kind, str) and kind != "all":
@@ -471,7 +552,7 @@ class Orchestrator:
             for project in processes:
                 for process in processes[project]:
                     self.queue.kill(process.unique_id)
-                    if process.kind == "train_bert":
+                    if process.kind in ("train_bert", "train_image"):
                         process = cast(LMComputing, process)
                         self.db_manager.language_models_service.delete_model(
                             project, process.model_name
@@ -483,7 +564,7 @@ class Orchestrator:
             processes_project = self.projects[project_slug].get_process(kind, username)
             for process in processes_project:
                 self.queue.kill(process.unique_id)
-                if process.kind == "train_bert":
+                if process.kind in ("train_bert", "train_image"):
                     process = cast(LMComputing, process)
                     self.db_manager.language_models_service.delete_model(
                         project_slug, process.model_name
@@ -521,6 +602,134 @@ class Orchestrator:
         if project_slug in self.projects:
             del self.projects[project_slug]
 
+    def duplicate_project(self, source_slug: str, username: str) -> str:
+        """
+        Kick off the duplication of an existing project. Non-blocking.
+
+        Queues a DuplicateProject task that copies the source project directory
+        (data, features, trained model files…) and any static export files.
+        The orchestrator update loop picks up the completed copy and clones the
+        DB rows in the main process (see `_sync_finish_duplications`). Returns
+        the target slug immediately so callers can poll `/projects/status`.
+        """
+        if not self.exists(source_slug):
+            raise Exception("Source project does not exist")
+
+        source_record = self.db_manager.projects_service.get_project(source_slug)
+        if source_record is None:
+            raise Exception("Source project not found in database")
+        source_params: dict[str, Any] = dict(source_record["parameters"])
+        source_dir = source_params.get("dir")
+        if not source_dir:
+            raise Exception("Source project has no directory")
+        source_dir_str = str(source_dir)
+        if not Path(source_dir_str).exists():
+            raise Exception(f"Source project directory missing on disk: {source_dir_str}")
+
+        # find an available target slug, accounting for in-flight duplications
+        existing = set(self.existing_projects())
+        existing.update(self.project_creation_ongoing.keys())
+        existing.update(self.project_duplication_ongoing.keys())
+        base = f"{source_slug}-copy"
+        target_slug = base
+        n = 2
+        while target_slug in existing or self.path.joinpath(target_slug).exists():
+            target_slug = f"{base}-{n}"
+            n += 1
+
+        target_dir = self.path.joinpath(target_slug)
+        target_dir_str = str(target_dir)
+
+        # build target parameters: keep everything from source but retarget
+        # slug/name/dir so the new project loads against the new directory
+        target_params = dict(source_params)
+        target_params["project_slug"] = target_slug
+        source_name = source_params.get("project_name") or source_slug
+        target_params["project_name"] = f"{source_name} (copy)"
+        target_params["dir"] = target_dir_str
+
+        source_static = f"{config.data_path}/projects/static/{source_slug}"
+        target_static = f"{config.data_path}/projects/static/{target_slug}"
+        has_static = Path(source_static).exists()
+
+        task = DuplicateProject(
+            source_dir=source_dir_str,
+            target_dir=target_dir_str,
+            source_static_dir=source_static if has_static else None,
+            target_static_dir=target_static if has_static else None,
+        )
+        task_id = self.queue.add_task("duplicate_project", target_slug, task, queue="cpu")
+
+        self.project_duplication_ongoing[target_slug] = {
+            "task_id": task_id,
+            "source_slug": source_slug,
+            "username": username,
+            "source_dir": source_dir_str,
+            "target_dir": target_dir_str,
+            "target_static": target_static,
+            "target_params": target_params,
+            "starting_time": time.time(),
+        }
+
+        return target_slug
+
+    def _sync_finish_duplications(self) -> None:
+        """
+        Pick up completed DuplicateProject tasks and finish them by cloning
+        the DB rows in the main process.
+        """
+        to_del: list[str] = []
+        for target_slug, info in list(self.project_duplication_ongoing.items()):
+            task = self.queue.get(info["task_id"])
+            if task is None:
+                shutil.rmtree(info["target_dir"], ignore_errors=True)
+                shutil.rmtree(info["target_static"], ignore_errors=True)
+                self.creation_errors[target_slug] = "Duplication task disappeared"
+                to_del.append(target_slug)
+                continue
+
+            if task.state in ("pending", "running"):
+                continue
+
+            future = task.future
+            exception = future.exception() if future is not None and future.done() else None
+
+            if task.state == "cancelled" or exception is not None:
+                shutil.rmtree(info["target_dir"], ignore_errors=True)
+                shutil.rmtree(info["target_static"], ignore_errors=True)
+                self.creation_errors[target_slug] = (
+                    f"Duplication failed: {exception}" if exception else "Duplication cancelled"
+                )
+                self.queue.delete(info["task_id"])
+                to_del.append(target_slug)
+                continue
+
+            # filesystem copy succeeded — clone the DB rows
+            try:
+                self.db_manager.projects_service.duplicate_project(
+                    source_slug=info["source_slug"],
+                    target_slug=target_slug,
+                    target_parameters=info["target_params"],
+                    user_name=info["username"],
+                    source_dir=info["source_dir"],
+                    target_dir=info["target_dir"],
+                )
+                self.log_action(
+                    info["username"],
+                    f"DUPLICATE PROJECT: {info['source_slug']} -> {target_slug}",
+                    target_slug,
+                )
+            except Exception as e:
+                shutil.rmtree(info["target_dir"], ignore_errors=True)
+                shutil.rmtree(info["target_static"], ignore_errors=True)
+                self.creation_errors[target_slug] = f"DB duplication failed: {e}"
+
+            self.queue.delete(info["task_id"])
+            to_del.append(target_slug)
+
+        for slug in to_del:
+            self.project_duplication_ongoing.pop(slug, None)
+
     def clean_unfinished_project(
         self, project_slug: str | None = None, project_name: str | None = None
     ) -> None:
@@ -557,9 +766,9 @@ class Orchestrator:
         """
         # TODO : put those elements in the config file
         path_data = Path("../frontend/public/gwsd_train_test.csv")
-        col_id = "id"
+        col_id = "guid"
         col_text = "sentence"
-        col_label = "label_agg"
+        col_label = "label"
 
         if not path_data.exists():
             raise Exception("The demo dataset is not available")

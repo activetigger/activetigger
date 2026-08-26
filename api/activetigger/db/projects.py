@@ -8,7 +8,18 @@ from sqlalchemy.orm import sessionmaker
 
 from activetigger.datamodels import AnnotationModel, FeatureDescriptionModelOut
 from activetigger.db import DBException
-from activetigger.db.models import Annotations, Auths, Features, Models, Projects, Schemes, Tokens
+from activetigger.db.models import (
+    Annotations,
+    Auths,
+    Features,
+    Generations,
+    GenModels,
+    Models,
+    Projects,
+    Prompts,
+    Schemes,
+    Tokens,
+)
 
 
 class Codebook(TypedDict):
@@ -59,12 +70,58 @@ class ProjectsService:
         session.close()
         return [project.project_slug for project in projects]
 
+    def existing_projects_with_meta(self) -> list[dict[str, Any]]:
+        """
+        Return slug, parameters, user_name, time_created for every project in
+        one query — avoids the N+1 pattern of looping existing_projects() and
+        calling get_project() for each slug.
+        """
+        with self.Session() as session:
+            rows = session.execute(
+                select(
+                    Projects.project_slug,
+                    Projects.parameters,
+                    Projects.user_name,
+                    Projects.time_created,
+                )
+            ).all()
+        return [
+            {
+                "project_slug": r.project_slug,
+                "parameters": r.parameters,
+                "user_name": r.user_name,
+                "time_created": r.time_created,
+            }
+            for r in rows
+        ]
+
+    def get_user_auths_all_projects(self, user_name: str) -> dict[str, str]:
+        """
+        Return a {project_slug: status} map of every project the user has
+        an auth row on. One query instead of one per project.
+        """
+        with self.Session() as session:
+            rows = session.execute(
+                select(Auths.project_slug, Auths.status).where(Auths.user_name == user_name)
+            ).all()
+        return {row.project_slug: row.status for row in rows}
+
     def add_token(self, token: str, status: str):
         with self.Session.begin() as session:
             new_token = Tokens(
                 token=token, status=status, time_created=datetime.datetime.now(timezone.utc)
             )
             session.add(new_token)
+
+    def prune_old_tokens(self, older_than_hours: int = 48) -> None:
+        """
+        Delete tokens created long enough ago that they cannot be valid
+        anymore (access tokens expire after 24h). The table is scanned on
+        every authenticated request and otherwise grows forever.
+        """
+        cutoff = datetime.datetime.now(timezone.utc) - datetime.timedelta(hours=older_than_hours)
+        with self.Session.begin() as session:
+            session.execute(delete(Tokens).where(Tokens.time_created < cutoff))
 
     def get_token_status(self, token: str):
         with self.Session() as session:
@@ -152,6 +209,156 @@ class ProjectsService:
             if project is None:
                 return None
             session.delete(project)
+
+    def duplicate_project(
+        self,
+        source_slug: str,
+        target_slug: str,
+        target_parameters: dict[str, Any],
+        user_name: str,
+        source_dir: str,
+        target_dir: str,
+    ) -> None:
+        """
+        Clone all DB rows belonging to source_slug under target_slug.
+        """
+        now = datetime.datetime.now(timezone.utc)
+        with self.Session.begin() as session:
+            existing_target = session.scalars(
+                select(Projects).filter_by(project_slug=target_slug)
+            ).first()
+            if existing_target is not None:
+                raise DBException("Target project already exists")
+            source_project = session.scalars(
+                select(Projects).filter_by(project_slug=source_slug)
+            ).first()
+            if source_project is None:
+                raise DBException("Source project not found")
+
+            session.add(
+                Projects(
+                    project_slug=target_slug,
+                    parameters=target_parameters,
+                    time_created=now,
+                    time_modified=now,
+                    user_name=user_name,
+                )
+            )
+
+            for s in session.scalars(select(Schemes).filter_by(project_slug=source_slug)).all():
+                session.add(
+                    Schemes(
+                        name=s.name,
+                        time_created=s.time_created,
+                        time_modified=s.time_modified,
+                        user_name=s.user_name,
+                        project_slug=target_slug,
+                        params=s.params,
+                    )
+                )
+
+            for a in session.scalars(select(Annotations).filter_by(project_slug=source_slug)).all():
+                session.add(
+                    Annotations(
+                        time=a.time,
+                        dataset=a.dataset,
+                        user_name=a.user_name,
+                        project_slug=target_slug,
+                        element_id=a.element_id,
+                        scheme_name=a.scheme_name,
+                        annotation=a.annotation,
+                        comment=a.comment,
+                        selection=a.selection,
+                    )
+                )
+
+            for f in session.scalars(select(Features).filter_by(project_slug=source_slug)).all():
+                session.add(
+                    Features(
+                        time=f.time,
+                        user_name=f.user_name,
+                        project_slug=target_slug,
+                        name=f.name,
+                        kind=f.kind,
+                        parameters=f.parameters,
+                        data=f.data,
+                    )
+                )
+
+            # gen_models must be inserted (and flushed) before generations so we
+            # can remap generations.model_id → the new gen_models.id.
+            gen_model_id_map: dict[int, int] = {}
+            source_gen_models = session.scalars(
+                select(GenModels).filter_by(project_slug=source_slug)
+            ).all()
+            for gm in source_gen_models:
+                new_gm = GenModels(
+                    project_slug=target_slug,
+                    user_name=gm.user_name,
+                    slug=gm.slug,
+                    name=gm.name,
+                    api=gm.api,
+                    endpoint=gm.endpoint,
+                    credentials=gm.credentials,
+                )
+                session.add(new_gm)
+                session.flush()
+                gen_model_id_map[gm.id] = new_gm.id
+
+            for g in session.scalars(select(Generations).filter_by(project_slug=source_slug)).all():
+                new_model_id = gen_model_id_map.get(g.model_id)
+                if new_model_id is None:
+                    # generation pointed at a gen_model not in this project; skip
+                    continue
+                session.add(
+                    Generations(
+                        time=g.time,
+                        user_name=g.user_name,
+                        project_slug=target_slug,
+                        element_id=g.element_id,
+                        model_id=new_model_id,
+                        prompt=g.prompt,
+                        answer=g.answer,
+                        batch=g.batch,
+                    )
+                )
+
+            for p in session.scalars(select(Prompts).filter_by(project_slug=source_slug)).all():
+                session.add(
+                    Prompts(
+                        time=p.time,
+                        time_modified=p.time_modified,
+                        user_name=p.user_name,
+                        project_slug=target_slug,
+                        value=p.value,
+                        parameters=p.parameters,
+                    )
+                )
+
+            for m in session.scalars(select(Models).filter_by(project_slug=source_slug)).all():
+                new_path = (
+                    m.path.replace(source_dir, target_dir, 1)
+                    if m.path and source_dir and m.path.startswith(source_dir)
+                    else m.path
+                )
+                session.add(
+                    Models(
+                        name=m.name,
+                        time=m.time,
+                        time_modified=m.time_modified,
+                        user_name=m.user_name,
+                        project_slug=target_slug,
+                        scheme_name=m.scheme_name,
+                        kind=m.kind,
+                        parameters=m.parameters,
+                        path=new_path,
+                        status=m.status,
+                        statistics=m.statistics,
+                        test=m.test,
+                    )
+                )
+
+            session.add(Auths(project_slug=target_slug, user_name=user_name, status="manager"))
 
     def get_project_auth(self, project_slug: str):
         with self.Session() as session:
@@ -385,10 +592,8 @@ class ProjectsService:
                         # If comment exists, append the rename info
                         (
                             Annotations.comment.isnot(None),
-                            func.concat(
-                                Annotations.comment,
-                                f" | Renamed from '{former_label}' to '{new_label}'",
-                            ),
+                            Annotations.comment
+                            + f" | Renamed from '{former_label}' to '{new_label}'",
                         ),
                         # If no comment, create new one
                         else_=f"Renamed from '{former_label}' to '{new_label}'",
@@ -405,24 +610,33 @@ class ProjectsService:
         elements: list[dict],  # [{"element_id": str, "annotation": str, "comment": str}]
         selection: str = "not defined",
     ):
+        # Commit in chunks: a label import can be tens of thousands of rows,
+        # and a single transaction holds the database write lock for the whole
+        # insert — on SQLite that stalls every other writer (and the token
+        # check of every request) for the duration.
+        chunk_size = 1000
         session = self.Session()
-        for e in elements:
-            annotation = Annotations(
-                time=datetime.datetime.now(timezone.utc),
-                dataset=dataset,
-                user_name=e.get(
-                    "user_name", user_name
-                ),  # allow overriding user_name for each annotation
-                project_slug=project_slug,
-                element_id=e["element_id"],
-                scheme_name=scheme,
-                annotation=e["annotation"],
-                comment=e["comment"],
-                selection=selection,
-            )
-            session.add(annotation)
-        session.commit()
-        session.close()
+        try:
+            for i, e in enumerate(elements, start=1):
+                annotation = Annotations(
+                    time=datetime.datetime.now(timezone.utc),
+                    dataset=dataset,
+                    user_name=e.get(
+                        "user_name", user_name
+                    ),  # allow overriding user_name for each annotation
+                    project_slug=project_slug,
+                    element_id=e["element_id"],
+                    scheme_name=scheme,
+                    annotation=e["annotation"],
+                    comment=e["comment"],
+                    selection=selection,
+                )
+                session.add(annotation)
+                if i % chunk_size == 0:
+                    session.commit()
+            session.commit()
+        finally:
+            session.close()
 
     def add_annotation(
         self,

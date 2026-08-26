@@ -1,7 +1,7 @@
 import datetime
 from datetime import timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from activetigger.db.models import (
@@ -68,6 +68,21 @@ class LogsService:
             return None
 
         return logs[0].time.strftime("%Y-%m-%d %H:%M:%S")
+
+    def get_last_activity_all_projects(self) -> dict[str, str]:
+        """
+        Return {project_slug: last_activity_str} for every project that has
+        at least one log row. Single GROUP BY query instead of one per project.
+        """
+        with self.SessionMaker() as session:
+            rows = session.execute(
+                select(Logs.project_slug, func.max(Logs.time)).group_by(Logs.project_slug)
+            ).all()
+        return {
+            slug: ts.strftime("%Y-%m-%d %H:%M:%S")
+            for slug, ts in rows
+            if slug is not None and ts is not None
+        }
 
     def get_last_activity_user(self, user_name: str):
         with self.SessionMaker() as session:

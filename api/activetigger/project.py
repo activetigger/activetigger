@@ -24,6 +24,7 @@ from activetigger.datamodels import (
     ElementInModel,
     ElementOutModel,
     EvalSetDataModel,
+    EvalSetImageModel,
     EventsModel,
     ExportGenerationsParams,
     FeatureComputing,
@@ -31,7 +32,10 @@ from activetigger.datamodels import (
     GenerationModel,
     GenerationRequest,
     GenerationResult,
+    ImageModelModel,
+    LexicometricsComputing,
     LMComputing,
+    NerModelModel,
     NextInModel,
     NextProjectStateModel,
     PredictedLabel,
@@ -45,6 +49,7 @@ from activetigger.datamodels import (
     ProjectModel,
     ProjectStateModel,
     ProjectUpdateModel,
+    PromptComputing,
     QuickModelComputing,
     QuickModelInModel,
     StaticFileModel,
@@ -63,15 +68,20 @@ from activetigger.functions import (
     sanitize_query_expression,
 )
 from activetigger.generation.generations import Generations
+from activetigger.imagemodels import ImageModels
 from activetigger.languagemodels import LanguageModels
+from activetigger.lexicometrics import Lexicometrics
 from activetigger.messages import Messages
 from activetigger.monitoring import Monitoring
+from activetigger.nermodels import NerModels
 from activetigger.projections import Projections
+from activetigger.prompts import BINDABLE_FEATURE_KINDS, Prompts
 from activetigger.queue_manager import Queue
 from activetigger.quickmodels import QuickModels
 from activetigger.schemes import Schemes
-from activetigger.tasks.add_evalset import AddEvalSet
-from activetigger.tasks.create_project import CreateProject
+from activetigger.tasks.add_evalset import AddEvalSet, AddEvalSetImage
+from activetigger.tasks.create_project import CreateProject, CreateProjectImagexp
+from activetigger.tasks.extend_features import ExtendFeatures
 from activetigger.tasks.generate_call import GenerateCall
 from activetigger.tasks.update_datasets import UpdateDatasets
 from activetigger.users import Users
@@ -110,6 +120,53 @@ class Errors:
         return self.__stack
 
 
+def _detect_span_scheme(values: pd.Series) -> tuple[bool, list[str]]:
+    """Detect whether a label column holds span-style annotations.
+
+    A span annotation is a JSON string parsing to a list of dicts with
+    ``start`` / ``end`` / ``tag`` keys (the same shape that
+    ``TextSpanPanel`` writes to the DB).
+
+    The column is treated as a span scheme when:
+    - at least one cell starts with ``[`` (so we don't run JSON on free text), AND
+    - the majority of non-null cells parse to that shape (allowing empty
+      ``[]`` lists, since "no entities" is a valid annotation).
+
+    Returns ``(is_span, sorted_unique_tags)``. ``sorted_unique_tags`` may be
+    empty if every row had ``[]`` — the caller can still create the scheme
+    and let the user add tags later.
+    """
+    if values.empty:
+        return False, []
+    bracket_lead = values.str.lstrip().str.startswith("[")
+    if not bracket_lead.any():
+        return False, []
+    tags: set[str] = set()
+    matches = 0
+    for raw in values:
+        try:
+            parsed = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(parsed, list):
+            continue
+        # Empty list still counts as a span cell (explicit "no spans")
+        if not parsed:
+            matches += 1
+            continue
+        if all(
+            isinstance(item, dict) and {"start", "end", "tag"} <= item.keys() for item in parsed
+        ):
+            matches += 1
+            for item in parsed:
+                tag = item.get("tag")
+                if isinstance(tag, str) and tag:
+                    tags.add(tag)
+    if matches > len(values) / 2:
+        return True, sorted(tags)
+    return False, []
+
+
 class Project:
     """
     Project object
@@ -127,6 +184,7 @@ class Project:
     schemes: Schemes
     features: Features
     languagemodels: LanguageModels
+    nermodels: NerModels | None
     quickmodels: QuickModels
     generations: Generations
     projections: Projections
@@ -215,15 +273,8 @@ class Project:
             self.db_manager,
             self.data,
         )
-        self.features = Features(
-            project_slug,
-            self.data,
-            self.path_models,
-            self.queue,
-            cast(list[FeatureComputing], self.computing),
-            self.db_manager,
-            self.params.language,
-        )
+        # LanguageModels is built first so Features can take a reference to
+        # it (needed to list trained BERTs as a source for bert-embeddings).
         self.languagemodels = LanguageModels(
             project_slug,
             self.params.dir,
@@ -232,13 +283,79 @@ class Project:
             self.db_manager,
             config.file_bert_models,
         )
+        self.features = Features(
+            project_slug,
+            self.data,
+            self.path_models,
+            self.queue,
+            cast(list[FeatureComputing], self.computing),
+            self.db_manager,
+            self.params.language,
+            kind=getattr(self.params, "kind", "text"),
+            languagemodels=self.languagemodels,
+        )
+        # Prompt-based selection — available on image projects (multimodal-
+        # embeddings features) and text projects (sentence-embeddings features).
+        self.prompts: Prompts | None = None
+        if self.params.dir is not None:
+            self.prompts = Prompts(
+                project_slug,
+                self.params.dir,
+                self.queue,
+                self.computing,
+                self.features,
+            )
+
+            def _cascade_prompts(name: str, kind: str | None) -> None:
+                if kind in BINDABLE_FEATURE_KINDS and self.prompts is not None:
+                    self.prompts.delete_by_feature(name)
+
+            def _reset_prompts() -> None:
+                if self.prompts is not None:
+                    self.prompts.reset_all()
+
+            self.features.on_delete = _cascade_prompts
+            self.features.on_reset = _reset_prompts
+        # Image fine-tuning is only meaningful for image projects.
+        self.imagemodels: ImageModels | None = None
+        if getattr(self.params, "kind", "text") == "image":
+            self.imagemodels = ImageModels(
+                project_slug,
+                self.params.dir,
+                self.queue,
+                self.computing,
+                self.db_manager,
+                config.file_image_models,
+            )
+        # NER fine-tuning is text-only (span schemes don't exist on image
+        # projects). Always instantiated for text projects so the state /
+        # routes can address it uniformly; whether the UI exposes it is
+        # gated by experimental mode on the frontend.
+        self.nermodels: NerModels | None = None
+        if getattr(self.params, "kind", "text") != "image":
+            self.nermodels = NerModels(
+                project_slug,
+                self.params.dir,
+                self.queue,
+                self.computing,
+                self.db_manager,
+                getattr(config, "file_bert_models", None),
+            )
         self.quickmodels = QuickModels(
-            project_slug, self.params.dir, self.queue, self.computing, self.db_manager
+            project_slug,
+            self.params.dir,
+            self.queue,
+            self.computing,
+            self.db_manager,
+            features=self.features,
         )
         self.generations = Generations(
             self.db_manager, cast(list[GenerationComputing], self.computing)
         )
-        self.projections = Projections(self.params.dir, self.computing, self.queue)
+        self.projections = Projections(
+            project_slug, self.params.dir, self.computing, self.queue, self.db_manager
+        )
+        self.lexicometrics = Lexicometrics(self.params.dir, self.computing, self.queue)
         self.bertopic = Bertopic(
             project_slug,
             self.params.dir,
@@ -300,6 +417,44 @@ class Project:
             )
         )
 
+    def start_project_creation_imagexp(
+        self, params: ProjectBaseModel, username: str, path: Path
+    ) -> None:
+        """
+        Experimental: enqueue creation of an image project.
+        See docs/image-projects-strategy.md.
+        """
+        self.status = "creating"
+        params.dir = path.joinpath(self.project_slug)
+
+        unique_id = self.queue.add_task(
+            "create_project",
+            self.project_slug,
+            CreateProjectImagexp(
+                self.project_slug,
+                params,
+                username,
+                data_all=config.data_all,
+                train_file=config.train_file,
+                valid_file=config.valid_file,
+                test_file=config.test_file,
+                features_file=config.features_file,
+                random_seed=config.random_seed,
+            ),
+            queue="cpu",
+        )
+
+        self.computing.append(
+            ProjectCreatingModel(
+                username=username,
+                project_slug=self.project_slug,
+                unique_id=unique_id,
+                time=datetime.now(timezone.utc),
+                kind="create_project",
+                status="training",
+            )
+        )
+
     def finish_project_creation(
         self,
         username: str,
@@ -326,15 +481,19 @@ class Project:
         else:
             for col in import_trainset_labels.columns:
                 scheme_name = col.replace("dataset_", "")
-                delimiters = import_trainset_labels[col].str.contains("|", regex=False).sum()
-                if delimiters < 5:
-                    scheme_type = "multiclass"
-                    scheme_labels = list(import_trainset_labels[col].dropna().unique())
+                non_null = import_trainset_labels[col].dropna().astype(str)
+                span_kind, span_labels = _detect_span_scheme(non_null)
+                if span_kind:
+                    scheme_type = "span"
+                    scheme_labels = span_labels
                 else:
-                    scheme_type = "multilabel"
-                    scheme_labels = list(
-                        import_trainset_labels[col].dropna().str.split("|").explode().unique()
-                    )
+                    delimiters = non_null.str.contains("|", regex=False).sum()
+                    if delimiters < 5:
+                        scheme_type = "multiclass"
+                        scheme_labels = list(non_null.unique())
+                    else:
+                        scheme_type = "multilabel"
+                        scheme_labels = list(non_null.str.split("|").explode().unique())
                 self.db_manager.projects_service.add_scheme(
                     self.project_slug,
                     scheme_name,
@@ -382,6 +541,14 @@ class Project:
         self.users.set_auth(
             AuthUserModel(username=username, project_slug=project.project_slug, status="manager")
         )
+
+        # pre-populate the project with the generative models declared in
+        # generative.yaml (no-op if the file is missing or empty)
+        try:
+            Generations(self.db_manager, []).add_default_models(project.project_slug, username)
+        except Exception as e:
+            print(f"Failed to add default generative models for {project.project_slug}: {e}")
+
         self.status = "created"
 
     def delete(self) -> None:
@@ -423,6 +590,10 @@ class Project:
         if not path.exists():
             raise Exception("No eval data available")
         os.remove(path)
+        if getattr(self.params, "kind", "text") == "image":
+            eval_images_dir = self.params.dir.joinpath("images", f"eval_{dataset}")
+            if eval_images_dir.exists():
+                shutil.rmtree(eval_images_dir, ignore_errors=True)
         self.db_manager.projects_service.delete_annotations_evalset(
             self.params.project_slug, dataset
         )
@@ -439,32 +610,56 @@ class Project:
         )
         # add reload
         self.data.load_dataset("all")
-        # reset the features file
-        self.features.reset_features_file()
-        self.quickmodels.drop_models(which="all")
+        self._shrink_features_after_evalset_drop(dataset)
 
     def add_evalset(
-        self, dataset, evalset: EvalSetDataModel, username: str, project_slug: str
+        self,
+        dataset,
+        evalset: EvalSetDataModel | EvalSetImageModel,
+        username: str,
+        project_slug: str,
     ) -> str | None:
         """
         Add a eval dataset (test or valid)
         """
-        if evalset.cols_text is None or len(evalset.cols_text) == 0:
-            raise Exception("No text column selected for the evalset")
-        # check the valid directory
         if self.params.dir is None:
             raise Exception("Cannot add eval data without a valid dir")
-        # check the labels
-        if evalset.col_label == "":
-            evalset.col_label = None
         if dataset not in ["test", "valid"]:
             raise Exception("Dataset should be test or valid")
-
         if dataset == "test" and self.params.test:
             raise Exception("There is already a test dataset")
-
         if dataset == "valid" and self.params.valid:
             raise Exception("There is already a valid dataset")
+
+        kind = getattr(self.params, "kind", "text")
+        is_image = kind == "image"
+        if is_image and not isinstance(evalset, EvalSetImageModel):
+            raise Exception("Image projects require an EvalSetImageModel payload")
+        if not is_image and not isinstance(evalset, EvalSetDataModel):
+            raise Exception("Text projects require an EvalSetDataModel payload")
+
+        # the evalset/add route filled the filename(s) from the staged
+        # uploads it moved into the project data folder
+        if not evalset.filename:
+            raise Exception("No data file associated with the evalset")
+
+        if isinstance(evalset, EvalSetDataModel):
+            if not evalset.cols_text:
+                raise Exception("No text column selected for the evalset")
+            # each selected label column must match an existing scheme name
+            available_schemes = self.schemes.available()
+            unknown = [c for c in evalset.cols_label if c not in available_schemes]
+            if unknown:
+                raise Exception(
+                    "Selected label column(s) do not match any existing scheme: "
+                    + ", ".join(unknown)
+                )
+        else:
+            if evalset.col_label == "":
+                evalset.col_label = None
+            if evalset.col_id == "":
+                evalset.col_id = None
+
         # check existing task in the queue → if there is already an add_evalset task for this project and this dataset, we return the status of the task without adding a new one
         if self.queue.current:
             add_eval_task = next(
@@ -480,19 +675,36 @@ class Project:
             if add_eval_task:
                 raise Exception("this set is already being added")
 
-        # call task
-        unique_id = self.queue.add_task(
-            "add_evalset",
-            project_slug,
-            AddEvalSet(
+        if isinstance(evalset, EvalSetImageModel):
+            scheme_labels = (
+                self.schemes.available()[evalset.scheme].labels if evalset.scheme else None
+            )
+            task = AddEvalSetImage(
                 dataset=dataset,
                 evalset=evalset,
                 project=self.params,
                 username=username,
                 index=self.data.get_full_id().index,
                 project_slug=project_slug,
-                scheme=self.schemes.available()[evalset.scheme].labels if evalset.scheme else None,
-            ),
+                scheme=scheme_labels,
+            )
+        else:
+            available_schemes = self.schemes.available()
+            schemes_labels = {name: available_schemes[name].labels for name in evalset.cols_label}
+            task = AddEvalSet(
+                dataset=dataset,
+                evalset=evalset,
+                project=self.params,
+                username=username,
+                index=self.data.get_full_id().index,
+                project_slug=project_slug,
+                schemes=schemes_labels,
+            )
+
+        unique_id = self.queue.add_task(
+            "add_evalset",
+            project_slug,
+            task,
             queue="cpu",
         )
         self.computing.append(
@@ -507,6 +719,89 @@ class Project:
             return unique_id
         else:
             return None
+
+    def _refresh_features_after_evalset(self, eval_dataset: str, username: str) -> None:
+        """
+        Bring the features file to the new train+valid+test shape after a
+        new eval set has been loaded. If every existing feature can be
+        recomputed from its stored parameters, only compute them for the
+        new rows in a background ExtendFeatures task — train features and
+        quickmodels stay valid. Otherwise (imported/prediction/dataset
+        features, image projects, or spec-building failure) fall back to
+        a full reset.
+        """
+        if self._kill_running_feature_extensions():
+            self.features.reset_features_file()
+            self.quickmodels.drop_models(which="all")
+            return
+
+        features_meta = self.db_manager.projects_service.get_project_features(self.name)
+        if (
+            getattr(self.params, "kind", "text") != "image"
+            and features_meta
+            and all(f.kind in Features.COMPUTABLE_KINDS for f in features_meta.values())
+        ):
+            try:
+                data = self.features.concat_split_column("text", eval_dataset)
+                specs = self.features.build_compute_specs(list(features_meta), data)
+                self._enqueue_extend_features(specs, eval_dataset, username)
+                return
+            except Exception as ex:
+                print(f"Cannot extend features for the new {eval_dataset} set: {ex}")
+        self.features.reset_features_file()
+        self.quickmodels.drop_models(which="all")
+
+    def _shrink_features_after_evalset_drop(self, eval_dataset: str) -> None:
+        """
+        Remove the dropped eval set's rows from the features file in a
+        background task. Row removal needs no recomputation, so every
+        feature kind survives (imported and prediction ones included)
+        and the quickmodels stay valid.
+        """
+        if self._kill_running_feature_extensions():
+            self.features.reset_features_file()
+            self.quickmodels.drop_models(which="all")
+            return
+        self._enqueue_extend_features([], eval_dataset, "system")
+
+    def _kill_running_feature_extensions(self) -> bool:
+        running = [c for c in self.computing if getattr(c, "kind", None) == "extend_features"]
+        for c in running:
+            self.queue.kill(c.unique_id)
+        return bool(running)
+
+    def _enqueue_extend_features(self, specs: list[dict], eval_dataset: str, username: str) -> None:
+        eval_data = getattr(self.data, eval_dataset)
+        new_index = eval_data.index if eval_data is not None else pd.Index([])
+        task = ExtendFeatures(
+            specs=specs,
+            path_process=self.features.path_all.parent,
+            path_models=self.features.path_models,
+            language=self.features.lang,
+            path_features=self.features.path_features,
+            eval_dataset=eval_dataset,
+            new_index=new_index,
+            full_index=self.data.index.index,
+        )
+        unique_id = self.queue.add_task("extend_features", self.name, task, queue="cpu")
+        self.computing.append(
+            ProcessComputing(
+                user=username,
+                unique_id=unique_id,
+                time=datetime.now(timezone.utc),
+                kind="extend_features",
+            )
+        )
+
+    def _recover_features_after_failed_extension(self) -> None:
+        """
+        A failed or cancelled ExtendFeatures task leaves the features
+        file with a shape that no longer matches the datasets (the eval
+        set change is already applied) — reset to the safe empty state,
+        matching what a non-extendable change does.
+        """
+        self.features.reset_features_file()
+        self.quickmodels.drop_models(which="all")
 
     def train_quickmodel(
         self,
@@ -623,6 +918,7 @@ class Project:
         Get prediction of a model or raise an error
         - quickmodel
         - languagemodel
+        - imagemodel
         """
         if type == "quickmodel":
             if not self.quickmodels.exists(name):
@@ -634,6 +930,10 @@ class Project:
                 raise Exception("Languagemodel doesn't exist")
             else:
                 prediction = self.languagemodels.get_prediction(name)
+        elif type == "imagemodel":
+            if self.imagemodels is None or not self.imagemodels.exists(name):
+                raise Exception("Image model doesn't exist")
+            prediction = self.imagemodels.get_prediction(name)
         else:
             raise Exception("Model type not recognized")
         return prediction
@@ -658,20 +958,20 @@ class Project:
         self,
         next: NextInModel,
         username: str = "user",
-    ) -> ElementOutModel:
+    ) -> list[ElementOutModel]:
         """
-        Get next item for a specific scheme with a specific selection method
+        Get next item(s) for a specific scheme with a specific selection method
         - fixed
         - random
         - active (entropy or active LABEL)
         - maxprob
         - test
 
+        next.n : number of elements to return (batch mode)
         history : previous selected elements
         frame is the use of projection coordinates to limit the selection
         filter is a regex to use on the corpus
         """
-        element_id = None
 
         if next.scheme not in self.schemes.available():
             raise ValueError("Scheme doesn't exist")
@@ -692,7 +992,6 @@ class Project:
 
         # check conditions for active learning and get proba
         proba = None
-        predict = PredictedLabel(label=None, proba=None, entropy=None)
         if next.model_active is not None:
             prediction = self.get_model_prediction(next.model_active.type, next.model_active.value)
             proba = prediction.reindex(df.index)
@@ -718,6 +1017,14 @@ class Project:
                 f = f & f_user
         elif next.sample == "commented":
             f = df["comment"].fillna("").str.len() > 0
+        elif next.sample == "wrong":
+            if next.dataset != "train":
+                raise ValueError("Wrong-prediction filter is only available on the train dataset")
+            if proba is None or "prediction" not in proba.columns:
+                raise ValueError(
+                    "Wrong-prediction filter requires an active model with predictions"
+                )
+            f = df["labels"].notna() & (df["labels"] != proba["prediction"])
         else:
             f = pd.Series(True, index=df.index)
 
@@ -765,20 +1072,21 @@ class Project:
 
         # filter with a frame (projection coordinates)
         if next.frame and len(next.frame) == 4:
-            if username in self.projections.available:
-                if self.projections.available[username].data is not None:
-                    projection = self.projections.available[username].data
-                    f_frame = (
-                        (projection[0] > next.frame[0])
-                        & (projection[0] < next.frame[1])
-                        & (projection[1] > next.frame[2])
-                        & (projection[1] < next.frame[3])
-                    )
-                    f = f & f_frame
-                else:
-                    raise ValueError("No vizualisation data available")
-            else:
-                raise ValueError("No vizualisation available")
+            if not next.projection_name:
+                raise ValueError("No active projection selected for frame selection")
+            projection = self.projections.get(next.projection_name)
+            if projection is None:
+                raise ValueError(f"Projection '{next.projection_name}' does not exist")
+            projection_data = projection.data
+            if projection_data is None:
+                raise ValueError("No vizualisation data available")
+            f_frame = (
+                (projection_data[0] > next.frame[0])
+                & (projection_data[0] < next.frame[1])
+                & (projection_data[1] > next.frame[2])
+                & (projection_data[1] < next.frame[3])
+            )
+            f = f & f_frame
 
         # test if there is at least one element available
         if f.sum() == 0:
@@ -790,21 +1098,26 @@ class Project:
             raise ValueError(
                 "No element available with this selection mode and history. Clear the history to access previous elements."
             )
-        indicator = None
         n_sample = f.sum()  # use len(ss) for adding history
 
+        n = min(max(1, next.n), 100)
+        element_ids: list = []
+        indicators: dict = {}
+        similarities: dict = {}
+        ranks: dict = {}
+
         # validate selection method
-        valid_selections = {"fixed", "random", "maxprob", "active"}
+        valid_selections = {"fixed", "random", "maxprob", "active", "prompt"}
         if next.selection not in valid_selections:
             raise ValueError(f"Unknown selection method: '{next.selection}'")
 
         # select an element based on the method
 
-        if next.selection == "fixed":  # next row
-            element_id = ss.index[0]
+        if next.selection == "fixed":  # next rows
+            element_ids = list(ss.index[:n])
 
-        elif next.selection == "random":  # random row
-            element_id = ss.sample(n=1).index[0]
+        elif next.selection == "random":  # random rows
+            element_ids = list(ss.sample(n=min(n, len(ss))).index)
 
         # be sure that the model has been trained
         if next.selection in ["maxprob", "active"] and next.model_active is None:
@@ -819,9 +1132,9 @@ class Project:
                 .drop(next.history, errors="ignore")
                 .sort_values(ascending=False)
             )
-            element_id = ss_maxprob.index[0]
-            n_sample = f.sum()
-            indicator = f"probability: {round(proba.loc[element_id, next.label_prob], 2)}"
+            element_ids = list(ss_maxprob.index[:n])
+            for eid in element_ids:
+                indicators[eid] = f"probability: {round(proba.loc[eid, next.label_prob], 2)}"
 
         # active: two modes depending on whether label_prob is set
         if next.selection == "active" and proba is not None:
@@ -838,9 +1151,9 @@ class Project:
                     .drop(next.history, errors="ignore")
                     .sort_values(ascending=False)
                 )
-                element_id = ss_active.index[0]
-                n_sample = f.sum()
-                indicator = f"probability: {round(proba.loc[element_id, next.label_prob], 2)}"
+                element_ids = list(ss_active.index[:n])
+                for eid in element_ids:
+                    indicators[eid] = f"probability: {round(proba.loc[eid, next.label_prob], 2)}"
             else:
                 # active (no label): higher entropy (uncertainty sampling)
                 ss_active = (
@@ -848,60 +1161,105 @@ class Project:
                     .drop(next.history, errors="ignore")
                     .sort_values(ascending=False)
                 )
-                element_id = ss_active.index[0]
-                n_sample = f.sum()
-                indicator = f"entropy: {round(proba.loc[element_id, 'entropy'], 2)}"
+                element_ids = list(ss_active.index[:n])
+                for eid in element_ids:
+                    indicators[eid] = f"entropy: {round(proba.loc[eid, 'entropy'], 2)}"
 
-        if element_id is None:
+        # prompt: cosine similarity between a saved prompt embedding and the
+        # element embeddings of its bound feature (multimodal-embeddings on
+        # image projects, sentence-embeddings on text projects). The full
+        # sorted ranking is cached on the Prompts object per (prompt_id,
+        # dataset); each call then just does an index intersection with the
+        # candidate set ss.
+        if next.selection == "prompt":
+            if self.prompts is None:
+                raise ValueError("Prompt selection is not available on this project")
+            if next.prompt_id is None:
+                raise ValueError("prompt_id is required for prompt selection")
+            ranked = self.prompts.get_ranking(next.prompt_id, next.dataset)
+            # Index.intersection preserves the order of self, so candidates
+            # stays in descending-similarity order.
+            candidates = ranked.loc[ranked.index.intersection(ss.index)]
+            if next.similarity_range is not None:
+                lo, hi = next.similarity_range
+                if lo > hi:
+                    lo, hi = hi, lo
+                candidates = candidates[(candidates >= lo) & (candidates <= hi)]
+            if candidates.empty:
+                raise ValueError("No candidate elements have embeddings for the prompt's feature.")
+            element_ids = list(candidates.index[:n])
+            for eid in element_ids:
+                similarities[eid] = float(candidates.loc[eid])
+                # rank in the full prompt ranking (1-based), independent of the
+                # currently filtered candidate pool, so the user sees the
+                # absolute position across the whole dataset.
+                loc = ranked.index.get_loc(eid)
+                if not isinstance(loc, int):
+                    raise ValueError(
+                        f"Expected unique position for {eid} in prompt ranking, got {type(loc).__name__}"
+                    )
+                ranks[eid] = loc + 1
+                indicators[eid] = f"similarity: {round(similarities[eid], 3)}"
+        if len(element_ids) == 0:
             raise ValueError("No element available with this selection mode.")
 
-        # get prediction for the element selected
+        # build the output for each selected element
+        elements: list[ElementOutModel] = []
+        for element_id in element_ids:
+            # get prediction for the element selected
+            predict = PredictedLabel(label=None, proba=None, entropy=None)
+            if (
+                next.model_active is not None
+                and next.model_active.type is not None
+                and next.model_active.value is not None
+                and next.dataset == "train"
+            ):
+                predict = self.get_prediction_element(
+                    next.model_active.type,
+                    next.model_active.value,
+                    element_id,
+                )
 
-        if (
-            next.model_active is not None
-            and next.model_active.type is not None
-            and next.model_active.value is not None
-            and next.dataset == "train"
-        ):
-            predict = self.get_prediction_element(
-                next.model_active.type,
-                next.model_active.value,
+            # get all tags already existing for the element selected
+            previous = self.schemes.projects_service.get_annotations_by_element(
+                self.params.project_slug,
+                next.scheme,
                 element_id,
             )
 
-        # get all tags already existing for the element selected
-        previous = self.schemes.projects_service.get_annotations_by_element(
-            self.params.project_slug,
-            next.scheme,
-            element_id,
-        )
+            if next.dataset in ["test", "valid"]:
+                context = {}
+            else:
+                if self.data.train is None:
+                    raise Exception("Train dataset is not defined")
+                # get context for the selected element
+                context = dict(
+                    self.data.train.loc[element_id, self.params.cols_context]
+                    .fillna("NA")
+                    .apply(str)
+                )
 
-        if next.dataset in ["test", "valid"]:
-            context = {}
-        else:
-            if self.data.train is None:
-                raise Exception("Train dataset is not defined")
-            # get context for the single selected element
-            context = dict(
-                self.data.train.loc[element_id, self.params.cols_context].fillna("NA").apply(str)
+            text = df.loc[element_id, "text"]
+            if pd.isna(text):
+                text = "NA"
+
+            elements.append(
+                ElementOutModel(
+                    element_id=element_id,
+                    text=text,
+                    context=context,
+                    selection=next.selection,
+                    info=indicators.get(element_id),
+                    predict=predict,
+                    frame=next.frame,
+                    limit=None,
+                    history=previous,
+                    n_sample=n_sample,
+                    similarity=similarities.get(element_id),
+                    rank=ranks.get(element_id),
+                )
             )
-
-        text = df.loc[element_id, "text"]
-        if pd.isna(text):
-            text = "NA"
-
-        return ElementOutModel(
-            element_id=element_id,
-            text=text,
-            context=context,
-            selection=next.selection,
-            info=indicator,
-            predict=predict,
-            frame=next.frame,
-            limit=None,
-            history=previous,
-            n_sample=n_sample,
-        )
+        return elements
 
     def get_element(
         self,
@@ -1071,14 +1429,14 @@ class Project:
 
     def get_projection(
         self,
-        username: str,
+        projection_name: str,
         scheme: str,
         active_model: ActiveModel | None = None,
     ) -> ProjectionOutModel | None:
         """
-        Get projection if computed
+        Get a projection by name if computed
         """
-        projection = self.projections.get(username)
+        projection = self.projections.get(projection_name)
         if projection is None:
             return None
         # get annotations - use copy to avoid mutating stored projection data
@@ -1097,6 +1455,10 @@ class Project:
             data["prediction"] = self.languagemodels.get_prediction(active_model.value)[
                 "prediction"
             ]
+        elif active_model is not None and active_model.type == "imagemodel":
+            if self.imagemodels is None or not self.imagemodels.exists(active_model.value):
+                raise Exception("Image model doesn't exist")
+            data["prediction"] = self.imagemodels.get_prediction(active_model.value)["prediction"]
 
         if "prediction" in data:
             predictions = data["prediction"].to_list()
@@ -1150,18 +1512,36 @@ class Project:
         ):
             return self._state_cache
 
+        # expose "prompt" selection only when the project has at least one
+        # bindable feature (multimodal-embeddings for image, sentence-embeddings
+        # for text) AND at least one saved prompt.
+        methods = ["fixed", "random", "maxprob", "active"]
+        if self.prompts is not None:
+            try:
+                available = self.features.get_available()
+            except Exception:
+                available = {}
+            has_bindable_feature = any(f.kind in BINDABLE_FEATURE_KINDS for f in available.values())
+            has_prompt = len(self.prompts.list()) > 0
+            if has_bindable_feature and has_prompt:
+                methods.append("prompt")
+
         result = ProjectStateModel(
             params=self.params,
             next=NextProjectStateModel(
                 methods_min=["fixed", "random"],
-                methods=["fixed", "random", "maxprob", "active"],
-                sample=["untagged", "all", "tagged", "not_by_me", "commented"],
+                methods=methods,
+                sample=["untagged", "all", "tagged", "not_by_me", "commented", "wrong"],
             ),
             schemes=self.schemes.state(),
             features=self.features.state(),
+            prompts=self.prompts.state() if self.prompts is not None else None,
             quickmodel=self.quickmodels.state(),
             languagemodels=self.languagemodels.state(),
+            imagemodels=self.imagemodels.state() if self.imagemodels is not None else None,
+            nermodels=self.nermodels.state() if self.nermodels is not None else None,
             projections=self.projections.state(),
+            lexicometrics=self.lexicometrics.state(),
             generations=self.generations.state(),
             bertopic=self.bertopic.state(),
             errors=self.errors.state(),
@@ -1174,6 +1554,218 @@ class Project:
         self._state_cache = result
         self._state_cache_time = now
         return result
+
+    def export_summary(self) -> dict:
+        """
+        Lab-notebook style snapshot of the project.
+
+        Returns a plain dict (JSON-serializable) covering project parameters,
+        users, schemes (with per-label / per-user / per-dataset annotation counts),
+        features, language models, quick models, generations, projections, bertopic.
+        Dates are ISO-8601 strings.
+
+        This feature can be a bit heavy for the orchestrator ; in the future; move it somewhere else ?
+        """
+
+        # Remove keys linked to credentials
+
+        def _iso(value: Any) -> str | None:
+            if value is None:
+                return None
+            if isinstance(value, datetime):
+                return value.isoformat()
+            return str(value)
+
+        REDACT_KEYS = ("api_key", "apikey", "token", "secret", "password", "credentials")
+
+        def _redact(obj: Any) -> Any:
+            if isinstance(obj, dict):
+                return {
+                    k: ("***" if any(s in k.lower() for s in REDACT_KEYS) else _redact(v))
+                    for k, v in obj.items()
+                }
+            if isinstance(obj, list):
+                return [_redact(v) for v in obj]
+            return obj
+
+        # --- project header --------------------------------------------------
+        slug = self.params.project_slug
+        project_row = self.db_manager.projects_service.get_project(slug) or {}
+        time_created = project_row.get("time_created")
+        time_modified = project_row.get("time_modified")
+        created_by = project_row.get("user_name")
+
+        project_block = {
+            "slug": slug,
+            "name": self.params.project_name,
+            "kind": self.params.kind,
+            "language": self.params.language,
+            "created_at": _iso(time_created),
+            "created_by": created_by,
+            "modified_at": _iso(time_modified),
+            "col_id": self.params.col_id,
+            "cols_text": list(self.params.cols_text or []),
+            "cols_context": list(self.params.cols_context or []),
+            "n_total": self.params.n_total,
+            "n_train": self.params.n_train,
+            "n_test": self.params.n_test,
+            "n_valid": self.params.n_valid,
+            "parameters": _redact(jsonable_encoder(self.params, exclude={"dir"})),
+        }
+
+        # --- users -----------------------------------------------------------
+        auths = self.db_manager.projects_service.get_project_auth(slug) or {}
+        users_block = [
+            {"username": username, "role": role} for username, role in sorted(auths.items())
+        ]
+
+        # --- schemes (with annotation rollups) -------------------------------
+        available_schemes = self.schemes.available()
+        scheme_datasets = ["train", "test", "valid"]
+        schemes_block: list[dict] = []
+
+        # query DB once per scheme via SQLAlchemy for time_created / time_modified
+        # available() does not expose timestamps; reuse the same query other code
+        # uses to read schemes from the DB.
+        scheme_timestamps: dict[str, dict[str, Any]] = {}
+        try:
+            with self.db_manager.projects_service.Session() as session:
+                from activetigger.db.models import Schemes as SchemesTable
+
+                rows = session.query(SchemesTable).filter_by(project_slug=slug).all()
+                for r in rows:
+                    scheme_timestamps[r.name] = {
+                        "time_created": r.time_created,
+                        "time_modified": r.time_modified,
+                        "user_name": r.user_name,
+                    }
+        except Exception:
+            scheme_timestamps = {}
+
+        for scheme_name, scheme in available_schemes.items():
+            per_label: dict[str, int] = {}
+            per_user: dict[str, int] = {}
+            per_dataset: dict[str, int] = {d: 0 for d in scheme_datasets}
+            distinct_elements: set[str] = set()
+            total = 0
+
+            for dataset in scheme_datasets:
+                try:
+                    rows = self.db_manager.projects_service.get_table_annotations_users(
+                        slug, scheme_name, dataset
+                    )
+                except Exception:
+                    rows = []
+                # rows: [element_id, annotation, user_name, time, dataset]
+                for element_id, annotation, user_name, _time, _ds in rows:
+                    if annotation is None:
+                        continue
+                    total += 1
+                    per_dataset[dataset] += 1
+                    distinct_elements.add(element_id)
+                    per_user[user_name] = per_user.get(user_name, 0) + 1
+                    # multilabel uses "|"-separated labels
+                    if scheme.kind == "multilabel" and "|" in annotation:
+                        for lbl in annotation.split("|"):
+                            per_label[lbl] = per_label.get(lbl, 0) + 1
+                    else:
+                        per_label[annotation] = per_label.get(annotation, 0) + 1
+
+            ts = scheme_timestamps.get(scheme_name, {})
+            schemes_block.append(
+                {
+                    "name": scheme_name,
+                    "kind": scheme.kind,
+                    "labels": list(scheme.labels),
+                    "created_at": _iso(ts.get("time_created")),
+                    "modified_at": _iso(ts.get("time_modified")),
+                    "created_by": ts.get("user_name"),
+                    "n_annotations_total": total,
+                    "n_annotations_per_dataset": per_dataset,
+                    "n_distinct_elements_annotated": len(distinct_elements),
+                    "annotations_per_label": dict(sorted(per_label.items())),
+                    "annotations_per_user": dict(sorted(per_user.items())),
+                }
+            )
+
+        # --- features --------------------------------------------------------
+        try:
+            available_features = self.features.get_available()
+        except Exception:
+            available_features = {}
+        features_block = [
+            {
+                "name": name,
+                "kind": getattr(feat, "kind", None),
+                "user": getattr(feat, "user", None),
+                "time": _iso(getattr(feat, "time", None)),
+                "parameters": _redact(getattr(feat, "parameters", {}) or {}),
+            }
+            for name, feat in available_features.items()
+        ]
+
+        # --- language models -------------------------------------------------
+        language_models_block: list[dict] = []
+        try:
+            lm_available = self.languagemodels.available()
+        except Exception:
+            lm_available = {}
+        for scheme_name, models in lm_available.items():
+            for model_name, status in models.items():
+                language_models_block.append(
+                    {
+                        "name": model_name,
+                        "scheme": scheme_name,
+                        "time": _iso(getattr(status, "time", None)),
+                        "predicted": getattr(status, "predicted", False),
+                        "predicted_all": getattr(status, "predicted_all", False),
+                        "predicted_external": getattr(status, "predicted_external", False),
+                        "tested": getattr(status, "tested", False),
+                        "exclude_labels": list(getattr(status, "exclude_labels", []) or []),
+                    }
+                )
+
+        # --- quick models ----------------------------------------------------
+        quick_models_block: list[dict] = []
+        try:
+            qm_available = self.quickmodels.available()
+        except Exception:
+            qm_available = {}
+        for scheme_name, models in qm_available.items():
+            for m in models:
+                quick_models_block.append(
+                    {
+                        "name": m.name,
+                        "scheme": scheme_name,
+                        "kind": m.kind,
+                        "time": _iso(m.time),
+                        "parameters": _redact(m.parameters or {}),
+                    }
+                )
+
+        # --- generations / projections / bertopic / image models -------------
+        def _state_dict(submodule) -> Any:
+            try:
+                return jsonable_encoder(submodule.state())
+            except Exception:
+                return None
+
+        return {
+            "format_version": "1.0",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "project": project_block,
+            "users": users_block,
+            "schemes": schemes_block,
+            "features": features_block,
+            "language_models": language_models_block,
+            "quick_models": quick_models_block,
+            "generations": _state_dict(self.generations),
+            "projections": _state_dict(self.projections),
+            "bertopic": _state_dict(self.bertopic),
+            "imagemodels": _state_dict(self.imagemodels) if self.imagemodels is not None else None,
+            "nermodels": _state_dict(self.nermodels) if self.nermodels is not None else None,
+            "prompts": _state_dict(self.prompts) if self.prompts is not None else None,
+        }
 
     def export_features(self, features: list, format: str = "parquet") -> FileResponse:
         """
@@ -1215,6 +1807,10 @@ class Project:
         - for a scheme & dataset
         - for all schemes & every annotation
         """
+        # Row-level columns are shared across schemes (one value per row).
+        # Annotation-level columns are produced per scheme and prefixed.
+        SHARED_COLS = ["dataset", "text", "id_external"]
+        SCHEME_COLS = ["labels", "user", "timestamp", "comment"]
 
         path = self.params.dir  # path of the data
         if path is None:
@@ -1230,37 +1826,34 @@ class Project:
 
         # for a specific scheme and dataset
         if scheme != "all" and dataset in ["train", "test", "valid"]:
-            data = self.schemes.get_scheme(
+            df = self.schemes.get_scheme(
                 scheme=scheme, complete=True, datasets=[dataset], id_external=True
             )
+            data = df[SHARED_COLS + SCHEME_COLS].copy()
             file_name = f"export_tags_{self.name}_{scheme}.{format}"
         # for all the annotated data in the project, need to concate
         elif scheme == "all":
             schemes = self.schemes.available()
-            data = pd.concat(
-                [
-                    self.schemes.get_scheme(
-                        scheme_name,
-                        complete=True,
-                        datasets=["train", "valid", "test"],
-                        id_external=True,
-                    ).rename(columns=lambda col: f"{scheme_name}_{col}")
-                    for scheme_name in schemes
-                ],
-                axis=1,
-            )
+            if not schemes:
+                raise Exception("No scheme available to export")
+
+            shared = None
+            per_scheme = []
+            for scheme_name in schemes:
+                df = self.schemes.get_scheme(
+                    scheme_name,
+                    complete=True,
+                    datasets=["train", "valid", "test"],
+                    id_external=True,
+                )
+                if shared is None:
+                    shared = df[SHARED_COLS].copy()
+                per_scheme.append(
+                    df[SCHEME_COLS].rename(columns=lambda c, s=scheme_name: f"{s}_{c}")
+                )
+            data = pd.concat([shared] + per_scheme, axis=1)
             file_name = f"export_tags_{self.name}_all.{format}"
             dropna = False
-
-            # Combine all columns id_internal into one
-            columns_id_external = [col for col in data.columns if col.endswith("id_external")]
-            id_external_serie = data[columns_id_external[0]].copy()
-            for column_external in columns_id_external:
-                id_external_serie = id_external_serie.combine(
-                    data[column_external], lambda a, b: a
-                )  # if 2 elements exist take the first one
-            data = data.drop(columns=columns_id_external)
-            data.loc[:, "id_external"] = id_external_serie
         else:
             raise Exception("Scheme or dataset not recognized")
 
@@ -1268,28 +1861,24 @@ class Project:
         if dropna:
             data = data.dropna(subset=["labels"])
 
-        # select columns + order
-        # drop dataset_annotation (redundant with dataset)
-        cols_to_drop = [col for col in data.columns if col.endswith("dataset_annotation")]
-        data = data.drop(columns=cols_to_drop, errors="ignore")
-
-        cols = [col for col in data.columns if not (col.endswith("id_internal"))]
-        data = data[cols]
+        # rename the project's id column and put it first
         if self.params.col_id is not None:
-            data.rename(
-                columns={"id_external": self.params.col_id.removeprefix("dataset_")},
-                inplace=True,
-            )
+            id_col = self.params.col_id.removeprefix("dataset_")
+            data = data.rename(columns={"id_external": id_col})
+        else:
+            id_col = "id_external"
+        ordered = [id_col] + [c for c in data.columns if c != id_col]
+        data = data[ordered]
 
         # write file in the folder
         if format == "csv":
-            data.to_csv(path.joinpath(file_name))
+            data.to_csv(path.joinpath(file_name), index=False)
         if format == "parquet":
-            data.to_parquet(path.joinpath(file_name))
+            data.to_parquet(path.joinpath(file_name), index=False)
         if format == "xlsx":
             if "timestamp" in data.columns:
                 data["timestamp"] = data["timestamp"].dt.tz_localize(None)
-            data.to_excel(path.joinpath(file_name))
+            data.to_excel(path.joinpath(file_name), index=False)
 
         return FileResponse(path.joinpath(file_name), filename=file_name)
 
@@ -1503,6 +2092,264 @@ class Project:
             user_name=username,
         )
 
+    def start_ner_training(self, ner: NerModelModel, username: str) -> None:
+        """
+        Launch fine-tuning of a token-classification model for a span scheme.
+
+        Span schemes store their annotation as JSON ([{start,end,tag}, ...]);
+        the dataframe column is forwarded as-is and parsed inside the task.
+        Skips dichotomization / class-balance / exclude-labels, none of
+        which apply to BIO tagging.
+        """
+        if self.nermodels is None:
+            raise Exception("NER fine-tuning is not available for this project")
+        if (
+            len(self.languagemodels.current_user_processes(username))
+            + len(self.nermodels.current_user_processes(username))
+            > 0
+        ):
+            raise Exception(
+                "User already has a process launched, please wait before launching another one"
+            )
+
+        df = self.schemes.get_scheme(ner.scheme, datasets=["train"], complete=True)
+        df = df[["text", "labels"]].dropna(subset=["text"])
+        # keep rows with explicit "[]" (no spans) but drop ones never annotated
+        df = df[df["labels"].notna()]
+
+        scheme = self.schemes.available()[ner.scheme]
+        if scheme.kind != "span":
+            raise Exception(f"NER training requires a span scheme (got kind: {scheme.kind})")
+
+        process_id = self.nermodels.start_training_process(
+            name=ner.name,
+            project=self.name,
+            user=username,
+            scheme=ner.scheme,
+            df=df,
+            scheme_labels=scheme.labels,
+            col_text=df.columns[0],
+            col_label=df.columns[1],
+            base_model=ner.base_model,
+            params=ner.params,
+            test_size=ner.test_size,
+            max_length=ner.max_length,
+        )
+        self.monitoring.register_process(
+            process_name=process_id,
+            kind="train_ner",
+            parameters={},
+            user_name=username,
+        )
+
+    def start_ner_prediction(
+        self,
+        username: str,
+        dataset_type: str,
+        datasets: list[str] | None,
+        scheme_name: str,
+        model_name: str,
+        external_dataset: TextDatasetModel | None = None,
+        batch_size: int = 16,
+    ) -> None:
+        """
+        Launch a NER prediction run. Mirrors start_language_model_prediction
+        but drops training_kind dispatch (always "ner") and routes to
+        self.nermodels.
+        """
+        if self.nermodels is None:
+            raise Exception("NER prediction is not available for this project")
+
+        path_train = None
+        path_valid = None
+        path_test = None
+        if dataset_type == "external":
+            if external_dataset is None or external_dataset.filename is None:
+                raise Exception("No external dataset available for prediction")
+            df = None
+            col_label = None
+            datasets = None
+            path_data = self.data.get_path(external_dataset.filename)
+        elif dataset_type == "all":
+            df = None
+            col_label = None
+            datasets = None
+            path_data = self.data.path_data_all
+            path_train = self.data.path_train
+            path_valid = self.data.path_valid if self.data.path_valid.exists() else None
+            path_test = self.data.path_test if self.data.path_test.exists() else None
+        elif dataset_type == "annotable":
+            if datasets is None:
+                raise Exception("No dataset available for prediction")
+            df = self.schemes.get_scheme(
+                scheme=scheme_name, complete=True, datasets=datasets, id_external=True
+            )
+            col_label = "labels"
+            path_data = None
+        else:
+            raise Exception(f"Dataset {dataset_type} not recognized")
+
+        scheme = self.schemes.available()[scheme_name]
+        if scheme.kind != "span":
+            raise Exception(f"NER prediction requires a span scheme (got kind: {scheme.kind})")
+
+        process_id = self.nermodels.start_predicting_process(
+            project_slug=self.name,
+            name=model_name,
+            user=username,
+            df=df,
+            scheme_labels=scheme.labels,
+            col_label=col_label,
+            dataset=dataset_type,
+            batch_size=batch_size,
+            statistics=datasets,
+            path_data=path_data,
+            external_dataset=external_dataset,
+            path_train=path_train,
+            path_valid=path_valid,
+            path_test=path_test,
+        )
+        self.monitoring.register_process(
+            process_name=process_id,
+            kind="predict_ner",
+            parameters={},
+            user_name=username,
+        )
+
+    def start_image_model_training(self, image: ImageModelModel, username: str) -> None:
+        """
+        Launch an image-classification fine-tuning process for an image project.
+        """
+        if self.imagemodels is None:
+            raise Exception("Image fine-tuning is only available for image projects")
+        # Cross-manager check: forbid stacking an image training on top of an
+        # existing BERT process (and vice versa) for the same user.
+        already = self.languagemodels.current_user_processes(
+            username
+        ) + self.imagemodels.current_user_processes(username)
+        if len(already) > 0:
+            raise Exception(
+                "User already has a process launched, please wait before launching another one"
+            )
+
+        # Labelled rows from the train split. Schemes return a DataFrame whose
+        # `text` column carries the image path for image projects.
+        df = self.schemes.get_scheme(image.scheme, datasets=["train"], complete=True)
+        df = df[["text", "labels"]].dropna()
+
+        scheme = self.schemes.available()[image.scheme]
+        scheme_labels = scheme.labels
+        training_kind = scheme.kind
+        if training_kind not in ["multiclass", "multilabel"]:
+            raise Exception(
+                f"Training does not support this type of scheme (kind: {training_kind})"
+            )
+
+        # Apply class_min_freq and exclude_labels (no dichotomization for images in v1).
+        label_counts = get_number_occurrences_per_label(df["labels"], scheme_labels)
+        for label_to_exclude in image.exclude_labels:
+            label_counts[label_to_exclude] = -1
+        df, scheme_labels = remove_labels_without_enough_annotations(
+            df, "labels", label_counts, image.class_min_freq
+        )
+        df = df[df["labels"].notna()]
+
+        if image.class_balance and training_kind == "multiclass":
+            min_freq = df["labels"].value_counts().sort_values().min()
+            df = df.groupby("labels").sample(n=min_freq)
+
+        process_id = self.imagemodels.start_training_process(
+            name=image.name,
+            project=self.name,
+            user=username,
+            scheme=image.scheme,
+            df=df,
+            training_kind=training_kind,
+            scheme_labels=scheme_labels,
+            col_text=df.columns[0],
+            col_label=df.columns[1],
+            base_model=image.base_model,
+            params=image.params,
+            test_size=image.test_size,
+            loss=image.loss,
+            class_balance=image.class_balance,
+            class_min_freq=image.class_min_freq,
+            exclude_labels=image.exclude_labels,
+            fp16=image.fp16,
+        )
+        self.monitoring.register_process(
+            process_name=process_id,
+            kind="train_imagemodel",
+            parameters={},
+            user_name=username,
+        )
+
+    def start_image_model_prediction(
+        self,
+        username: str,
+        dataset_type: str,
+        datasets: list[str] | None,
+        scheme_name: str,
+        model_name: str,
+        batch_size: int = 32,
+    ) -> None:
+        """
+        Launch an image-classification prediction process.
+
+        Only "annotable" and "all" are supported for v1; external-dataset
+        prediction would need an image-upload flow we don't have yet.
+        """
+        if self.imagemodels is None:
+            raise Exception("Image prediction is only available for image projects")
+        if dataset_type == "external":
+            raise Exception("External-dataset prediction is not supported for image models yet")
+
+        path_train = None
+        path_valid = None
+        path_test = None
+        if dataset_type == "all":
+            df = None
+            col_label = None
+            datasets = None
+            path_data = self.data.path_data_all
+            path_train = self.data.path_train
+            path_valid = self.data.path_valid if self.data.path_valid.exists() else None
+            path_test = self.data.path_test if self.data.path_test.exists() else None
+        elif dataset_type == "annotable":
+            if datasets is None:
+                raise Exception("No dataset available for prediction")
+            df = self.schemes.get_scheme(
+                scheme=scheme_name, complete=True, datasets=datasets, id_external=True
+            )
+            col_label = "labels"
+            path_data = None
+        else:
+            raise Exception(f"Dataset {dataset_type} not recognized")
+
+        scheme_ = self.schemes.available()[scheme_name]
+        training_kind = scheme_.kind
+        if training_kind not in ["multiclass", "multilabel"]:
+            raise Exception(
+                f"Prediction does not support this type of scheme (kind: {training_kind})"
+            )
+        scheme_labels = scheme_.labels
+        self.imagemodels.start_predicting_process(
+            project_slug=self.name,
+            name=model_name,
+            user=username,
+            df=df,
+            training_kind=training_kind,
+            scheme_labels=scheme_labels,
+            col_label=col_label,
+            dataset=dataset_type,
+            batch_size=batch_size,
+            statistics=datasets,
+            path_data=path_data,
+            path_train=path_train,
+            path_valid=path_valid,
+            path_test=path_test,
+        )
+
     def start_language_model_prediction(
         self,
         username: str,
@@ -1521,7 +2368,7 @@ class Project:
         path_valid = None
         path_test = None
         if dataset_type == "external":
-            if external_dataset is None:
+            if external_dataset is None or external_dataset.filename is None:
                 raise Exception("No external dataset available for prediction")
             df = None
             col_label = None
@@ -1553,7 +2400,7 @@ class Project:
                 f"Prediction does not support this type of scheme (kind: {training_kind})"
             )
         scheme_labels = scheme_.labels
-        self.languagemodels.start_predicting_process(
+        process_id = self.languagemodels.start_predicting_process(
             project_slug=self.name,
             name=model_name,
             user=username,
@@ -1569,6 +2416,12 @@ class Project:
             path_train=path_train,
             path_valid=path_valid,
             path_test=path_test,
+        )
+        self.monitoring.register_process(
+            process_name=process_id,
+            kind="predict_languagemodel",
+            parameters={},
+            user_name=username,
         )
 
     def start_quick_model_prediction(
@@ -1632,6 +2485,7 @@ class Project:
                 cols_context=self.params.cols_context,
                 dataset=request.dataset,
                 prompt_name=request.prompt_name if request.prompt_name else "",
+                n_workers=request.n_workers,
             ),
         )
         self.computing.append(
@@ -1716,6 +2570,8 @@ class Project:
                 # User-initiated cancellations are not errors; clean up silently.
                 if process.state == "cancelled":
                     print(f"Process {e.kind} cancelled by user")
+                    if e.kind == "extend_features":
+                        self._recover_features_after_failed_extension()
                     self.clean_process(e)
                     continue
                 print(f"Error in {e.kind} : {exception}")
@@ -1749,6 +2605,11 @@ class Project:
                 if e.kind == "create_project":
                     print("Error in project creation")
                     self.status = "error"
+
+                # a failed extension leaves a features file with the
+                # pre-eval-set shape; reset to the safe empty state
+                if e.kind == "extend_features":
+                    self._recover_features_after_failed_extension()
 
                 self.clean_process(e)
                 continue
@@ -1793,6 +2654,46 @@ class Project:
                         ):
                             add_predictions["predict_" + prediction.model_name] = results.path
                         self.languagemodels.add(prediction)
+                        if results is not None and results.events is not None:
+                            self.monitoring.close_process(prediction.unique_id, results.events)
+                    case "train_image":
+                        if self.imagemodels is None:
+                            continue
+                        model = cast(LMComputing, e)
+                        events = cast(EventsModel, results)
+                        self.imagemodels.add(model)
+                        self.monitoring.close_process(model.unique_id, events)
+                    case "predict_image":
+                        if self.imagemodels is None:
+                            continue
+                        prediction = cast(LMComputing, e)
+                        if (
+                            results is not None
+                            and results.path
+                            and "predict_annotable.parquet" in results.path
+                        ):
+                            add_predictions["predict_" + prediction.model_name] = results.path
+                        self.imagemodels.add(prediction)
+                    case "train_ner":
+                        if self.nermodels is None:
+                            continue
+                        model = cast(LMComputing, e)
+                        events = cast(EventsModel, results)
+                        self.nermodels.add(model)
+                        self.monitoring.close_process(model.unique_id, events)
+                    case "predict_ner":
+                        if self.nermodels is None:
+                            continue
+                        prediction = cast(LMComputing, e)
+                        if (
+                            results is not None
+                            and results.path
+                            and "predict_annotable.parquet" in results.path
+                        ):
+                            add_predictions["predict_" + prediction.model_name] = results.path
+                        self.nermodels.add(prediction)
+                        if results is not None and results.events is not None:
+                            self.monitoring.close_process(prediction.unique_id, results.events)
                     case "train_quickmodel":
                         sm = cast(QuickModelComputing, e)
 
@@ -1802,6 +2703,9 @@ class Project:
                         self.monitoring.close_process(sm.unique_id, events)
                     case "predict_quickmodel":
                         sm = cast(QuickModelComputing, e)
+                    case "predict_with_features":
+                        pf = cast(QuickModelComputing, e)
+                        self.quickmodels.mark_prediction_done(pf.name, pf.dataset)
                     case "feature":
                         feature_computation = cast(FeatureComputing, e)
                         self.features.add(
@@ -1811,9 +2715,16 @@ class Project:
                             feature_computation.parameters,
                             results,
                         )
+                    case "prompt":
+                        prompt_computation = cast(PromptComputing, e)
+                        if self.prompts is not None and results is not None:
+                            self.prompts.receive_result(prompt_computation, results)
                     case "projection":
                         projection = cast(ProjectionComputing, e)
                         self.projections.add(projection, results)
+                    case "lexicometrics":
+                        lexicometrics_computation = cast(LexicometricsComputing, e)
+                        self.lexicometrics.add(lexicometrics_computation, results)
                     case "generation":
                         e = cast(GenerationComputing, e)
                         r = cast(
@@ -1840,13 +2751,29 @@ class Project:
                         events = cast(EventsModel, results)
                         self.bertopic.add(bertopic_model)
                         self.monitoring.close_process(bertopic_model.unique_id, events)
+                    case "extend_features":
+                        self.features.map, self.features.n = self.features.get_map()
+                        if self.features.n != len(self.data.index):
+                            self._recover_features_after_failed_extension()
                     case kind if kind.startswith("add_evalset_"):
                         e = cast(ProcessComputing, e)
                         if results is not None and len(results) > 0:
-                            if results[0][4]:  # elements list is non-empty
-                                self.db_manager.projects_service.add_annotations(*results[0])
+                            (
+                                eval_dataset,
+                                user_name,
+                                proj_slug,
+                                schemes_elements,
+                            ) = results[0]
+                            for scheme_name, elements in schemes_elements:
+                                if elements:
+                                    self.db_manager.projects_service.add_annotations(
+                                        eval_dataset,
+                                        user_name,
+                                        proj_slug,
+                                        scheme_name,
+                                        elements,
+                                    )
                             # update params with the new evalset
-                            eval_dataset = results[0][0]
                             setattr(self.params, eval_dataset, getattr(results[1], eval_dataset))
                             setattr(
                                 self.params,
@@ -1856,11 +2783,10 @@ class Project:
                             self.db_manager.projects_service.update_project(
                                 self.params.project_slug, jsonable_encoder(self.params)
                             )
-                            # load the new eval set before resetting features so the
-                            # features file is rebuilt with the full train+valid+test index
+                            # load the new eval set before refreshing features so the
+                            # features file covers the full train+valid+test index
                             self.data.load_dataset(eval_dataset)
-                            self.features.reset_features_file()
-                            self.quickmodels.drop_models(which="all")
+                            self._refresh_features_after_evalset(eval_dataset, user_name)
             except Exception as ex:
                 print(f"Error in {e.kind} : {ex}")
                 self.errors.add(f"Error in {e.kind} : {str(ex)}")
@@ -1871,6 +2797,16 @@ class Project:
                         bert_task = cast(LMComputing, e)
                         self.db_manager.language_models_service.delete_model(
                             self.name, bert_task.model_name
+                        )
+                    case "train_image":
+                        image_task = cast(LMComputing, e)
+                        self.db_manager.language_models_service.delete_model(
+                            self.name, image_task.model_name
+                        )
+                    case "train_ner":
+                        ner_task = cast(LMComputing, e)
+                        self.db_manager.language_models_service.delete_model(
+                            self.name, ner_task.model_name
                         )
             # clean the process from the list and the queue
             finally:

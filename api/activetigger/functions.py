@@ -16,6 +16,7 @@ import regex
 import spacy
 import torch
 from cryptography.fernet import Fernet
+from fastapi import HTTPException
 from pandas import Series
 from sklearn.metrics import (
     accuracy_score,
@@ -43,6 +44,61 @@ def slugify(text: str, way: str = "file") -> str:
         return quote(text, safe="")
     else:
         raise ValueError("Invalid way parameter. Use 'file' or 'url'.")
+
+
+def sanitize_uploaded_filename(filename: str) -> str:
+    """
+    Reduce an uploaded filename to the safe name used on disk.
+
+    The upload endpoints (which write the file) and the tasks that later read
+    it back must both go through this function, otherwise a filename with
+    accents or special characters is stored under a different name than the
+    one the task looks up.
+    """
+
+    def to_ascii(text: str) -> str:
+        # transliterate accents (é -> e) instead of losing them to underscores
+        text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+        return regex.sub(r"[^A-Za-z0-9._-]", "_", text)
+
+    base = Path(filename).name
+    stem = to_ascii(Path(base).stem).lstrip(".")
+    suffix = to_ascii(Path(base).suffix)
+    # a fully non-ascii stem (e.g. "中文.csv") transliterates to nothing
+    if not stem:
+        stem = "file"
+    return stem + suffix
+
+
+def safe_upload_path(
+    directory: Path,
+    filename: str | None,
+    allowed_extensions: tuple[str, ...],
+) -> Path:
+    """
+    Return a path inside `directory` that is safe to write to.
+
+    Strips any directory components from `filename`, restricts the result to a
+    conservative character set, and verifies the final path stays inside
+    `directory` so a crafted filename cannot escape via traversal or absolute
+    path tricks.
+    """
+    if not filename:
+        raise HTTPException(status_code=400, detail="Missing filename")
+
+    safe_name = sanitize_uploaded_filename(filename)
+    if not safe_name:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    if not safe_name.lower().endswith(allowed_extensions):
+        allowed_str = ", ".join(ext.lstrip(".") for ext in allowed_extensions)
+        raise HTTPException(status_code=400, detail=f"Only {allowed_str} files are allowed")
+
+    directory_resolved = directory.resolve()
+    target = (directory_resolved / safe_name).resolve()
+    if not target.is_relative_to(directory_resolved):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    return target
 
 
 def remove_punctuation(text) -> str:
@@ -140,6 +196,20 @@ def get_device() -> torch.device:
     if torch.backends.mps.is_available():
         return torch.device("mps")
     return torch.device("cpu")
+
+
+def release_device_memory() -> None:
+    """
+    Return cached accelerator memory to the OS after a heavy torch job.
+    Freed Python objects stay in the CUDA/MPS allocator cache until this
+    is called; no-op on CPU-only setups.
+    """
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+        torch.cuda.ipc_collect()
+    elif torch.backends.mps.is_available():
+        torch.mps.empty_cache()
 
 
 def get_gpu_memory_info() -> GpuInformationModel:
@@ -575,15 +645,27 @@ def get_metrics_multilabel(
 
 def get_dir_size(path: str = ".") -> float:
     """
-    Get size of a directory in MB
+    Get size of a directory in MB. Tolerates entries that disappear mid-scan
+    (e.g. a project being deleted concurrently).
     """
     total: float = 0
-    with os.scandir(path) as it:
-        for entry in it:
-            if entry.is_file():
-                total = total + entry.stat().st_size / (1024 * 1024)
-            elif entry.is_dir():
-                total += get_dir_size(entry.path)
+    stack: list[str] = [str(path)]
+    while stack:
+        current_path = stack.pop()
+        try:
+            with os.scandir(current_path) as it:
+                for entry in it:
+                    try:
+                        if entry.is_file(follow_symlinks=False):
+                            total += entry.stat(follow_symlinks=False).st_size / (
+                                1024**2
+                            )  # Convert to MB
+                        elif entry.is_dir(follow_symlinks=False):
+                            stack.append(entry.path)
+                    except (FileNotFoundError, PermissionError, OSError):
+                        continue
+        except (FileNotFoundError, PermissionError, OSError):
+            continue
     return total
 
 

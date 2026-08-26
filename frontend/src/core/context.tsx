@@ -21,6 +21,7 @@ export type AppContextValue = {
   currentProject?: ProjectStateModel | null; // current project selected
   currentScheme?: string; // scheme selected to annotate
   currentProjection?: ProjectionOutModel;
+  currentProjectionName?: string | null;
   labelColorMapping?: { [key: string]: string };
   activeModel?: ActiveModel | null;
   freqRefreshQuickModel: number; // freq to refresh active learning model
@@ -33,8 +34,14 @@ export type AppContextValue = {
 };
 
 export const CONTEXT_LOCAL_STORAGE_KEY = 'activeTigger.context';
+// developmentMode lives in its own key so it survives logout (it's a per-user-on-this-machine
+// preference, not a session value that should be wiped with the rest of the context).
+export const DEVELOPMENT_MODE_STORAGE_KEY = 'activeTigger.developmentMode';
 
 const storedContext = localStorage.getItem(CONTEXT_LOCAL_STORAGE_KEY);
+
+const readStoredDevelopmentMode = (): boolean =>
+  localStorage.getItem(DEVELOPMENT_MODE_STORAGE_KEY) === 'true';
 
 // type of the context
 export type AppContextType = {
@@ -46,13 +53,15 @@ export type AppContextType = {
 export const AppContext = createContext<AppContextType>(null as unknown as AppContextType);
 
 const _useAppContext = () => {
-  const [appContext, setAppContext] = useState<AppContextValue>(
-    storedContext ? (JSON.parse(storedContext) as AppContextValue) : DEFAULT_CONTEXT,
-  );
+  const [appContext, setAppContext] = useState<AppContextValue>(() => {
+    const base = storedContext ? (JSON.parse(storedContext) as AppContextValue) : DEFAULT_CONTEXT;
+    return { ...base, developmentMode: readStoredDevelopmentMode() };
+  });
 
   //store context in localstorage
   useEffect(() => {
     localStorage.setItem(CONTEXT_LOCAL_STORAGE_KEY, JSON.stringify(appContext));
+    localStorage.setItem(DEVELOPMENT_MODE_STORAGE_KEY, String(appContext.developmentMode));
   }, [appContext]);
 
   // Function to reset the context

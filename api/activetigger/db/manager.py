@@ -21,6 +21,14 @@ from activetigger.functions import get_hash, get_root_pwd
 def set_sqlite_pragma(dbapi_connection, _):
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA foreign_keys=ON")
+    # WAL lets readers proceed while a writer holds the lock; the default
+    # rollback-journal mode blocks every read during any write, which under
+    # multi-user load surfaces as "database is locked" errors
+    cursor.execute("PRAGMA journal_mode=WAL")
+    # with WAL, NORMAL is durable enough and avoids an fsync per commit
+    cursor.execute("PRAGMA synchronous=NORMAL")
+    # wait up to 15s for a lock instead of failing after the 5s default
+    cursor.execute("PRAGMA busy_timeout=15000")
     cursor.close()
 
 
@@ -67,6 +75,21 @@ class DatabaseManager:
             with self.engine.begin() as conn:
                 conn.execute(text("SELECT pg_advisory_xact_lock(1)"))
                 Base.metadata.create_all(conn)
+
+        # create_all only creates missing tables — it never adds indexes to
+        # tables that already exist, and this repo does not run alembic. These
+        # indexes back the hottest read paths (token lookup on every request,
+        # activity queries on the ever-growing logs table); without them each
+        # query is a full-table scan that gets slower over the instance's life.
+        with self.engine.begin() as conn:
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_tokens_token ON tokens (token)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_logs_time ON logs (time)"))
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_logs_project_slug_time "
+                    "ON logs (project_slug, time)"
+                )
+            )
 
         self._create_default_users()
 

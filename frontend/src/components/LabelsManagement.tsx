@@ -141,7 +141,15 @@ export const LabelsManagement: FC<LabelsManagementProps> = ({
     })),
   );
 
-  // update labels when availableLabels change
+  // The parent re-builds `availableLabels` on every render (project polling
+  // produces a fresh array reference every ~2s even when label content is
+  // unchanged). Reacting to the array identity would re-fire reFetchStatistics
+  // and reset local sort state on every poll — feeding back into ReactSortable
+  // / setAppContext and flooding the /statistics endpoint with requests
+  // (ERR_INSUFFICIENT_RESOURCES). Key off the *content* instead.
+  const availableLabelsKey = availableLabels.join('|');
+
+  // update labels when availableLabels content changes
   useEffect(() => {
     reFetchStatistics();
     setLabels(
@@ -150,7 +158,9 @@ export const LabelsManagement: FC<LabelsManagementProps> = ({
         label: label,
       })),
     );
-  }, [availableLabels, reFetchStatistics]);
+    // availableLabels is read but tracked via availableLabelsKey (content-stable)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [availableLabelsKey, reFetchStatistics]);
 
   // manage label creation
   const [createLabelValue, setCreateLabelValue] = useState('');
@@ -170,16 +180,30 @@ export const LabelsManagement: FC<LabelsManagementProps> = ({
   //   reFetchStatistics();
   // }, [reFetchStatistics, currentScheme, availableLabels]);
 
-  // update the labels in the state and context
+  // update the labels in the state and context. Skip the appContext write
+  // when the order is unchanged — ReactSortable can call setList during
+  // external prop updates with the same content, and an unconditional
+  // setAppContext re-renders the parent (which feeds a new availableLabels
+  // ref back into the sync effect above).
   const updateLabels = (newLabels: LabelType[]) => {
     setLabels(newLabels);
-    setAppContext((state) => ({
-      ...state,
-      displayConfig: {
-        ...state.displayConfig,
-        labelsOrder: newLabels.map((e) => e.label),
-      },
-    }));
+    setAppContext((state) => {
+      const newOrder = newLabels.map((e) => e.label);
+      const currentOrder = state.displayConfig.labelsOrder || [];
+      if (
+        currentOrder.length === newOrder.length &&
+        currentOrder.every((label, i) => label === newOrder[i])
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        displayConfig: {
+          ...state.displayConfig,
+          labelsOrder: newOrder,
+        },
+      };
+    });
   };
 
   return (

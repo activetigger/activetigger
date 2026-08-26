@@ -25,9 +25,8 @@ dependencies = [
 		"numpy",
 		"pandas",
 		"pyarrow",
-		"torch>=2.6.0",
 		"transformers[torch]>=4.51.0",
-		"sentence-transformers",
+		"sentence-transformers>=5.4.0",
 		"typing-inspect",
 		"typing-extensions",
 		"spacy>=3.8",
@@ -70,7 +69,19 @@ dependencies = [
 		"nltk",
 		"peft>=0.18.1",
 		"regex>=2024.0.0",
+		"open-clip-torch>=3.3.0",
+		"codecarbon>=2.7.0",
+		"wtpsplit>=2.1.0",
+		"python-docx>=1.1.0",
 ]
+
+# torch/torchvision live in mutually exclusive extras (see tool.uv.conflicts):
+# `--extra cpu` pins them to the CPU-only PyTorch index, `--extra gpu` uses PyPI
+# CUDA builds. transformers[torch] still pulls torch transitively, so a plain
+# `uv sync` without an extra falls back to the PyPI (CUDA) build.
+[project.optional-dependencies]
+cpu = ["torch>=2.6.0", "torchvision>=0.21.0"]
+gpu = ["torch>=2.6.0", "torchvision>=0.21.0"]
 
 [dependency-groups]
 dev = [
@@ -132,10 +143,20 @@ environments = [
     "sys_platform == 'linux'",
 ]
 
+conflicts = [
+    [{ extra = "cpu" }, { extra = "gpu" }],
+]
+
 [tool.uv.sources]
 fr-core-news-sm = { url = "https://github.com/explosion/spacy-models/releases/download/fr_core_news_sm-3.8.0/fr_core_news_sm-3.8.0.tar.gz" }
 en-core-web-sm = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0.tar.gz" }
+torch = [{ index = "pytorch-cpu", extra = "cpu" }]
+torchvision = [{ index = "pytorch-cpu", extra = "cpu" }]
 
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [tool.coverage.run]
 source = ["activetigger"]

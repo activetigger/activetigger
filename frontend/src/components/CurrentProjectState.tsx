@@ -5,6 +5,7 @@ import { isEqual } from 'lodash';
 import { useProject } from '../core/api';
 import { useAppContext } from '../core/useAppContext';
 import { useAuth } from '../core/useAuth';
+import { ProjectStateModel } from '../types';
 
 /**
  * Component to actualise project state in the context, called every N seconds.
@@ -43,17 +44,27 @@ export const CurrentProjectState: FC = () => {
 
   // update isComputing context value
   useEffect(() => {
+    // The API response carries `nermodels`, but the generated OpenAPI client
+    // hasn't been regenerated; the extended local type adds it back.
+    const projectExt = project as ProjectStateModel | null;
     const isComputing =
       project && authenticatedUser && authenticatedUser.username
         ? authenticatedUser.username in project.languagemodels.training ||
+          (project.imagemodels
+            ? authenticatedUser.username in project.imagemodels.training
+            : false) ||
+          (projectExt?.nermodels
+            ? authenticatedUser.username in projectExt.nermodels.training
+            : false) ||
           authenticatedUser.username in project.quickmodel.training ||
           authenticatedUser.username in project.projections.training ||
+          authenticatedUser.username in project.lexicometrics.training ||
           authenticatedUser.username in project.bertopic.training ||
           Object.values(project.features.training).length > 0
         : false;
     setAppContext((prev) => {
-      if (!isEqual(prev.currentProject, project)) {
-        return { ...prev, currentProject: project, isComputing };
+      if (!isEqual(prev.currentProject, projectExt)) {
+        return { ...prev, currentProject: projectExt, isComputing };
       }
       if (prev.isComputing !== isComputing) return { ...prev, isComputing };
       return prev;

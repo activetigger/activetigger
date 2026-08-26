@@ -1,23 +1,17 @@
 import os
-import random
-import re
 import shutil
-import time
 from pathlib import Path
 from typing import Annotated
 
 from fastapi import (
     APIRouter,
     Depends,
-    File,
     HTTPException,
-    UploadFile,
 )
 
 from activetigger.app.dependencies import (
     ProjectAction,
     ServerAction,
-    get_project,
     test_rights,
     verified_user,
 )
@@ -26,106 +20,11 @@ from activetigger.datamodels import (
     UserInDBModel,
 )
 from activetigger.orchestrator import get_orchestrator
-from activetigger.project import Project
+
+# Uploaded files are sent through the chunked-upload protocol
+# Only server-side copies remain here.
 
 router = APIRouter(tags=["files"])
-
-_ALLOWED_UPLOAD_EXTENSIONS = (".csv", ".parquet", ".xlsx")
-
-
-def _safe_upload_path(directory: Path, filename: str | None) -> Path:
-    """
-    Return a path inside `directory` that is safe to write to.
-
-    Strips any directory components from `filename`, restricts the result to a
-    conservative character set, and verifies the final path stays inside
-    `directory` so a crafted filename cannot escape via traversal or absolute
-    path tricks.
-    """
-    if not filename:
-        raise HTTPException(status_code=400, detail="Missing filename")
-
-    base = Path(filename).name
-    safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", base).lstrip(".")
-    if not safe_name:
-        raise HTTPException(status_code=400, detail="Invalid filename")
-
-    if not safe_name.lower().endswith(_ALLOWED_UPLOAD_EXTENSIONS):
-        raise HTTPException(status_code=400, detail="Only csv, parquet and xlsx files are allowed")
-
-    directory_resolved = directory.resolve()
-    target = (directory_resolved / safe_name).resolve()
-    if not target.is_relative_to(directory_resolved):
-        raise HTTPException(status_code=400, detail="Invalid filename")
-    return target
-
-
-@router.post("/files/add/project")
-def upload_file_project(
-    current_user: Annotated[UserInDBModel, Depends(verified_user)],
-    project_name: str,
-    file: UploadFile = File(...),
-) -> None:
-    """
-    Upload a file on the server to create a new project
-    use: type de file
-    """
-    test_rights(ServerAction.CREATE_PROJECT, current_user.username)
-    orchestrator = get_orchestrator()
-
-    # add a delay if projects are already being created
-    if len(orchestrator.project_creation_ongoing) >= 3:
-        time.sleep(random.randint(1, 4))
-
-    # check if the project does not already exist
-    if orchestrator.exists(project_name):
-        raise HTTPException(
-            status_code=500, detail="Project already exists, please choose another name"
-        )
-    # try to upload the file
-    try:
-        # create a folder for the project to be created
-        project_slug = orchestrator.check_project_name(project_name)
-        project_path = Path(f"{config.data_path}/projects/{project_slug}")
-        os.makedirs(project_path)
-
-        target = _safe_upload_path(project_path, file.filename)
-
-        # Read and write the file synchronously
-        with open(target, "wb") as out_file:
-            while chunk := file.file.read(1024 * 1024):
-                out_file.write(chunk)
-        print("File uploaded successfully")
-
-    except HTTPException:
-        if project_path.exists():  # ty: ignore[possibly-unresolved-reference]
-            shutil.rmtree(project_path)  # ty: ignore[possibly-unresolved-reference]
-        raise
-    except Exception as e:
-        # if failed, remove the project folder
-        if project_path.exists():  # ty: ignore[possibly-unresolved-reference]
-            shutil.rmtree(project_path)  # ty: ignore[possibly-unresolved-reference]
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/files/add/dataset")
-def upload_file_dataset(
-    project: Annotated[Project, Depends(get_project)],
-    current_user: Annotated[UserInDBModel, Depends(verified_user)],
-    file: UploadFile = File(...),
-) -> None:
-    """
-    Upload a file on the server for a project in the data folder
-    """
-    test_rights(ProjectAction.MANAGE_FILES, current_user.username, project.params.project_slug)
-    target = _safe_upload_path(project.data.path_datasets, file.filename)
-
-    try:
-        with open(target, "wb") as out_file:
-            while chunk := file.file.read(1024 * 1024):
-                out_file.write(chunk)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/files/copy/project")

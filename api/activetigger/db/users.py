@@ -34,7 +34,7 @@ class UsersService:
             user = Users(
                 user_name=user_name,
                 key=password,
-                description=role,
+                informations={"status": role},
                 created_by=created_by,
                 contact=contact,
                 deactivated=None,
@@ -81,6 +81,20 @@ class UsersService:
         with self.SessionMaker.begin() as session:
             _ = session.execute(update(Users).filter_by(user_name=user_name).values(key=password))
 
+    def get_informations(self, user_name: str) -> dict:
+        with self.SessionMaker() as session:
+            user = session.scalars(select(Users).filter_by(user_name=user_name)).first()
+            if user is None:
+                raise DBException(f"User {user_name} not found")
+            return dict(user.informations or {})
+
+    def update_informations(self, user_name: str, informations: dict) -> None:
+        # JSON columns don't track in-place mutation: always write a full dict
+        with self.SessionMaker.begin() as session:
+            _ = session.execute(
+                update(Users).filter_by(user_name=user_name).values(informations=informations)
+            )
+
     def change_contact(self, user_name: str, contact: str) -> None:
         """
         Change contact email for a specific user
@@ -112,6 +126,34 @@ class UsersService:
                 .distinct()
             ).all()
             return list(distinct_users)
+
+    def count_annotations(self, username: str) -> int:
+        """
+        Total number of non-null annotations made by a user
+        """
+        with self.SessionMaker() as session:
+            count = session.execute(
+                select(func.count())
+                .select_from(Annotations)
+                .where(
+                    Annotations.user_name == username,
+                    Annotations.annotation.is_not(None),
+                )
+            ).scalar_one()
+            return int(count)
+
+    def get_annotation_times(self, username: str, limit: int = 5000) -> list[datetime.datetime]:
+        """
+        Timestamps of the most recent annotations of a user (most recent first)
+        """
+        with self.SessionMaker() as session:
+            rows = session.execute(
+                select(Annotations.time)
+                .where(Annotations.user_name == username)
+                .order_by(Annotations.time.desc())
+                .limit(limit)
+            ).all()
+            return [row[0] for row in rows]
 
     def get_user_created_projects(self, user_name: str) -> list[str]:
         """

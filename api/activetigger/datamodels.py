@@ -10,10 +10,8 @@ from sklearn.base import BaseEstimator
 # Data model to use of the API
 
 # Model-name validator: safe filesystem character set with a length cap.
-# Used as a Pydantic constraint on BertModelModel.name to prevent path
-# traversal — the same string flows into Path.joinpath, shutil.make_archive,
-# shutil.rmtree, os.remove and DB primary keys, so it must never contain
-# "/", "..", or other path separators.
+# Used as a Pydantic constraint
+
 MODEL_NAME_PATTERN = r"^[A-Za-z0-9_\-]{1,64}$"
 
 
@@ -85,6 +83,8 @@ class ProjectBaseModel(BaseModel):
     Parameters of a project to save in the database
     """
 
+    # Experimental: image projects.
+    kind: Literal["text", "image"] = "text"
     cols_text: list[str]
     project_name: str
     col_id: str
@@ -93,6 +93,8 @@ class ProjectBaseModel(BaseModel):
     n_valid: int = 0
     from_project: str | None = None
     from_toy_dataset: bool = False
+    # data file as a staged chunked upload (see activetigger.uploads);
+    upload_id: str | None = None
     filename: str | None = None
     dir: Path | None = None
     embeddings: list[str] = []
@@ -109,10 +111,11 @@ class ProjectBaseModel(BaseModel):
     random_selection: bool = False
     cols_stratify: list[str] = []
     stratify_train: bool = False
-    stratify_test: bool = False
+    stratify_eval: bool = False
     force_label: bool = False
     force_computation: bool = False
     seed: int = 42
+    col_split: str | None = None
 
 
 class ProjectModel(ProjectBaseModel):
@@ -124,28 +127,66 @@ class ProjectModel(ProjectBaseModel):
     all_columns: list[str] | None = None
 
 
-class ProjectDataModel(ProjectBaseModel):
-    """
-    To create a new project
-    """
-
-    csv: str
-
-
 class AnnotationsDataModel(BaseModel):
+    """
+    Import annotations from a file.
+    sent beforehand through the chunked-upload protocol
+    """
+
     col_id: str
     col_label: str
     scheme: str
-    csv: str
+    upload_id: str
     filename: str | None = None
 
 
 class EvalSetDataModel(BaseModel):
+    """
+    Add an eval/test set to a text project.
+    sent beforehand through the chunked-upload protocol
+    """
+
     cols_text: list[str]
     col_id: str
     n_eval: int
+    upload_id: str
+    filename: str | None = None
+    cols_label: list[str] = []  # each column name must match an existing scheme name
+
+
+class UploadStartModel(BaseModel):
+    """
+    Open a chunked-upload staging session (see activetigger.uploads)
+    """
+
     filename: str
-    csv: str
+    total_size: int
+    total_chunks: int
+
+
+class UploadSessionModel(BaseModel):
+    upload_id: str
+    filename: str
+
+
+class UploadFinishedModel(BaseModel):
+    upload_id: str
+    filename: str
+    size: int
+
+
+class EvalSetImageModel(BaseModel):
+    """
+    Eval-set payload for image projects.
+    sent beforehand through the chunked-upload protocol
+    """
+
+    upload_id: str
+    labels_upload_id: str | None = None
+    filename: str | None = None
+    n_eval: int | None = None
+    labels_filename: str | None = None
+    col_id: str | None = None
     col_label: str | None = None
     scheme: str | None = None
 
@@ -184,10 +225,16 @@ class NextInModel(BaseModel):
     on_users: list[str] | None = None
     label_prob: str | None = None
     frame: list[Any] | None = None
+    projection_name: str | None = None
     history: list[str] = []
     filter: str | None = None
     dataset: str = "train"
     model_active: ActiveModel | None = None
+    prompt_id: str | None = None
+    # (min, max) cosine-similarity bounds for prompt selection. Inclusive on
+    # both ends. None means no filtering.
+    similarity_range: tuple[float, float] | None = None
+    n: int = 1
 
 
 class ElementInModel(BaseModel):
@@ -232,6 +279,8 @@ class ElementOutModel(BaseModel):
     limit: int | None  # TO REMOVE
     history: list[AnnotationModel] | None = None
     n_sample: int | None = None
+    similarity: float | None = None
+    rank: int | None = None
 
 
 class NewUserModel(BaseModel):
@@ -261,6 +310,27 @@ class UserInDBModel(UserModel):
     """
 
     hashed_password: str
+
+
+class UserCredentialInput(BaseModel):
+    """
+    Endpoint/credentials pair saved in the user account
+    """
+
+    name: str
+    api: str
+    endpoint: str | None = None
+    credentials: str
+
+
+class UserCredentialPublic(BaseModel):
+    """
+    Saved credentials entry without the secret
+    """
+
+    name: str
+    api: str
+    endpoint: str | None = None
 
 
 class CompareSchemesModel(BaseModel):
@@ -383,6 +453,43 @@ class BertModelModel(BaseModel):
     auto_max_length: bool = False
 
 
+class ImageModelModel(BaseModel):
+    """
+    Request for fine-tuning an image-classification model on an image
+    project. Works with any HuggingFace AutoModelForImageClassification
+    backbone (ViT, ConvNeXt, EfficientNet, Swin, BEiT, ...). Mirrors
+    BertModelModel but drops text-only fields (max_length, dichotomize).
+    """
+
+    project_slug: str
+    scheme: str
+    name: str = Field(pattern=MODEL_NAME_PATTERN)
+    base_model: str = "google/vit-large-patch16-384"
+    params: LMParametersModel
+    test_size: float = 0.2
+    class_min_freq: int = 1
+    class_balance: bool = False
+    loss: str = "cross_entropy"
+    exclude_labels: list[str] = []
+    fp16: bool = True
+
+
+class NerModelModel(BaseModel):
+    """
+    Request to fine-tune a token-classification (NER) model for a span scheme.
+    Drops classification-only fields (loss, dichotomize, class_balance,
+    class_min_freq, exclude_labels) — BIO tagging makes them moot.
+    """
+
+    project_slug: str
+    scheme: str
+    name: str = Field(pattern=MODEL_NAME_PATTERN)
+    base_model: str
+    params: LMParametersModel
+    test_size: float = 0.2
+    max_length: int = 512
+
+
 class UmapModel(BaseModel):
     """
     Params UmapModel
@@ -409,6 +516,7 @@ class ProjectionParametersModel(BaseModel):
     Request projection
     """
 
+    name: str
     method: str
     features: list
     parameters: dict[str, float | str | bool | list] = {}
@@ -418,6 +526,7 @@ class ProjectionParametersModel(BaseModel):
 class ProjectionDataModel(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
     id: str
+    name: str = ""
     data: DataFrame
     parameters: ProjectionParametersModel
 
@@ -485,6 +594,8 @@ class GenerationCreationModel(BaseModel):
     name: str
     endpoint: str | None = None
     credentials: str | None = None
+    # name of a credentials entry saved in the user account, resolved server-side
+    saved_credentials: str | None = None
 
 
 class GenerationModel(GenerationCreationModel):
@@ -512,21 +623,26 @@ class BertopicParamsModel(BaseModel):
     umap_n_components: int = 2
     # umap_min_dist: float = 0.0 # Removed because 0.0 is the best value to use for clustering - Axel
     embedding_kind: str = "sentence_transformers"
-    embedding_model: str = "all-MiniLM-L6-v2"
+    embedding_model: str | None = "all-MiniLM-L6-v2"
     embedding_batch_size: int = 32
     filter_text_length: int = 2
     input_datasets: str = "train"
+    existing_feature: str | None = None
 
 
 class ComputeBertopicModel(BertopicParamsModel):
     """
-    Parameters for computing BERTopic model
+    Parameters for computing BERTopic model.
+
+    BERTopic reuses embeddings from an existing project feature
+    (existing_feature must reference an embedding feature:
+    sentence-embeddings, bert-embeddings or imported).
+    Embeddings are never recomputed from this endpoint — to add a new
+    embedding model, use the project's Features page.
     """
 
     name: str
-    force_compute_embeddings: bool = False
-    embedding_model: str
-    embedding_batch_size: int = 32
+    existing_feature: str | None = None
     language: str | None = None
     input_datasets: str = "train"
     umap_n_neighbors: int = 30
@@ -536,8 +652,6 @@ class ComputeBertopicModel(BertopicParamsModel):
     umap_n_components: int = 5
     top_n_words: int = 15
     n_gram_range: tuple[int, int] = (1, 2)
-    embedding_kind: str = "sentence_transformers"
-    scheme: str
 
 
 class GenerationAvailableModel(BaseModel):
@@ -583,6 +697,7 @@ class GenerationRequest(BaseModel):
     token: str | None = None
     prompt: str
     n_batch: int = 1
+    n_workers: int = 1
     scheme: str
     mode: str = "all"
     dataset: str = "train"
@@ -646,6 +761,43 @@ class FeatureComputing(ProcessComputing):
     parameters: dict
 
 
+class LexicometricsParametersModel(BaseModel):
+    tokenizer: str = "bert-base-multilingual-cased"
+    n_most_frequent: int = 100
+    language: str = "en"
+    tfidf_n_words: int = 300
+    tfidf_n_docs_per_word: int = 25
+    tfidf_n_words_per_doc: int = 5
+    tfidf_min_term_freq: int = 5
+    tfidf_max_documents: int = 10000
+
+
+class LexicometricsComputing(ProcessComputing):
+    kind: Literal["lexicometrics"]
+    parameters: LexicometricsParametersModel
+
+
+class PromptComputing(ProcessComputing):
+    kind: Literal["prompt"]
+    prompt_id: str
+    text: str
+    feature_name: str
+    hf_name: str
+
+
+class PromptInModel(BaseModel):
+    text: str
+    feature_name: str
+
+
+class PromptOutModel(BaseModel):
+    prompt_id: str
+    text: str
+    feature_name: str
+    user: str
+    created_at: str
+
+
 class GenerationComputing(ProcessComputing):
     kind: Literal["generation"]
     project: str
@@ -665,7 +817,6 @@ class BertopicComputing(ProcessComputing):
     parameters: BertopicParamsModel
     force_compute_embeddings: bool
     get_progress: Callable[[], str | float | None] | None = None
-    scheme: str  # This is a dummy necessary to save the model in the database, it will not be used afterwards — Axel
 
 
 class QuickModelInModel(BaseModel):
@@ -706,6 +857,7 @@ class QuickModelComputing(ProcessComputing):
     exclude_labels: list[str] = []
     test_size: float = 0.2
     retrain: bool = False
+    get_progress: Callable[[], float | None] | None = None
 
 
 class QuickModelComputed(BaseModel):
@@ -850,13 +1002,21 @@ class FeaturesProjectStateModel(BaseModel):
     training: dict[str, dict[str, str | None]]
 
 
+class PromptsProjectStateModel(BaseModel):
+    available: list[PromptOutModel]
+    bindable_features: list[str]
+    training: dict[str, dict[str, str | None]]
+
+
 class ModelDescriptionModel(BaseModel):
     name: str
     kind: str
-    scheme: str
+    scheme: str | None = None
     parameters: dict[str, Any]
     path: str
     time: str
+    predicted_all: bool = False
+    predicted_external: bool = False
 
 
 class QuickModelsProjectStateModel(BaseModel):
@@ -864,10 +1024,24 @@ class QuickModelsProjectStateModel(BaseModel):
     # available: dict[str, dict[str, QuickModelOutModel]]
     # training: dict[str, list[str]]
     available: dict[str, list[ModelDescriptionModel]]
-    training: dict[str, list[str]]
+    training: dict[str, LMComputingOutModel]
 
 
 class LanguageModelsProjectStateModel(BaseModel):
+    options: list[dict[str, Any]]
+    available: dict[str, dict[str, LMStatusModel]]
+    training: dict[str, LMComputingOutModel]
+    base_parameters: LMParametersModel
+
+
+class ImageModelsProjectStateModel(BaseModel):
+    options: list[dict[str, Any]]
+    available: dict[str, dict[str, LMStatusModel]]
+    training: dict[str, LMComputingOutModel]
+    base_parameters: LMParametersModel
+
+
+class NerModelsProjectStateModel(BaseModel):
     options: list[dict[str, Any]]
     available: dict[str, dict[str, LMStatusModel]]
     training: dict[str, LMComputingOutModel]
@@ -880,6 +1054,86 @@ class ProjectionsProjectStateModel(BaseModel):
     training: dict[str, str]
 
 
+class HistogramModel(BaseModel):
+    bin_edges: list[float]
+    counts: list[int]
+
+
+class DistributionSummaryModel(BaseModel):
+    count: int
+    mean: float | None = None
+    std: float | None = None
+    min: float | None = None
+    q25: float | None = None
+    median: float | None = None
+    q75: float | None = None
+    max: float | None = None
+
+
+class DistributionModel(BaseModel):
+    summary: DistributionSummaryModel
+    histogram: HistogramModel
+
+
+class WordFrequencyModel(BaseModel):
+    word: str
+    count: int
+
+
+class TfidfDocumentScoreModel(BaseModel):
+    element_id: str
+    score: float
+
+
+class TfidfWordTopDocumentsModel(BaseModel):
+    word: str
+    n_documents: int
+    top_documents: list[TfidfDocumentScoreModel]
+
+
+class TfidfWordScoreModel(BaseModel):
+    word: str
+    score: float
+
+
+class TfidfDocumentTopWordsModel(BaseModel):
+    element_id: str
+    top_words: list[TfidfWordScoreModel]
+
+
+class LexicometricsStatisticsModel(BaseModel):
+    """
+    Statistics computed by the lexicometrics task. Future statistics are new
+    optional fields, so older lexicometrics.json files still load.
+    """
+
+    words_per_doc: DistributionModel
+    # None when the tokenizer could not be loaded when computing (non-fatal)
+    tokens_per_doc: DistributionModel | None = None
+    most_frequent_words: list[WordFrequencyModel]
+    # tfidf_documents is None when the train set exceeds
+    # LexicometricsParametersModel.tfidf_max_documents (size trade-off)
+    tfidf_words: list[TfidfWordTopDocumentsModel] | None = None
+    tfidf_documents: list[TfidfDocumentTopWordsModel] | None = None
+
+
+class LexicometricsModel(BaseModel):
+    """
+    Lexicometry statistics of the annotable dataset.
+    """
+
+    version: int = 1
+    computed_at: str
+    user: str
+    parameters: LexicometricsParametersModel
+    statistics: LexicometricsStatisticsModel
+
+
+class LexicometricsProjectStateModel(BaseModel):
+    available: bool
+    training: dict[str, str]
+
+
 class BERTopicDescriptionModel(BaseModel):
     name: str
     time: str
@@ -888,7 +1142,7 @@ class BERTopicDescriptionModel(BaseModel):
 class BertopicProjectStateModel(BaseModel):
     available: dict[str, BERTopicDescriptionModel]
     training: dict[str, dict[str, str | int | float | None]]
-    models: list[str]
+    bindable_features: list[str]
 
 
 class GenerationsProjectStateModel(BaseModel):
@@ -913,9 +1167,13 @@ class ProjectStateModel(BaseModel):
     next: NextProjectStateModel
     schemes: SchemesProjectStateModel
     features: FeaturesProjectStateModel
+    prompts: PromptsProjectStateModel | None = None
     quickmodel: QuickModelsProjectStateModel
     languagemodels: LanguageModelsProjectStateModel
+    imagemodels: ImageModelsProjectStateModel | None = None
+    nermodels: NerModelsProjectStateModel | None = None
     projections: ProjectionsProjectStateModel
+    lexicometrics: LexicometricsProjectStateModel
     generations: GenerationsProjectStateModel
     bertopic: BertopicProjectStateModel
     users: UsersStateModel
@@ -1046,6 +1304,8 @@ class MessagesOutModel(BaseModel):
     created_by: str
     time: str
     content: str
+    for_project: str | None = None
+    for_user: str | None = None
 
 
 class ServerStateModel(BaseModel):
@@ -1092,13 +1352,14 @@ class TrainMLResults(BaseModel):
     statistics_cv10: MLStatisticsModel | None = None
 
 
+class EventsModel(BaseModel):
+    events: dict[str, dict[str, str | None]]
+
+
 class ReturnTaskPredictModel(BaseModel):
     path: str
     metrics: dict[str, MLStatisticsModel] | None = None
-
-
-class EventsModel(BaseModel):
-    events: dict[str, dict[str, str | None]]
+    events: EventsModel | None = None
 
 
 class ModelScoresModel(BaseModel):
@@ -1113,13 +1374,26 @@ class ModelInformationsModel(BaseModel):
     params: dict | None = None
     loss: dict | None = None
     scores: ModelScoresModel
+    predicted: bool = False
+
+
+class UserActivityPointModel(BaseModel):
+    """
+    Hourly annotation bucket for a single user (hour = ISO UTC hour start)
+    """
+
+    hour: str
+    annotations: int
 
 
 class UserStatistics(BaseModel):
     username: str
     projects: dict[str, str]
-    # last_connexion
-    # last_actions
+    total_annotations: int = 0
+    gpu_time_seconds: float = 0.0
+    compute_time_seconds: float = 0.0  # all completed processes, fallback when no GPU
+    median_annotation_time_seconds: float | None = None
+    annotation_activity: list[UserActivityPointModel] = []
 
 
 class PromptInputModel(BaseModel):
@@ -1134,9 +1408,15 @@ class PromptModel(BaseModel):
 
 
 class TextDatasetModel(BaseModel):
+    """
+    External dataset for prediction
+    sent beforehand through the chunked-upload protocol
+    """
+
     id: str
     cols_text: list[str]
-    filename: str
+    upload_id: str
+    filename: str | None = None
     path: Path | None = None
 
 
@@ -1222,6 +1502,28 @@ class MonitoringLanguageModelsModel(BaseModel):
     std: float
 
 
+class MonitoringGpuModel(BaseModel):
+    """
+    Monitoring GPU use per process, in GB-seconds (peak GB * duration s).
+    """
+
+    n: int
+    mean: float
+    std: float
+
+
+class MonitoringEmissionsModel(BaseModel):
+    """
+    Monitoring carbon emissions per process, in kg CO2eq.
+    Includes a `total` field summing across the window for sustainability dashboards.
+    """
+
+    n: int
+    mean: float
+    std: float
+    total: float
+
+
 class MonitoringMetricsModel(BaseModel):
     """
     Monitoring metrics
@@ -1229,6 +1531,26 @@ class MonitoringMetricsModel(BaseModel):
 
     quickmodels: MonitoringQuickModelsModel
     languagemodels: MonitoringLanguageModelsModel
+    gpu: MonitoringGpuModel
+    emissions: MonitoringEmissionsModel
+
+
+class MonitoringActivityPointModel(BaseModel):
+    """
+    Hourly activity bucket for the instance
+    """
+
+    hour: str
+    annotations: int
+    active_users: int
+
+
+class MonitoringActivityModel(BaseModel):
+    """
+    Hourly activity over the last 7 days
+    """
+
+    activity: list[MonitoringActivityPointModel]
 
 
 class BertopicProjectionNode(BaseModel):
@@ -1250,3 +1572,56 @@ class BertopicProjectionData(BaseModel):
 
     nodes: list[BertopicProjectionNode]
     cluster_id_label_mapper: dict
+
+
+class PrepareSessionModel(BaseModel):
+    """
+    Response after uploading a file to the dataset preparation tool
+    """
+
+    session_id: str
+    filename: str
+    columns: list[str]
+    n_rows: int
+    preview: list[dict]
+
+
+class PrepareSplitModel(BaseModel):
+    """
+    Request to split an uploaded dataset into text chunks
+    """
+
+    session_id: str
+    cols_text: list[str]
+    col_id: str = "row_number"
+    cols_keep: list[str] = []
+    method: Literal["chunk", "regex", "wtpsplit", "none"]
+    chunk_size: int | None = None
+    regex_pattern: str | None = None
+    granularity: Literal["sentence", "paragraph"] | None = None
+    language: str | None = None
+    min_chars: int = 10
+    drop_duplicates: bool = False
+    remove_html: bool = False
+    remove_urls: bool = False
+    force_unique_id: bool = False
+
+
+class PrepareTaskModel(BaseModel):
+    """
+    Response after launching a dataset preparation split task
+    """
+
+    task_id: str
+
+
+class PrepareStatusModel(BaseModel):
+    """
+    Status of a dataset preparation split task
+    """
+
+    status: Literal["pending", "running", "done", "failed", "not found"] | str
+    progress: float | None = None
+    error: str | None = None
+    n_rows: int | None = None
+    preview: list[dict] | None = None

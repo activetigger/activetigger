@@ -14,6 +14,42 @@ from activetigger.datamodels import (
 
 TIMEOUT = 60
 
+# small chunk size so multi-chunk assembly is exercised even with small fixtures
+UPLOAD_CHUNK_SIZE = 64 * 1024
+
+
+def upload_staged(
+    client: TestClient,
+    headers: dict[str, str],
+    content: bytes,
+    filename: str,
+    chunk_size: int = UPLOAD_CHUNK_SIZE,
+) -> str:
+    """
+    Send `content` through the chunked-upload protocol (start/chunk/finish)
+    and return the upload_id, ready to be consumed by an endpoint.
+    This is the canonical way for tests to upload any file.
+    """
+    total_chunks = max(1, -(-len(content) // chunk_size))
+    r = client.post(
+        "/api/upload/start",
+        headers=headers,
+        json={"filename": filename, "total_size": len(content), "total_chunks": total_chunks},
+    )
+    assert r.status_code == 200, r.text
+    upload_id = r.json()["upload_id"]
+    for index in range(total_chunks):
+        part = content[index * chunk_size : (index + 1) * chunk_size]
+        r = client.post(
+            f"/api/upload/chunk?upload_id={upload_id}&index={index}",
+            headers=headers,
+            files={"file": ("blob", part, "application/octet-stream")},
+        )
+        assert r.status_code == 200, r.text
+    r = client.post(f"/api/upload/finish?upload_id={upload_id}", headers=headers)
+    assert r.status_code == 200, r.text
+    return upload_id
+
 
 def create_user(
     client: TestClient, superuser_header: dict[str, str], username: str
@@ -47,21 +83,14 @@ def create_project(
     Helper function to create a project and return the headers for that project.
     """
 
-    # Upload file
+    # Upload file (chunked-upload protocol), then create the project
+    # referencing the staged upload
     file_path = Path(__file__).resolve().parent / "assets" / "gwsd_train_test.csv"
-    with open(file_path, "rb") as f:
-        response = client.post(
-            f"/api/files/add/project?project_name={project_name}",
-            headers=superuser_header,
-            files={"file": (file_path.name, f, "text/csv")},
-            data={"name": "file", "filename": file_path.name},
-        )
-        assert response.status_code == 200
+    upload_id = upload_staged(client, superuser_header, file_path.read_bytes(), file_path.name)
 
-    # Create the project
     data = ProjectBaseModel(
         project_name=project_name,
-        filename="gwsd_train_test.csv",
+        upload_id=upload_id,
         col_id="row_number",
         cols_text=["sentence", "label"],
         cols_context=[],
@@ -75,7 +104,7 @@ def create_project(
         force_label=False,
         seed=1290,
         stratify_train=False,
-        stratify_test=False,
+        stratify_eval=False,
         from_project=None,
         from_toy_dataset=False,
     )

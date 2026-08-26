@@ -1,6 +1,6 @@
 import datetime
 from datetime import timezone
-from io import StringIO
+from pathlib import Path
 from typing import Tuple
 
 import pandas as pd
@@ -747,7 +747,8 @@ class Schemes:
                     annotation.scheme,
                     username,
                     table.dataset,
-                    "table",
+                    annotation.comment,
+                    annotation.selection or "table",
                 )
             except Exception:
                 errors.append(annotation)
@@ -805,9 +806,11 @@ class Schemes:
         except DBException as e:
             raise Exception from e
 
-    def add_file_annotations(self, annotationsdata: AnnotationsDataModel, user: str) -> None:
+    def add_file_annotations(
+        self, annotationsdata: AnnotationsDataModel, file_path: Path, user: str
+    ) -> None:
         """
-        Add annotations from a file to the trainset
+        Add annotations from an uploaded csv file to the trainset
         Create labels if not exist
         """
         # check if the scheme exist
@@ -817,7 +820,7 @@ class Schemes:
             labels = self.available()[annotationsdata.scheme].labels
 
         # convert the data, match the external index, drop empty
-        df = pd.read_csv(StringIO(annotationsdata.csv), sep=None, engine="python")
+        df = pd.read_csv(file_path, sep=None, engine="python")
 
         # test if the index is unique
         df[annotationsdata.col_id] = df[annotationsdata.col_id].astype(str)
@@ -832,9 +835,10 @@ class Schemes:
         )
 
         # match to the internal index and keep only annotated
+        # (compare external ids as strings: the trainset may store numeric
+        # ids as int64 while the imported column was cast to str above)
         df = df.set_index(annotationsdata.col_id)
-        df = self.data.train.join(df, on="id_external")
-        col = df[label_col].dropna().astype(str)
+        col = self.data.train["id_external"].astype(str).map(df[label_col]).dropna().astype(str)
 
         # if needed, create the labels in the scheme
         for i in col.unique():

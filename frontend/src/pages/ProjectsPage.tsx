@@ -1,18 +1,19 @@
 import { FC, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { DuplicateProjectModal } from '../components/DuplicateProjectModal';
 import { ProjectCard } from '../components/ProjectCard';
 
 import { PageLayout } from '../components/layout/PageLayout';
 import { useUserProjects } from '../core/api';
 
-import { FaPlusCircle } from 'react-icons/fa';
+import { FaPlusCircle, FaRegCopy } from 'react-icons/fa';
 import { useAppContext } from '../core/useAppContext';
 import { AvailableProjectsModel } from '../types';
 
 export const ProjectsPage: FC = () => {
   // hooks
   const {
-    appContext: { currentProject, displayConfig },
+    appContext: { currentProject, displayConfig, developmentMode },
     resetContext,
   } = useAppContext();
   const currentProjectSlug = currentProject?.params.project_slug;
@@ -20,26 +21,40 @@ export const ProjectsPage: FC = () => {
   // api call
   const { projects, storageUsed, storageLimit } = useUserProjects();
 
+  // hide image projects unless experimental mode is on
+  const visibleProjects = (projects || []).filter(
+    (project) => developmentMode || project.parameters.kind !== 'image',
+  );
+
   // rows to display
   const [rows, setRows] = useState<AvailableProjectsModel[]>([]);
   useEffect(() => {
-    setRows(projects || []);
-  }, [projects]);
+    setRows(visibleProjects);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projects, developmentMode]);
 
-  // handle search input
+  // duplicate modal state
+  const [showDuplicate, setShowDuplicate] = useState<boolean>(false);
+
+  // handle search input — supports `type:<kind>` token to filter by project kind
   const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const searchValue = e.target.value.toLowerCase();
+    const tokens = e.target.value.toLowerCase().split(/\s+/).filter(Boolean);
+    const typeFilters = tokens.filter((t) => t.startsWith('type:')).map((t) => t.slice(5));
+    const textQuery = tokens.filter((t) => !t.startsWith('type:')).join(' ');
 
     setRows(
-      (projects || []).filter((project) => {
+      visibleProjects.filter((project) => {
+        if (typeFilters.length > 0 && !typeFilters.includes(project.parameters.kind)) {
+          return false;
+        }
+        if (!textQuery) return true;
         const projectName = project.parameters.project_name.toLowerCase();
         const projectSlug = project.parameters.project_slug.toLowerCase();
         const createdBy = project.created_by.toLowerCase();
-
         return (
-          projectName.includes(searchValue) ||
-          projectSlug.includes(searchValue) ||
-          createdBy.includes(searchValue)
+          projectName.includes(textQuery) ||
+          projectSlug.includes(textQuery) ||
+          createdBy.includes(textQuery)
         );
       }),
     );
@@ -115,11 +130,28 @@ export const ProjectsPage: FC = () => {
               )}
 
               <div className="project-list">
-                <input
-                  type="text"
-                  className="form-control mt-3"
-                  placeholder="Search for a project or a user"
-                  onChange={handleSearch}
+                <div className="d-flex align-items-stretch mt-3 gap-2">
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="Search for a project or a user (use type:text or type:image to filter by type)"
+                    onChange={handleSearch}
+                  />
+                  {canEdit && visibleProjects.length > 0 && (
+                    <button
+                      type="button"
+                      className="btn btn-outline-secondary d-flex align-items-center"
+                      title="Duplicate an existing project"
+                      onClick={() => setShowDuplicate(true)}
+                    >
+                      <FaRegCopy size={18} />
+                    </button>
+                  )}
+                </div>
+                <DuplicateProjectModal
+                  show={showDuplicate}
+                  onHide={() => setShowDuplicate(false)}
+                  projects={visibleProjects}
                 />
                 {rows.map((project) => (
                   <ProjectCard

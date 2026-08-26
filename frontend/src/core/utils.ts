@@ -1,9 +1,27 @@
-import { parquetMetadataAsync, parquetRead } from 'hyparquet';
+import { parquetMetadataAsync, parquetRead, parquetSchema } from 'hyparquet';
+import { compressors } from 'hyparquet-compressors';
 import { fromPairs, sample, zip } from 'lodash';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 
 import { DataType } from '../components/forms/ProjectCreationForm';
+
+/**
+ * flattenCell
+ * keeps scalar values (string, number, bigint, date...) as they are, and
+ * serializes nested ones (lists, structs) to a JSON string so a column always
+ * holds one value per row whatever the type of its content
+ */
+function flattenCell(value: unknown): unknown {
+  if (value === null || typeof value !== 'object' || value instanceof Date) {
+    return value;
+  }
+  try {
+    return JSON.stringify(value, (_, v) => (typeof v === 'bigint' ? v.toString() : v));
+  } catch (e) {
+    return String(value);
+  }
+}
 
 /**
  * loadParquetFile
@@ -26,12 +44,17 @@ export async function loadParquetFile(file: File): Promise<DataType> {
     parquetRead({
       metadata,
       file: arrayBuffer,
+      // support all parquet compression codecs (ZSTD, gzip, brotli...), not just snappy
+      compressors,
       // here is the callback which will be called once the file has been loaded
       onComplete: (arrayData) => {
-        // extract headers from metadata
-        const headers = metadata.schema.slice(1).map((s) => s.name);
-        // transforme the data as an array of objects
-        const data = arrayData.map((ad) => fromPairs(zip(headers, ad)));
+        // one header per top-level column: metadata.schema is a flat tree where
+        // nested types (lists, structs...) add extra elements, while parquetRead
+        // assembles each top-level column into a single value per row
+        const headers = parquetSchema(metadata).children.map((child) => child.element.name);
+        // transforme the data as an array of objects, flattening nested values
+        // (lists, structs) to strings so every column holds one scalar per row
+        const data = arrayData.map((ad) => fromPairs(zip(headers, ad.map(flattenCell))));
         // resolve the promise with a dataType object
         resolve({ data, headers, filename: file.name });
       },
@@ -484,6 +507,15 @@ export function getRandomName(prefix: string) {
   if (prefix === 'bertmodel') {
     random_name = ('bert-' + sample(animalsList)) as string;
   }
+  if (prefix === 'nermodel') {
+    random_name = ('ner-' + sample(animalsList)) as string;
+  }
+  if (prefix === 'imagemodel') {
+    random_name = ('image-' + sample(animalsList)) as string;
+  }
+  if (prefix === 'projection') {
+    random_name = ('projection-' + sample(animalsList)) as string;
+  }
   if (prefix === 'Scheme') {
     random_name = 'New_Scheme';
   }
@@ -528,6 +560,25 @@ export function isValidRegex(pattern: string) {
 export const displayTime = (time: string) => {
   // 2025-12-11 10:50:57.786644 -> 2025-12-11 10:50
   return time.slice(0, time.indexOf(':') + 3);
+};
+
+// Match feature names that act as text representations suitable
+// as inputs for quick models / projections (sentence-embeddings, fasttext).
+export const isEmbeddingLikeFeature = (name: string): boolean =>
+  /sentence-embeddings|embeddings|fasttext/i.test(name);
+
+// Pick the priority default feature for a quick model:
+// prefer a sentence-embedding (BERT predictions bias quality estimates upward),
+// fall back to a BERT prediction, then to the last fasttext-like feature.
+export const pickDefaultQuickModelFeature = (features: string[]): string | undefined => {
+  const embedding = features.find((f) => /sentence-embeddings|embeddings/i.test(f));
+  if (embedding) return embedding;
+  const bert = features.find((f) => /predict/i.test(f));
+  if (bert) return bert;
+  for (let i = features.length - 1; i >= 0; i--) {
+    if (/fasttext/i.test(features[i])) return features[i];
+  }
+  return undefined;
 };
 
 export function truncateInMiddle(string: string, maxLength: number, separator: string = '...') {

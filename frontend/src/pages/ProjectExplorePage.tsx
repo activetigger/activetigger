@@ -6,6 +6,7 @@ import { BertopicPage } from '../pages/BertopicPage';
 
 import { DataTabular } from '../components/DataTabular';
 import { ProjectPageLayout } from '../components/layout/ProjectPageLayout';
+import { LexicometricsManagement } from '../components/LexicometricsManagement';
 import { ProjectionManagement } from '../components/ProjectionManagement';
 import { useAppContext } from '../core/useAppContext';
 
@@ -15,7 +16,7 @@ import { useAppContext } from '../core/useAppContext';
 export const ProjectExplorePage: FC = () => {
   const { projectName } = useParams();
   const {
-    appContext: { currentScheme, currentProject: project, phase },
+    appContext: { currentScheme, currentProject: project, phase, developmentMode },
     setAppContext,
   } = useAppContext();
   const availableLabels =
@@ -43,12 +44,21 @@ export const ProjectExplorePage: FC = () => {
                   availableLabels={availableLabels}
                   availableUsers={project?.users?.users ?? []}
                   kindScheme={kindScheme}
+                  projectKind={project?.params.kind || 'text'}
                   isValid={project?.params.valid || false}
                   isTest={project?.params.test || false}
                   currentDataset={phase}
                   setAppContext={setAppContext}
                 />
               </Tab>
+              {project?.params.kind !== 'image' && developmentMode && (
+                <Tab eventKey="lexicometry" title="Lexicometry">
+                  <div className="explanations">
+                    Statistics on your train data (word and token count, most frequent words)
+                  </div>
+                  <LexicometricsManagement projectSlug={projectName || null} />
+                </Tab>
+              )}
               <Tab eventKey="visualization" title="Visualization" unmountOnExit={true}>
                 <div className="explanations">Explore your annotable data as a projection</div>
                 <ProjectionManagement
@@ -58,28 +68,30 @@ export const ProjectExplorePage: FC = () => {
                   currentElementId={undefined}
                 />
               </Tab>
-              <Tab eventKey="bertopic" title="Topic model">
-                <div className="explanations">
-                  Explore the topics in your train data with{' '}
-                  <a
-                    href="https://maartengr.github.io/BERTopic/index.html"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    Bertopic
-                  </a>
-                  . You can also find a complete tutorial on BERTopic{' '}
-                  <a
-                    href="https://www.css.cnrs.fr/the-general-inquirer-in-the-time-of-llms-a-bertopic-tutorial/"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    here
-                  </a>
-                  .
-                </div>
-                <BertopicPage />
-              </Tab>
+              {project?.params.kind !== 'image' && (
+                <Tab eventKey="bertopic" title="Topic model">
+                  <div className="explanations">
+                    Explore the topics in your train data with{' '}
+                    <a
+                      href="https://maartengr.github.io/BERTopic/index.html"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      Bertopic
+                    </a>
+                    . You can also find a complete tutorial on BERTopic{' '}
+                    <a
+                      href="https://www.css.cnrs.fr/the-general-inquirer-in-the-time-of-llms-a-bertopic-tutorial/"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      here
+                    </a>
+                    .
+                  </div>
+                  <BertopicPage />
+                </Tab>
+              )}
             </Tabs>
           </div>
         </div>

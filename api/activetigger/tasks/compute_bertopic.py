@@ -11,7 +11,6 @@ import nltk
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-import torch
 import umap
 from bertopic import BERTopic
 from great_tables import GT, loc, style
@@ -23,6 +22,7 @@ from slugify import slugify
 
 from activetigger.config import config
 from activetigger.datamodels import BertopicParamsModel, EventsModel
+from activetigger.functions import release_device_memory
 from activetigger.monitoring import TaskTimer
 from activetigger.tasks.base_task import BaseTask
 from activetigger.tasks.compute_sbert import ComputeSbert
@@ -268,7 +268,7 @@ class ComputeBertopic(BaseTask):
         path_embeddings = self.path_bertopic.joinpath("embeddings").joinpath(
             (
                 f"bertopic_embeddings_{self.input_datasets}_"
-                f"{slugify(self.parameters.embedding_model)}"
+                f"{slugify(self.parameters.embedding_model or '')}"
                 f".parquet"
             )
         )
@@ -788,10 +788,7 @@ class ComputeBertopic(BaseTask):
             except NameError:
                 pass
             gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
-                torch.cuda.empty_cache()
-                torch.cuda.ipc_collect()
+            release_device_memory()
 
     def update_progress(self, value: float) -> None:
         """

@@ -10,17 +10,39 @@ import { components } from './generated/openapi';
  */
 
 export type UserModel = components['schemas']['UserModel'];
+export type UserCredentialInput = components['schemas']['UserCredentialInput'];
+export type UserCredentialPublic = components['schemas']['UserCredentialPublic'];
 
 export type ProjectModel = components['schemas']['ProjectModel'];
 export type ProjectBaseModel = components['schemas']['ProjectBaseModel'];
-export type ProjectStateModel = components['schemas']['ProjectStateModel'];
+// Base type comes from the generated client. We extend it locally with an
+// optional `nermodels` field until /models/ner/* makes it into the OpenAPI
+// regen — mirrors api/activetigger/datamodels.py::ProjectStateModel.
+export type NerModelsProjectStateModel = {
+  options: Record<string, unknown>[];
+  available: Record<string, Record<string, components['schemas']['LMStatusModel']>>;
+  training: Record<string, components['schemas']['LMComputingOutModel']>;
+  base_parameters: components['schemas']['LMParametersModel'];
+};
+export type ProjectStateModel = components['schemas']['ProjectStateModel'] & {
+  nermodels?: NerModelsProjectStateModel | null;
+};
 export type ElementOutModel = components['schemas']['ElementOutModel'];
+
+export type PrepareSessionModel = components['schemas']['PrepareSessionModel'];
+export type PrepareSplitModel = components['schemas']['PrepareSplitModel'];
+export type PrepareStatusModel = components['schemas']['PrepareStatusModel'];
+
+export type LexicometricsModel = components['schemas']['LexicometricsModel'];
+export type DistributionModel = components['schemas']['DistributionModel'];
+export type TfidfWordTopDocumentsModel = components['schemas']['TfidfWordTopDocumentsModel'];
+export type TfidfDocumentTopWordsModel = components['schemas']['TfidfDocumentTopWordsModel'];
 
 export type AvailableProjectsModel = {
   created_by: string;
   created_at: string;
   parameters: ProjectModel;
-  size: number;
+  size: number | null;
 };
 export type LoginParams = components['schemas']['Body_login_for_access_token_token_post'];
 
@@ -81,6 +103,7 @@ export type ActiveModel = components['schemas']['ActiveModel'];
 export type ElementHistoryPoint = Omit<components['schemas']['AnnotationModel'], 'user'> & {
   element_text: string;
   skip?: boolean;
+  durationMs?: number;
 };
 
 export interface FeatureDfmParameters {
@@ -113,12 +136,20 @@ export interface FeatureSbertParameters {
   batch_size?: number;
 }
 
+export interface FeatureBertEmbeddingsParameters {
+  model?: string;
+  pooling?: 'mean' | 'cls';
+  max_length_tokens?: number;
+  batch_size?: number;
+}
+
 export interface FeatureModelExtended {
   name: string;
   type: string;
   parameters:
     | null
     | FeatureSbertParameters
+    | FeatureBertEmbeddingsParameters
     | FeatureDfmParameters
     | FeatureRegexParameters
     | FeatureDatasetParameters
@@ -134,6 +165,26 @@ export interface SelectionConfig {
   frameSelection?: boolean; // true/false to use frame to select
   filter?: string;
   users?: string[];
+  prompt_id?: string; // saved prompt id, used when mode === 'prompt'
+  // [min, max] cosine-similarity bounds when mode === 'prompt'. Both ends are
+  // inclusive; undefined means no filtering.
+  similarity_range?: [number, number];
+}
+
+// Prompt-based image selection (multimodal). Hand-written until
+// `npm run generate` picks up the new backend routes/schemas.
+export interface PromptOutModel {
+  prompt_id: string;
+  text: string;
+  feature_name: string;
+  user: string;
+  created_at: string;
+}
+
+export interface PromptsProjectStateModel {
+  available: PromptOutModel[];
+  bindable_features: string[];
+  training: Record<string, Record<string, string | null>>;
 }
 
 export interface GenerateConfig {
@@ -143,6 +194,7 @@ export interface GenerateConfig {
   prompt?: string;
   promptId?: string;
   n_batch?: number;
+  n_workers?: number;
   selectionMode?: string;
   dataset?: string;
   selectedModel?: GenModel & { api: string };
@@ -164,6 +216,14 @@ export interface DisplayConfig {
   forceOneColumnLayout?: boolean;
   forceCompleteLabel?: boolean;
   displayFormat?: 'table' | 'cards';
+  displayMeanAnnotationTime?: boolean;
+  spanAnnotationMode?: 'locked' | 'neutral';
+  // focus mode modal: text size (% of normal) and text frame width (% of screen)
+  focusFontSize?: number;
+  focusTextWidth?: number;
+  // experimental: batch grid annotation for image projects.
+  imageGridMode?: boolean;
+  imageGridSize?: number;
 }
 
 export interface newBertModel {
@@ -180,15 +240,47 @@ export interface newBertModel {
   auto_max_length: boolean;
 }
 
+export interface newImageModel {
+  name?: string;
+  base: string;
+  parameters: LMParametersModel;
+  class_balance?: boolean;
+  loss?: string;
+  class_min_freq?: number;
+  test_size?: number;
+  exclude_labels: string[];
+  fp16: boolean;
+}
+
+// Mirrors api/activetigger/datamodels.py::NerModelModel. Defined locally
+// until the openapi client is regenerated for /models/ner/*.
+export interface newNerModel {
+  name?: string;
+  base: string;
+  parameters: LMParametersModel;
+  test_size?: number;
+  max_length?: number;
+}
+
 export interface EvalSetModel {
   col_id: string;
   cols_text: string[];
-  col_label?: string | null;
-  scheme?: string | null;
+  cols_label?: string[];
   n_eval: number;
 }
 
-export type SupportedAPI = 'Ollama' | 'OpenAI' | 'HuggingFace';
+// Mirrors api/activetigger/datamodels.py::EvalSetImageModel. Defined locally
+// because the openapi-generated client has not been regenerated yet.
+export interface EvalSetImageModel {
+  filename: string;
+  n_eval?: number | null;
+  labels_filename?: string | null;
+  col_id?: string | null;
+  col_label?: string | null;
+  scheme?: string | null;
+}
+
+export type SupportedAPI = 'Ollama' | 'OpenAI' | 'HuggingFace' | 'OpenAICompatible';
 
 export type GenModelAPI = { models: GenModel[] } & (
   | {
@@ -212,4 +304,6 @@ export interface GenModel {
   name: string;
   endpoint?: string;
   credentials?: string;
+  // name of a credentials entry saved in the user account, resolved server-side
+  saved_credentials?: string;
 }

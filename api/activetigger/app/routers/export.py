@@ -41,6 +41,21 @@ def export_data(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/export/summary", dependencies=[Depends(verified_user)])
+def export_summary(
+    project: Annotated[Project, Depends(get_project)],
+    current_user: Annotated[UserInDBModel, Depends(verified_user)],
+) -> dict:
+    """
+    Lab-notebook style snapshot of the project (JSON).
+    """
+    test_rights(ProjectAction.EXPORT_DATA, current_user.username, project.name)
+    try:
+        return project.export_summary()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/export/features", dependencies=[Depends(verified_user)])
 def export_features(
     project: Annotated[Project, Depends(get_project)],
@@ -63,14 +78,15 @@ def export_projection(
     project: Annotated[Project, Depends(get_project)],
     current_user: Annotated[UserInDBModel, Depends(verified_user)],
     format: str = Query(),
+    projection_name: str = Query(),
 ) -> FileResponse:
     """
-    Export features
+    Export a named projection
     """
     test_rights(ProjectAction.EXPORT_DATA, current_user.username, project.name)
     try:
         return project.projections.export(
-            user_name=current_user.username,
+            name=projection_name,
             format=format,
             col_id=project.params.col_id,
             id_mapping=project.data.index,
@@ -86,12 +102,34 @@ def export_prediction(
     format: str = Query(),
     name: str = Query(),
     dataset: str = Query("all"),
+    kind: str = Query("bert"),
 ) -> FileResponse:
     """
-    Export annotations
+    Export prediction file (parquet/csv/xlsx). `kind` selects which manager
+    owns the file: BERT classifications under `languagemodels`, NER span
+    predictions under `nermodels`, quickmodel predictions on the whole
+    dataset under `quickmodels`.
     """
     test_rights(ProjectAction.EXPORT_DATA, current_user.username, project.name)
     try:
+        if kind == "ner":
+            if project.nermodels is None:
+                raise HTTPException(
+                    status_code=400, detail="NER models are not available for this project"
+                )
+            return project.nermodels.export_prediction(
+                name=name,
+                file_name=f"predict_{dataset}.parquet",
+                format=format,
+                col_id=project.params.col_id,
+            )
+        if kind == "quick":
+            return project.quickmodels.export_prediction_file(
+                name=name,
+                dataset=dataset,
+                format=format,
+                col_id=project.params.col_id,
+            )
         return project.languagemodels.export_prediction(
             name=name,
             file_name=f"predict_{dataset}.parquet",

@@ -1,6 +1,11 @@
 import { ChangeEvent, FC, useEffect, useState } from 'react';
 import { SubmitHandler, useForm } from 'react-hook-form';
-import { fetchOllamaModels, useGetGenModels } from '../../core/api';
+import {
+  fetchOllamaModels,
+  fetchOpenAICompatibleModels,
+  useGetGenModels,
+  useUserCredentials,
+} from '../../core/api';
 import { useNotifications } from '../../core/notifications';
 import { GenerationModelApi, GenModel, SupportedAPI } from '../../types';
 
@@ -17,6 +22,14 @@ export const GenModelSetupForm: FC<{
   const [ollamaEndpoint, setOllamaEndpoint] = useState<string>('');
   const [ollamaModels, setOllamaModels] = useState<Array<{ slug: string; name: string }>>([]);
   const [ollamaLoading, setOllamaLoading] = useState(false);
+  const [openaiEndpoint, setOpenaiEndpoint] = useState<string>('');
+  const [openaiCredentials, setOpenaiCredentials] = useState<string>('');
+  const [openaiModels, setOpenaiModels] = useState<Array<{ slug: string; name: string }>>([]);
+  const [openaiLoading, setOpenaiLoading] = useState(false);
+  // credentials saved in the user account (secrets stay in the backend)
+  const { userCredentials } = useUserCredentials();
+  const [selectedSaved, setSelectedSaved] = useState<string>('');
+  const savedForAPI = (userCredentials || []).filter((c) => c.api === selectedAPI?.name);
   const { models } = useGetGenModels();
   const { register, handleSubmit, setValue } = useForm<FormValues>();
   useEffect(() => {
@@ -37,13 +50,31 @@ export const GenModelSetupForm: FC<{
     setSelectedAPI(availableAPIs[index]);
     setOllamaModels([]);
     setOllamaEndpoint('');
+    setOpenaiModels([]);
+    setOpenaiEndpoint('');
+    setOpenaiCredentials('');
+    setSelectedSaved('');
   };
 
   const onSubmit: SubmitHandler<FormValues> = (data: FormValues) => {
     const slug = data.model;
     const name = modelName;
-    const endpoint = selectedAPI?.name === 'Ollama' ? ollamaEndpoint : data.endpoint;
-    const credentials = data.credentials;
+    let endpoint: string | undefined;
+    let credentials: string | undefined;
+    if (selectedSaved) {
+      // endpoint/secret are resolved server-side from the saved entry
+      endpoint = undefined;
+      credentials = undefined;
+    } else if (selectedAPI?.name === 'Ollama') {
+      endpoint = ollamaEndpoint;
+      credentials = undefined;
+    } else if (selectedAPI?.name === 'OpenAICompatible') {
+      endpoint = openaiEndpoint;
+      credentials = openaiCredentials || undefined;
+    } else {
+      endpoint = data.endpoint;
+      credentials = data.credentials;
+    }
     if (slug === null || slug === '') {
       notify({ type: 'error', message: 'You must select a model' });
       return;
@@ -52,8 +83,16 @@ export const GenModelSetupForm: FC<{
       notify({ type: 'error', message: 'You must select a name' });
       return;
     }
-    if (selectedAPI?.name === 'Ollama' && (!endpoint || endpoint === '')) {
+    if (!selectedSaved && selectedAPI?.name === 'Ollama' && (!endpoint || endpoint === '')) {
       notify({ type: 'error', message: 'You must provide an Ollama endpoint' });
+      return;
+    }
+    if (
+      !selectedSaved &&
+      selectedAPI?.name === 'OpenAICompatible' &&
+      (!endpoint || endpoint === '')
+    ) {
+      notify({ type: 'error', message: 'You must provide an endpoint URL' });
       return;
     }
     add({
@@ -62,6 +101,7 @@ export const GenModelSetupForm: FC<{
       api: selectedAPI.name as SupportedAPI,
       endpoint,
       credentials,
+      saved_credentials: selectedSaved || undefined,
     });
   };
 
@@ -74,13 +114,16 @@ export const GenModelSetupForm: FC<{
   };
 
   const handleFetchOllamaModels = async () => {
-    if (!ollamaEndpoint) {
+    const endpoint = selectedSaved
+      ? savedForAPI.find((c) => c.name === selectedSaved)?.endpoint
+      : ollamaEndpoint;
+    if (!endpoint) {
       notify({ type: 'error', message: 'Please enter an Ollama endpoint URL' });
       return;
     }
     setOllamaLoading(true);
     try {
-      const models = await fetchOllamaModels(ollamaEndpoint);
+      const models = await fetchOllamaModels(endpoint);
       setOllamaModels(models);
       if (models.length > 0) {
         setValue('model', models[0].slug);
@@ -94,6 +137,29 @@ export const GenModelSetupForm: FC<{
     }
   };
 
+  const handleFetchOpenAIModels = async () => {
+    if (!selectedSaved && !openaiEndpoint) {
+      notify({ type: 'error', message: 'Please enter an endpoint URL' });
+      return;
+    }
+    setOpenaiLoading(true);
+    try {
+      const models = selectedSaved
+        ? await fetchOpenAICompatibleModels(undefined, undefined, selectedSaved)
+        : await fetchOpenAICompatibleModels(openaiEndpoint, openaiCredentials);
+      setOpenaiModels(models);
+      if (models.length > 0) {
+        setValue('model', models[0].slug);
+        setModelName(selectedAPI.name + '-' + models[0].slug);
+      }
+    } catch (e) {
+      notify({ type: 'error', message: `Failed to fetch models: ${e}` });
+      setOpenaiModels([]);
+    } finally {
+      setOpenaiLoading(false);
+    }
+  };
+
   return (
     <form onSubmit={handleSubmit(onSubmit)}>
       <label htmlFor="api">API </label>
@@ -104,22 +170,31 @@ export const GenModelSetupForm: FC<{
           </option>
         ))}
       </select>
+      {savedForAPI.length > 0 && (
+        <div>
+          <label htmlFor="saved-credentials">Credentials</label>
+          <select
+            id="saved-credentials"
+            value={selectedSaved}
+            onChange={(e) => setSelectedSaved(e.target.value)}
+          >
+            <option value="">Enter manually</option>
+            {savedForAPI.map((credential) => (
+              <option key={credential.name} value={credential.name}>
+                {credential.name}
+                {credential.endpoint ? ` (${credential.endpoint})` : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
       {(() => {
         const inputs = [];
         if (selectedAPI !== undefined) {
           if (selectedAPI.name === 'Ollama') {
-            inputs.push(
-              <div key="endpoint">
-                <label htmlFor="endpoint">Endpoint</label>
-                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                  <input
-                    type="text"
-                    id="endpoint"
-                    placeholder="enter the url of the Ollama server"
-                    value={ollamaEndpoint}
-                    onChange={(e) => setOllamaEndpoint(e.target.value)}
-                    style={{ flex: 1 }}
-                  />
+            if (selectedSaved) {
+              inputs.push(
+                <div key="fetch-saved">
                   <button
                     type="button"
                     className="btn btn-secondary btn-sm"
@@ -128,9 +203,33 @@ export const GenModelSetupForm: FC<{
                   >
                     {ollamaLoading ? 'Loading...' : 'Fetch models'}
                   </button>
-                </div>
-              </div>,
-            );
+                </div>,
+              );
+            } else {
+              inputs.push(
+                <div key="endpoint">
+                  <label htmlFor="endpoint">Endpoint</label>
+                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                    <input
+                      type="text"
+                      id="endpoint"
+                      placeholder="enter the url of the Ollama server"
+                      value={ollamaEndpoint}
+                      onChange={(e) => setOllamaEndpoint(e.target.value)}
+                      style={{ flex: 1 }}
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={handleFetchOllamaModels}
+                      disabled={ollamaLoading}
+                    >
+                      {ollamaLoading ? 'Loading...' : 'Fetch models'}
+                    </button>
+                  </div>
+                </div>,
+              );
+            }
             if (ollamaModels.length > 0) {
               inputs.push(
                 <div key="model">
@@ -145,19 +244,84 @@ export const GenModelSetupForm: FC<{
                 </div>,
               );
             }
-          } else if (selectedAPI.name === 'OpenAI' || selectedAPI.name === 'ilaas') {
-            inputs.push(
-              <div key="model">
-                <label htmlFor="model">Model</label>
-                <select id="model" {...register('model', { onChange: onModelChange })}>
-                  {selectedAPI.models.map((model) => (
-                    <option key={model.slug} value={model.slug}>
-                      {model.name}
-                    </option>
-                  ))}
-                </select>
-              </div>,
-            );
+          } else if (selectedAPI.name === 'OpenAICompatible') {
+            if (selectedSaved) {
+              inputs.push(
+                <div key="fetch-saved">
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={handleFetchOpenAIModels}
+                    disabled={openaiLoading}
+                  >
+                    {openaiLoading ? 'Loading...' : 'Fetch models'}
+                  </button>
+                </div>,
+              );
+            } else {
+              inputs.push(
+                <div key="endpoint">
+                  <label htmlFor="endpoint">Endpoint</label>
+                  <input
+                    type="text"
+                    id="endpoint"
+                    placeholder="e.g. https://api.example.com/v1"
+                    value={openaiEndpoint}
+                    onChange={(e) => setOpenaiEndpoint(e.target.value)}
+                  />
+                </div>,
+              );
+              inputs.push(
+                <div key="credentials">
+                  <label htmlFor="credentials">API Credentials</label>
+                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                    <input
+                      type="text"
+                      id="credentials"
+                      placeholder="API key (optional)"
+                      autoComplete="off"
+                      value={openaiCredentials}
+                      onChange={(e) => setOpenaiCredentials(e.target.value)}
+                      style={{ flex: 1 }}
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={handleFetchOpenAIModels}
+                      disabled={openaiLoading}
+                    >
+                      {openaiLoading ? 'Loading...' : 'Fetch models'}
+                    </button>
+                  </div>
+                </div>,
+              );
+            }
+            if (openaiModels.length > 0) {
+              inputs.push(
+                <div key="model">
+                  <label htmlFor="model">Model</label>
+                  <select id="model" {...register('model', { onChange: onModelChange })}>
+                    {openaiModels.map((model) => (
+                      <option key={model.slug} value={model.slug}>
+                        {model.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>,
+              );
+            } else {
+              inputs.push(
+                <div key="model">
+                  <label htmlFor="model">Model</label>
+                  <input
+                    type="text"
+                    id="model"
+                    placeholder="ID of the model"
+                    {...register('model', { onChange: onModelChange })}
+                  />
+                </div>,
+              );
+            }
           } else {
             inputs.push(
               <div key="model">
@@ -170,7 +334,7 @@ export const GenModelSetupForm: FC<{
                 />
               </div>,
             );
-            if (selectedAPI.name !== 'OpenRouter')
+            if (selectedAPI.name !== 'OpenRouter' && !selectedSaved)
               inputs.push(
                 <div key="endpoint">
                   <label htmlFor="endpoint">Endpoint</label>
@@ -184,7 +348,11 @@ export const GenModelSetupForm: FC<{
               );
           }
 
-          if (selectedAPI.name !== 'Ollama')
+          if (
+            selectedAPI.name !== 'Ollama' &&
+            selectedAPI.name !== 'OpenAICompatible' &&
+            !selectedSaved
+          )
             inputs.push(
               <div key="credentials">
                 <label htmlFor="credentials">API Credentials</label>

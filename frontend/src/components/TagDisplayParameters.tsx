@@ -3,9 +3,10 @@ import { useAppContext } from '../core/useAppContext';
 
 export const TagDisplayParameters: FC = () => {
   const {
-    appContext: { displayConfig },
+    appContext: { displayConfig, currentProject, developmentMode },
     setAppContext,
   } = useAppContext();
+  const isImageProject = currentProject?.params?.kind === 'image';
   return (
     <div className="d-flex flex-column">
       <label>
@@ -110,6 +111,23 @@ export const TagDisplayParameters: FC = () => {
         Element history
       </label>
 
+      <label>
+        <input
+          type="checkbox"
+          checked={!!displayConfig.displayMeanAnnotationTime}
+          onChange={(_) => {
+            setAppContext((prev) => ({
+              ...prev,
+              displayConfig: {
+                ...displayConfig,
+                displayMeanAnnotationTime: !displayConfig.displayMeanAnnotationTime,
+              },
+            }));
+          }}
+        />
+        Mean annotation time
+      </label>
+
       <label>Tokens (approx. 4 c / token)</label>
       <input
         type="number"
@@ -202,6 +220,23 @@ export const TagDisplayParameters: FC = () => {
         Force complete label
       </label>
 
+      <label title="Locked: pick a label, then highlight text to tag it. Neutral: highlight text first, then click a label to apply it.">
+        <input
+          type="checkbox"
+          checked={displayConfig.spanAnnotationMode === 'neutral'}
+          onChange={(e) =>
+            setAppContext((prev) => ({
+              ...prev,
+              displayConfig: {
+                ...displayConfig,
+                spanAnnotationMode: e.target.checked === true ? 'neutral' : 'locked',
+              },
+            }))
+          }
+        />
+        Highlight first
+      </label>
+
       <label>Highlight words in the text</label>
       <textarea
         placeholder="Line break to separate"
@@ -217,6 +252,51 @@ export const TagDisplayParameters: FC = () => {
           }));
         }}
       />
+
+      {isImageProject && developmentMode && (
+        <>
+          <hr />
+          <label title="Experimental: annotate images in batch on a N x N grid. Multiclass schemes on the train dataset only. Designed for computer screens.">
+            <input
+              type="checkbox"
+              checked={!!displayConfig.imageGridMode}
+              onChange={(_) => {
+                setAppContext((prev) => ({
+                  ...prev,
+                  displayConfig: {
+                    ...displayConfig,
+                    imageGridMode: !displayConfig.imageGridMode,
+                  },
+                }));
+              }}
+            />
+            Grid display 🧪
+          </label>
+          {displayConfig.imageGridMode && (
+            <div className="horizontal">
+              <span className="text-nowrap me-1">
+                Grid size {displayConfig.imageGridSize ?? 3} × {displayConfig.imageGridSize ?? 3}
+              </span>
+              <input
+                type="range"
+                min="2"
+                max="5"
+                value={displayConfig.imageGridSize ?? 3}
+                onChange={(e) => {
+                  setAppContext((prev) => ({
+                    ...prev,
+                    displayConfig: {
+                      ...displayConfig,
+                      imageGridSize: Number(e.target.value),
+                    },
+                  }));
+                }}
+                style={{ marginRight: '10px' }}
+              />
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 };

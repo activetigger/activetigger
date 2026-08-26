@@ -26,13 +26,42 @@ export const SelectCurrentScheme: FC<{ username?: string | null }> = ({ username
 
   // get element from the context
   const {
-    appContext: { currentProject, currentScheme, selectionConfig },
+    appContext: { currentProject, currentScheme, selectionConfig, developmentMode },
     setAppContext,
   } = useAppContext();
 
+  // Span schemes are experimental: hide them from the picker (and from the
+  // count used to auto-select a default scheme) unless dev mode is on.
   const availableSchemes = useMemo(() => {
-    return currentProject ? Object.keys(currentProject.schemes.available) : [];
-  }, [currentProject]);
+    if (!currentProject) return [];
+    return Object.keys(currentProject.schemes.available).filter(
+      (name) => developmentMode || currentProject.schemes.available[name]?.kind !== 'span',
+    );
+  }, [currentProject, developmentMode]);
+
+  // If the active scheme just became hidden (user turned dev mode off while
+  // sitting on a span scheme), switch to the first visible non-default one.
+  // BUT: only switch if we actually have a non-span scheme to switch TO.
+  // When a project is created by importing only a span column, there is no
+  // "default" scheme at all (project.py:464 skips the default-scheme creation
+  // when import_trainset_labels has columns), so `availableSchemes` is empty
+  // here. Setting `currentScheme = undefined` in that case lets
+  // CurrentProjectState's auto-selector immediately re-pick the span scheme
+  // (it iterates unfiltered Object.keys), and the two effects oscillate at
+  // React-render speed — flooding /statistics and /schemes/codebook until
+  // the browser hits ERR_INSUFFICIENT_RESOURCES.
+  useEffect(() => {
+    if (
+      currentScheme &&
+      !developmentMode &&
+      currentProject?.schemes.available[currentScheme]?.kind === 'span'
+    ) {
+      const fallback = availableSchemes.find((s) => s !== 'default') || availableSchemes[0];
+      if (fallback && fallback !== currentScheme) {
+        setAppContext((state) => ({ ...state, currentScheme: fallback, activeModel: null }));
+      }
+    }
+  }, [currentScheme, developmentMode, currentProject, availableSchemes, setAppContext]);
 
   // manage scheme selection
   useEffect(() => {
@@ -122,11 +151,17 @@ export const SchemesManagement: FC<SchemeManagementProps> = ({
 }) => {
   // get element from the context
   const {
-    appContext: { currentProject, currentScheme, reFetchCurrentProject },
+    appContext: { currentProject, currentScheme, reFetchCurrentProject, developmentMode },
     setAppContext,
   } = useAppContext();
 
-  const availableSchemes = currentProject ? Object.keys(currentProject.schemes.available) : [];
+  // Same filter as SelectCurrentScheme: span schemes don't appear in the
+  // post-delete fallback list either when not in dev mode.
+  const availableSchemes = currentProject
+    ? Object.keys(currentProject.schemes.available).filter(
+        (name) => developmentMode || currentProject.schemes.available[name]?.kind !== 'span',
+      )
+    : [];
 
   // hooks to use the objets
   const { register, handleSubmit } = useForm<SchemeModel>({
@@ -258,7 +293,7 @@ export const SchemesManagement: FC<SchemeManagementProps> = ({
             <select id="scheme_kind" {...register('kind')}>
               <option value="multiclass">Multiclass</option>
               <option value="multilabel">Multilabel</option>
-              <option value="span">Span (experimental - only annotation)</option>
+              {developmentMode && <option value="span">Span (experimental)</option>}
             </select>
             <details style={{ marginTop: '10px' }}>
               <summary style={{ cursor: 'pointer' }}>Initial labels (optional)</summary>
