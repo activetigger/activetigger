@@ -28,11 +28,11 @@ api:
       - ReadWriteOnce
   resources:
     requests:
-      cpu: "2"
-      memory: 8Gi
-    limits:
-      cpu: "4"
+      cpu: "5"
       memory: 16Gi
+    limits:
+      cpu: "20"
+      memory: 64Gi
   gpu:
     enabled: false
     resourceName: nvidia.com/gpu
@@ -57,11 +57,11 @@ frontend:
   port: 80
   resources:
     requests:
-      cpu: 100m
-      memory: 128Mi
-    limits:
-      cpu: 500m
+      cpu: "500m"
       memory: 512Mi
+    limits:
+      cpu: 1
+      memory: 1Gi
 
 postgresql:
   enabled: true
@@ -81,11 +81,11 @@ postgresql:
       - ReadWriteOnce
   resources:
     requests:
-      cpu: 250m
-      memory: 512Mi
-    limits:
       cpu: "1"
       memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 2Gi
   podSecurityContext:
     fsGroup: 999
     fsGroupChangePolicy: OnRootMismatch
