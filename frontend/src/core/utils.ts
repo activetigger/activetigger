@@ -1,10 +1,27 @@
-import { parquetMetadataAsync, parquetRead } from 'hyparquet';
+import { parquetMetadataAsync, parquetRead, parquetSchema } from 'hyparquet';
 import { compressors } from 'hyparquet-compressors';
 import { fromPairs, sample, zip } from 'lodash';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 
 import { DataType } from '../components/forms/ProjectCreationForm';
+
+/**
+ * flattenCell
+ * keeps scalar values (string, number, bigint, date...) as they are, and
+ * serializes nested ones (lists, structs) to a JSON string so a column always
+ * holds one value per row whatever the type of its content
+ */
+function flattenCell(value: unknown): unknown {
+  if (value === null || typeof value !== 'object' || value instanceof Date) {
+    return value;
+  }
+  try {
+    return JSON.stringify(value, (_, v) => (typeof v === 'bigint' ? v.toString() : v));
+  } catch (e) {
+    return String(value);
+  }
+}
 
 /**
  * loadParquetFile
@@ -31,10 +48,13 @@ export async function loadParquetFile(file: File): Promise<DataType> {
       compressors,
       // here is the callback which will be called once the file has been loaded
       onComplete: (arrayData) => {
-        // extract headers from metadata
-        const headers = metadata.schema.slice(1).map((s) => s.name);
-        // transforme the data as an array of objects
-        const data = arrayData.map((ad) => fromPairs(zip(headers, ad)));
+        // one header per top-level column: metadata.schema is a flat tree where
+        // nested types (lists, structs...) add extra elements, while parquetRead
+        // assembles each top-level column into a single value per row
+        const headers = parquetSchema(metadata).children.map((child) => child.element.name);
+        // transforme the data as an array of objects, flattening nested values
+        // (lists, structs) to strings so every column holds one scalar per row
+        const data = arrayData.map((ad) => fromPairs(zip(headers, ad.map(flattenCell))));
         // resolve the promise with a dataType object
         resolve({ data, headers, filename: file.name });
       },
