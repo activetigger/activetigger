@@ -1,0 +1,124 @@
+nameOverride: ""
+fullnameOverride: ""
+
+imagePullSecrets: []
+
+api:
+  replicaCount: 1
+  image:
+    repository: activetigger/activetigger-api
+    tag: deployed
+    pullPolicy: Always
+  port: 4000
+  env:
+    MODE: prod
+    DATA_PATH: /data
+    API_PORT: "4000"
+    CPU_ONLY: "true"
+    ACTIVETIGGER_USER_HDD_MAX: "20"
+    MAX_LOADED_PROJECTS: "2"
+    N_WORKERS_CPU: "1"
+    N_WORKERS_GPU: "0"
+    UPDATE_TIMEOUT: "1"
+  persistence:
+    enabled: true
+    size: 20Gi
+    storageClassName: ""
+    accessModes:
+      - ReadWriteOnce
+  resources:
+    requests:
+      cpu: "2"
+      memory: 8Gi
+    limits:
+      cpu: "4"
+      memory: 16Gi
+  gpu:
+    enabled: false
+    resourceName: nvidia.com/gpu
+    count: 1
+    runtimeClassName: ""
+    nodeSelector: {}
+    tolerations: []
+  podSecurityContext:
+    fsGroup: 1000
+    fsGroupChangePolicy: OnRootMismatch
+  securityContext:
+    runAsUser: 1000
+    runAsGroup: 1000
+    runAsNonRoot: true
+
+frontend:
+  replicaCount: 1
+  image:
+    repository: activetigger/activetigger-frontend
+    tag: deployed
+    pullPolicy: Always
+  port: 80
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+postgresql:
+  enabled: true
+  trustAuth: true
+  image:
+    repository: postgres
+    tag: "16"
+    pullPolicy: IfNotPresent
+  database: activetigger
+  username: activetigger
+  port: 5432
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClassName: ""
+    accessModes:
+      - ReadWriteOnce
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  podSecurityContext:
+    fsGroup: 999
+    fsGroupChangePolicy: OnRootMismatch
+
+secrets:
+  create: true
+  existingSecret: ""
+  rootPassword: l3tm31n!
+  secretKey: change-me-use-a-fernet-key-for-real-deployments
+  postgresqlPassword: activetigger
+
+initContainer:
+  image: busybox:1.36
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+service:
+  type: ClusterIP
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations: {}
+  host: activetigger.lab.groupe-genes.fr
+  tls:
+    - hosts:
+        - activetigger.lab.groupe-genes.fr
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

@@ -1,0 +1,61 @@
+name: Build and push Docker images
+
+# Manual trigger only: run from the Actions tab (or `gh workflow run`).
+# Requires two repository secrets (Settings > Secrets and variables > Actions):
+#   DOCKERHUB_USERNAME - Docker Hub account with push access to the activetigger org
+#   DOCKERHUB_TOKEN    - a Docker Hub access token (hub.docker.com > Account Settings > Personal access tokens)
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag to push"
+        required: true
+        default: "deployed"
+      image:
+        description: "Which image(s) to build"
+        required: true
+        default: "both"
+        type: choice
+        options:
+          - both
+          - api
+          - frontend
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: api
+            dockerfile: docker/api/Dockerfile
+            repository: activetigger/activetigger-api
+          - name: frontend
+            dockerfile: docker/frontend/Dockerfile
+            repository: activetigger/activetigger-frontend
+    steps:
+      - uses: actions/checkout@v6
+        if: ${{ inputs.image == 'both' || inputs.image == matrix.name }}
+
+      - name: Set up Docker Buildx
+        if: ${{ inputs.image == 'both' || inputs.image == matrix.name }}
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        if: ${{ inputs.image == 'both' || inputs.image == matrix.name }}
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push ${{ matrix.name }}
+        if: ${{ inputs.image == 'both' || inputs.image == matrix.name }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          push: true
+          tags: ${{ matrix.repository }}:${{ inputs.tag }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,scope=${{ matrix.name }},mode=max

@@ -1,0 +1,45 @@
+# Build context is the repo root (see docker/docker-compose.yml and
+# charts/README.md); keep runtime data, caches, and local state out of images.
+.git
+.github
+.claude
+.mypy_cache
+.ruff_cache
+.vscode
+**/.DS_Store
+.secret_key
+**/.secret_key
+docs/
+charts/
+site/
+dist/
+
+# api: virtualenvs, caches, local data and config
+api/.venv
+api/.env
+api/.mypy_cache
+api/.pytest_cache
+api/.ruff_cache
+api/.coverage
+api/htmlcov
+api/test-data
+api/mlruns
+api/projects
+api/models
+api/config.yaml
+api/key.yaml
+api/embeddings.yaml
+api/users_parameters.yaml
+api/generative.yaml
+**/__pycache__/
+
+# frontend: dependencies and build output are produced inside the image
+frontend/node_modules
+frontend/dist
+
+# local docker runtime state (bind-mounted volumes, certificates)
+docker/api/projects
+docker/api/venv
+docker/api/models
+docker/api/postgresql
+docker/certificates

@@ -1,0 +1,164 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "activetigger.fullname" . }}-api
+  labels:
+    {{- include "activetigger.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  replicas: {{ .Values.api.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "activetigger.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      {{- if .Values.secrets.create }}
+      annotations:
+        # Roll the API pod when the chart-managed Secret changes; without this,
+        # helm upgrade with new credentials leaves the old env values running.
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+      {{- end }}
+      labels:
+        {{- include "activetigger.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: api
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.api.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if and .Values.api.gpu.enabled .Values.api.gpu.runtimeClassName }}
+      runtimeClassName: {{ .Values.api.gpu.runtimeClassName | quote }}
+      {{- end }}
+      initContainers:
+        - name: init-data-dir
+          image: {{ .Values.initContainer.image | quote }}
+          command:
+            - sh
+            - -c
+            - |
+              mkdir -p /data/projects/static /data/models
+              chown -R 1000:1000 /data
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            {{- toYaml .Values.initContainer.resources | nindent 12 }}
+        {{- if .Values.postgresql.enabled }}
+        - name: wait-for-postgresql
+          image: {{ .Values.initContainer.image | quote }}
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z {{ include "activetigger.postgresqlServiceName" . }} {{ .Values.postgresql.port }}; do
+                echo "waiting for postgresql"
+                sleep 2
+              done
+          resources:
+            {{- toYaml .Values.initContainer.resources | nindent 12 }}
+        {{- end }}
+      containers:
+        - name: api
+          image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}"
+          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.api.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.api.port }}
+              protocol: TCP
+          env:
+            {{- range $key, $value := .Values.api.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            - name: ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "activetigger.secretName" . }}
+                  key: root-password
+            {{- if .Values.secrets.create }}
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "activetigger.secretName" . }}
+                  key: secret-key
+            {{- end }}
+            {{- if .Values.postgresql.enabled }}
+            {{- if .Values.secrets.create }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "activetigger.secretName" . }}
+                  key: database-url
+            {{- else }}
+            - name: DATABASE_URL
+              value: {{ include "activetigger.databaseUrl" . | quote }}
+            {{- end }}
+            {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /version
+              port: http
+            initialDelaySeconds: 120
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /version
+              port: http
+            initialDelaySeconds: 180
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            {{- if .Values.api.gpu.enabled }}
+            {{- $resources := deepCopy .Values.api.resources }}
+            {{- $limits := deepCopy (default dict $resources.limits) }}
+            {{- $_ := set $limits .Values.api.gpu.resourceName .Values.api.gpu.count }}
+            {{- $_ := set $resources "limits" $limits }}
+            {{- toYaml $resources | nindent 12 }}
+            {{- else }}
+            {{- toYaml .Values.api.resources | nindent 12 }}
+            {{- end }}
+      volumes:
+        - name: data
+          {{- if .Values.api.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "activetigger.fullname" . }}-api-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      {{- if and .Values.api.gpu.enabled .Values.api.gpu.nodeSelector }}
+      nodeSelector:
+        {{- toYaml .Values.api.gpu.nodeSelector | nindent 8 }}
+      {{- else }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if and .Values.api.gpu.enabled .Values.api.gpu.tolerations }}
+      tolerations:
+        {{- toYaml .Values.api.gpu.tolerations | nindent 8 }}
+      {{- else }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- end }}

@@ -1,0 +1,16 @@
+ActiveTigger prototype chart installed.
+
+Check pods:
+  kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }}
+
+Follow API logs:
+  kubectl logs -n {{ .Release.Namespace }} deploy/{{ include "activetigger.fullname" . }}-api -f
+
+Follow frontend logs:
+  kubectl logs -n {{ .Release.Namespace }} deploy/{{ include "activetigger.fullname" . }}-frontend -f
+
+Port-forward frontend:
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "activetigger.frontendServiceName" . }} 8080:{{ .Values.frontend.port }}
+
+Open:
+  http://localhost:8080

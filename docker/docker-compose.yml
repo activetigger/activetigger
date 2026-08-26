@@ -16,8 +16,10 @@ services:
       retries: 10
   api:
     build:
-      context: ./api
-      dockerfile: ./Dockerfile
+      # Repo root: the Dockerfile COPYs api/ and docker/api/entrypoint.sh
+      # (shadowed by the bind mounts below in the compose stack).
+      context: ..
+      dockerfile: docker/api/Dockerfile
       args:
         - PYTHON_VERSION=${PYTHON_VERSION}
         - USER_ID=${USER_ID}
@@ -39,7 +41,6 @@ services:
       - USER_ID=${USER_ID}
       - GROUP_ID=${GROUP_ID}
       - DATA_PATH=/data
-      - GPU=false
       - CPU_ONLY=true
       - UV_CACHE_DIR=/home/python/.cache/uv
       - HF_HOME=/home/python/.cache/huggingface

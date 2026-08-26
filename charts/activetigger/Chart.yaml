@@ -1,0 +1,6 @@
+apiVersion: v2
+name: activetigger
+description: Helm chart for ActiveTigger on Kubernetes/Onyxia
+type: application
+version: 0.1.0
+appVersion: "deployed"
