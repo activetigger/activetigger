@@ -95,13 +95,36 @@ To validate against the live cluster without creating anything (requires fresh c
 helm template activetigger charts/activetigger | kubectl apply --dry-run=server -f -
 ```
 
+### Setting the root password
+
+The root password of the application is a chart value (`secrets.rootPassword`). The default in `values.yaml` is a **public placeholder** (it is in the git history): every deployment must override it. Three ways, from simplest to most isolated:
+
+1. **Personal values file (recommended).** Keep a small file outside git with only the values you override:
+
+   ```yaml
+   # my-values.yaml (never commit this file)
+   secrets:
+     rootPassword: "your-own-password"
+   ```
+
+   and pass it to every install/upgrade with `-f my-values.yaml`. All other values keep the chart defaults.
+
+2. **`--set secrets.rootPassword=...`** — works, but the password leaks into shell history and process listings; avoid it for real deployments.
+
+3. **Pre-created Kubernetes Secret** — the password never passes through Helm at all (not even into the Helm release metadata). See "Secret management with Onyxia Vault" below. The Secret must contain a `root-password` key; `secret-key` and `database-url` are only read from the chart-managed Secret, so a minimal admin Secret is just `root-password`.
+
+The password is only used at first startup to create the `root` user in the database: changing the value later and upgrading does not change the password of an existing deployment (that happens inside the application).
+
+### Install
+
 Install or upgrade with the default CPU values:
 
 ```bash
 helm upgrade --install activetigger ./charts/activetigger \
   --namespace "$NAMESPACE" \
   --server-side=false \
-  --timeout 25m
+  --timeout 25m \
+  -f my-values.yaml
 ```
 
 Deploy the GPU prototype (same image, GPU behavior enabled through values):
@@ -111,6 +134,7 @@ helm upgrade --install activetigger ./charts/activetigger \
   --namespace "$NAMESPACE" \
   --server-side=false \
   --timeout 25m \
+  -f my-values.yaml \
   --set api.gpu.enabled=true \
   --set api.env.CPU_ONLY=false \
   --set api.env.N_WORKERS_GPU=1 \
