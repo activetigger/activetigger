@@ -161,6 +161,17 @@ class Config(metaclass=_Singleton):
         self.models_embeddings = self._load_models_embeddings()
         self.models_generative = self._load_models_generative()
 
+    def resolve_file(self, filename: str) -> str:
+        """
+        Resolve a bundled configuration file (model lists, etc.): a copy
+        placed at DATA_PATH takes precedence over the file shipped with the
+        code, so a deployment can customize it without rebuilding the image.
+        """
+        override = Path(self.data_path) / filename
+        if override.exists():
+            return str(override)
+        return filename
+
     def _get_embeddings_path(self) -> Path:
         return Path(self.data_path) / self.file_embeddings_models
 

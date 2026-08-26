@@ -281,7 +281,7 @@ class Project:
             self.queue,
             self.computing,
             self.db_manager,
-            config.file_bert_models,
+            config.resolve_file(config.file_bert_models),
         )
         self.features = Features(
             project_slug,
@@ -325,7 +325,7 @@ class Project:
                 self.queue,
                 self.computing,
                 self.db_manager,
-                config.file_image_models,
+                config.resolve_file(config.file_image_models),
             )
         # NER fine-tuning is text-only (span schemes don't exist on image
         # projects). Always instantiated for text projects so the state /
@@ -339,7 +339,7 @@ class Project:
                 self.queue,
                 self.computing,
                 self.db_manager,
-                getattr(config, "file_bert_models", None),
+                config.resolve_file(config.file_bert_models),
             )
         self.quickmodels = QuickModels(
             project_slug,

@@ -215,3 +215,59 @@ If not:
 ```bash
 docker compose -p activetigger -f docker-compose.yml -f docker-compose.prod.yml up -d
 ```
+
+## Deployment on Kubernetes
+
+ActiveTigger can also be deployed on a Kubernetes cluster (tested on the ENSAE/CREST Onyxia instance) with the Helm chart in `charts/activetigger/`. The full documentation — building/publishing the Docker images, setting the root password, CPU and GPU installation commands, Vault-based secret management, and useful `kubectl` commands — is in [`charts/README.md`](charts/README.md).
+
+Quick start:
+
+```bash
+git clone --depth 1 https://github.com/activetigger/activetigger.git
+cd activetigger
+
+cat > my-values.yaml <<'VALUES'
+secrets:
+    rootPassword: "PASSWORD"
+api:
+  resources:
+    requests:
+      cpu: "2"
+      memory: 8Gi
+    limits:
+      cpu: "20"
+      memory: 64Gi
+  env:
+    CPU_ONLY: "false"
+    N_WORKERS_GPU: "1"
+    HF_HOME: /data/models/huggingface
+  gpu:
+    enabled: true
+
+helm upgrade --install activetigger ./charts/activetigger --timeout 25m -f my-values.yaml
+```
+
+### Runtime configuration files (model lists, user quotas)
+
+Some of the API configuration is file-based. Any file placed at `DATA_PATH` (the persistent volume mounted at `/data` in Kubernetes, `${DATA_PATH}` with docker compose) **takes precedence over the copy shipped in the image**, so a deployment can be customized without rebuilding anything:
+
+- `bert_models.csv` — fine-tunable language models proposed to users;
+- `image_models.csv` — fine-tunable image models;
+- `embeddings.yaml` — embeddings models (auto-created with defaults on first start);
+- `generative.yaml` — preconfigured generative models (optional);
+- `users_parameters.yaml` — per-user parameters such as storage limits (auto-created on first start).
+
+On Kubernetes, edit them on the API pod's persistent volume, then restart the API so they are reloaded:
+
+```bash
+# copy a customized model list onto the data volume
+kubectl cp bert_models.csv <api-pod-name>:/data/bert_models.csv
+
+# or edit in place
+kubectl exec -it deploy/activetigger-api -- vi /data/bert_models.csv
+
+# restart the API to reload the configuration
+kubectl rollout restart deployment/activetigger-api
+```
+
+The files survive pod restarts and chart upgrades because they live on the PersistentVolumeClaim, not in the container.

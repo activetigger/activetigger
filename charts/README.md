@@ -228,6 +228,25 @@ VAULT_RELATIVE_PATH
 
 The chart should then pass these variables to the API pod. A small ActiveTigger entrypoint wrapper can read the Vault KV v2 secret, export `ROOT_PASSWORD`, then execute the normal API entrypoint.
 
+## Runtime configuration files
+
+Part of the API configuration is file-based (model lists proposed to users, per-user quotas). A copy of any of these files placed at the root of the data volume (`/data`, backed by the API PersistentVolumeClaim) takes precedence over the version shipped in the image:
+
+- `bert_models.csv` — fine-tunable language models;
+- `image_models.csv` — fine-tunable image models;
+- `embeddings.yaml` — embeddings models (auto-created with defaults on first start);
+- `generative.yaml` — preconfigured generative models (optional);
+- `users_parameters.yaml` — per-user parameters such as storage limits (auto-created on first start).
+
+To customize a deployment without rebuilding the image:
+
+```bash
+kubectl cp bert_models.csv <api-pod-name>:/data/bert_models.csv
+kubectl rollout restart deployment/activetigger-api
+```
+
+Because the files live on the PVC, they survive pod restarts and chart upgrades.
+
 ## Useful kubectl commands
 
 Check deployed resources:
