@@ -10,7 +10,7 @@ on:
       tag:
         description: "Image tag to push"
         required: true
-        default: "cicd"
+        default: "deployed"
       image:
         description: "Which image(s) to build"
         required: true

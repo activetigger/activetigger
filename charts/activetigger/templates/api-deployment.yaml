@@ -15,6 +15,12 @@ spec:
       app.kubernetes.io/component: api
   template:
     metadata:
+      {{- if .Values.secrets.create }}
+      annotations:
+        # Roll the API pod when the chart-managed Secret changes; without this,
+        # helm upgrade with new credentials leaves the old env values running.
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+      {{- end }}
       labels:
         {{- include "activetigger.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: api

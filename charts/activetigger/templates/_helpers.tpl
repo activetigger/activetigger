@@ -31,8 +31,10 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- define "activetigger.secretName" -}}
 {{- if .Values.secrets.existingSecret }}
 {{- .Values.secrets.existingSecret }}
-{{- else }}
+{{- else if .Values.secrets.create }}
 {{- printf "%s-secret" (include "activetigger.fullname" .) }}
+{{- else }}
+{{- fail "secrets.create is false and secrets.existingSecret is empty: the API pod would reference a Secret that does not exist. Set secrets.existingSecret to the name of a pre-created Secret (with keys root-password, and optionally secret-key, database-url) or set secrets.create=true." }}
 {{- end }}
 {{- end }}
 

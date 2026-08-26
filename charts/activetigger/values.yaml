@@ -7,7 +7,7 @@ api:
   replicaCount: 1
   image:
     repository: activetigger/activetigger-api
-    tag: prototype
+    tag: deployed
     pullPolicy: Always
   port: 4000
   env:
@@ -52,7 +52,7 @@ frontend:
   replicaCount: 1
   image:
     repository: activetigger/activetigger-frontend
-    tag: prototype
+    tag: deployed
     pullPolicy: Always
   port: 80
   resources:

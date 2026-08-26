@@ -7,6 +7,41 @@ on:
   workflow_dispatch:
 
 jobs:
+  check-chart:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install kubeconform
+        run: |
+          curl -sL https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz | tar xz kubeconform
+          sudo mv kubeconform /usr/local/bin/
+
+      - name: Lint chart
+        run: helm lint charts/activetigger --strict
+
+      - name: Render and validate manifests
+        run: |
+          set -e
+          validate() {
+            echo "== helm template $*"
+            helm template test charts/activetigger "$@" \
+              | kubeconform -strict -summary -kubernetes-version 1.29.0
+          }
+          validate
+          validate --set secrets.create=false --set secrets.existingSecret=at-secret
+          validate --set api.gpu.enabled=true --set api.env.CPU_ONLY=false
+          validate --set postgresql.enabled=false
+          validate --set api.persistence.enabled=false --set postgresql.persistence.enabled=false
+
+      - name: Check missing-secret guard fails
+        run: |
+          if helm template test charts/activetigger --set secrets.create=false > /dev/null 2>&1; then
+            echo "ERROR: rendering should fail when secrets.create=false and no existingSecret is set"
+            exit 1
+          fi
+          echo "guard OK"
+
   check-api:
     runs-on: ubuntu-latest
     defaults:

@@ -10,7 +10,15 @@ The project uses GitHub Actions. Workflows live in `.github/workflows/`:
 
 ## Check code sanity
 
-`check-main.yml` — runs on every push and pull request to `main` or `dev`, and can be triggered manually. Two jobs run in parallel.
+`check-main.yml` — runs on every push and pull request to `main` or `dev`, and can be triggered manually. Three jobs run in parallel.
+
+### `check-chart` (Helm chart)
+
+Validates the Kubernetes deployment chart in `charts/activetigger`:
+
+1. **Lint** — `helm lint --strict`.
+2. **Render + schema-check** — `helm template` for the main value combinations (defaults, external Secret, GPU enabled, external PostgreSQL, no persistence), each piped through [kubeconform](https://github.com/yannh/kubeconform) to validate against the Kubernetes API schemas.
+3. **Guard check** — asserts that rendering fails when `secrets.create=false` without `secrets.existingSecret` (a misconfiguration that would otherwise deploy a pod referencing a nonexistent Secret).
 
 ### `check-api` (Python backend)
 

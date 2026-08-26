@@ -82,11 +82,17 @@ Reuse the namespace variable in Helm commands:
 export NAMESPACE=<onyxia-namespace>
 ```
 
-Validate the chart locally:
+Validate the chart locally (the `check-chart` job in CI runs the same checks, plus [kubeconform](https://github.com/yannh/kubeconform) schema validation — see `CICD.md`):
 
 ```bash
-helm lint charts/activetigger
+helm lint charts/activetigger --strict
 helm template activetigger charts/activetigger
+```
+
+To validate against the live cluster without creating anything (requires fresh cluster credentials):
+
+```bash
+helm template activetigger charts/activetigger | kubectl apply --dry-run=server -f -
 ```
 
 Install or upgrade with the default CPU values:
