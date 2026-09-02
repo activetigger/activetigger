@@ -15,6 +15,8 @@ Storage lives in a dedicated `prompts.parquet` (one row per prompt, with the
 embedding columns inline), separate from `features.parquet`.
 """
 
+import builtins
+import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,17 +25,29 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from activetigger.datamodels import PromptComputing, PromptOutModel, PromptsProjectStateModel
+from activetigger.datamodels import (
+    PromptComputing,
+    PromptOutModel,
+    PromptSimilarityComputing,
+    PromptsProjectStateModel,
+)
 from activetigger.features import Features
 from activetigger.queue_manager import Queue
 from activetigger.tasks.base_task import BaseTask
 from activetigger.tasks.compute_multimodal_prompt import ComputeMultimodalPrompt
 from activetigger.tasks.compute_sbert_prompt import ComputeSbertPrompt
+from activetigger.tasks.compute_similarity_with_features import ComputeSimilarityWithFeatures
 
 # Feature kinds whose vectors live in a space we can encode a text query into.
 BINDABLE_FEATURE_KINDS = {"multimodal-embeddings", "sentence-embeddings"}
 
 PROMPTS_FILE = "prompts.parquet"
+
+# Per-prompt similarity files computed on a dataset, exportable from the
+# export panel: <project_dir>/prompts_similarity/<prompt_id>/similarity_<dataset>.parquet
+SIMILARITY_DIR = "prompts_similarity"
+
+SIMILARITY_DATASETS = {"all", "train", "valid", "test"}
 
 METADATA_COLUMNS = ["text", "feature_name", "user", "created_at"]
 
@@ -183,6 +197,7 @@ class Prompts:
                     feature_name=str(row["feature_name"]),
                     user=str(row["user"]),
                     created_at=str(row["created_at"]),
+                    computed_datasets=self.computed_datasets(str(prompt_id)),
                 )
             )
         return out
@@ -205,6 +220,7 @@ class Prompts:
         df = df.drop(index=prompt_id)
         self._write(df)
         self._ranking_cache.pop(prompt_id, None)
+        self._delete_similarity_files(prompt_id)
 
     def reset_all(self) -> None:
         """
@@ -217,6 +233,12 @@ class Prompts:
             except OSError as ex:
                 print(f"Could not delete prompts file: {ex}")
         self._ranking_cache.clear()
+        similarity_root = self.path_dir.joinpath(SIMILARITY_DIR)
+        if similarity_root.exists():
+            try:
+                shutil.rmtree(similarity_root)
+            except OSError as ex:
+                print(f"Could not delete prompt similarity files: {ex}")
 
     def delete_by_feature(self, feature_name: str) -> int:
         """Drop every prompt bound to a feature (cascade from feature delete)."""
@@ -230,6 +252,7 @@ class Prompts:
             self._write(df.loc[~mask])
             for pid in dropped_ids:
                 self._ranking_cache.pop(pid, None)
+                self._delete_similarity_files(pid)
         return n
 
     def get_ranking(self, prompt_id: str, dataset: str) -> pd.Series:
@@ -264,6 +287,184 @@ class Prompts:
         cache_by_ds[dataset] = ranked
         return ranked
 
+    # ---------- full-dataset similarity (issue #1120) ----------
+
+    def _similarity_dir(self, prompt_id: str) -> Path:
+        return self.path_dir.joinpath(SIMILARITY_DIR).joinpath(prompt_id)
+
+    def similarity_file(self, prompt_id: str, dataset: str) -> Path:
+        return self._similarity_dir(prompt_id).joinpath(f"similarity_{dataset}.parquet")
+
+    # builtins.list: bare `list` here would resolve to the `list` method
+    # defined above in the class body
+    def computed_datasets(self, prompt_id: str) -> builtins.list[str]:
+        """Datasets for which a similarity file exists and can be exported."""
+        folder = self._similarity_dir(prompt_id)
+        if not folder.exists():
+            return []
+        out = [
+            ds
+            for ds in sorted(SIMILARITY_DATASETS)
+            if folder.joinpath(f"similarity_{ds}.parquet").exists()
+        ]
+        return out
+
+    def _delete_similarity_files(self, prompt_id: str) -> None:
+        folder = self._similarity_dir(prompt_id)
+        if folder.exists():
+            try:
+                shutil.rmtree(folder)
+            except OSError as ex:
+                print(f"Could not delete similarity files for prompt {prompt_id}: {ex}")
+
+    def _dataset_series(self, dataset: str) -> pd.Series:
+        """
+        Input series (texts for text projects, image paths for image
+        projects — both live in the `text` column) consumed by feature
+        recomputation for the requested dataset. Mirrors
+        `QuickModels._dataset_texts`: for "all" we read `path_all`
+        directly and index by `id_external` so the saved similarity
+        parquet carries a meaningful row id.
+        """
+        if dataset == "all":
+            df = pd.read_parquet(self.features.path_all, columns=["id_external", "text"])
+            series = df["text"]
+            series.index = df["id_external"].astype(str)
+            series.index.name = "id_external"
+            return series
+        return self.features.concat_split_column("text", dataset=dataset)
+
+    def compute_similarity(self, prompt_id: str, dataset: str, username: str) -> str | None:
+        """
+        Compute the cosine similarity between a prompt and every element
+        of the requested dataset, persisted as a parquet exportable from
+        the export panel.
+
+        For train/valid/test the embeddings already live in the features
+        file, so the file is written synchronously from `get_ranking`
+        (returns None). For "all" the bound feature is recomputed on the
+        complete dataset by a queued `ComputeSimilarityWithFeatures`
+        task (returns the task unique_id).
+        """
+        if dataset not in SIMILARITY_DATASETS:
+            raise ValueError(f"Dataset must be one of {sorted(SIMILARITY_DATASETS)}")
+
+        prompt_vec, feature_name = self.get_embedding_and_feature(prompt_id)
+
+        if dataset != "all":
+            ranked = self.get_ranking(prompt_id, dataset)
+            out = pd.DataFrame({"similarity": ranked})
+            out["rank"] = range(1, len(out) + 1)
+            folder = self._similarity_dir(prompt_id)
+            folder.mkdir(parents=True, exist_ok=True)
+            out.to_parquet(self.similarity_file(prompt_id, dataset), index=True)
+            return None
+
+        # only one similarity computation per prompt at a time
+        for e in self.computing:
+            if (
+                getattr(e, "kind", None) == "prompt_similarity"
+                and getattr(e, "prompt_id", None) == prompt_id
+            ):
+                raise ValueError("A similarity computation is already running for this prompt")
+
+        data = self._dataset_series(dataset)
+        specs = self.features.build_compute_specs([feature_name], data)
+        prompt_row = self._read().loc[prompt_id]
+
+        task = ComputeSimilarityWithFeatures(
+            specs=specs,
+            path_process=self.features.path_all.parent,
+            path_models=self.features.path_models,
+            language=self.features.lang,
+            prompt_vector=prompt_vec,
+            path_output=self._similarity_dir(prompt_id),
+            file_name=f"similarity_{dataset}.parquet",
+        )
+        unique_id = self.queue.add_task("prompt_similarity", self.project_slug, task, queue="gpu")
+
+        progress_path = self.features.path_all.parent.joinpath(unique_id)
+
+        def get_progress() -> float | None:
+            try:
+                if not progress_path.exists():
+                    return None
+                raw = progress_path.read_text().strip()
+                return float(raw) if raw else 0.0
+            except (OSError, ValueError):
+                return None
+
+        self.computing.append(
+            PromptSimilarityComputing(
+                user=username,
+                unique_id=unique_id,
+                time=datetime.now(timezone.utc),
+                kind="prompt_similarity",
+                prompt_id=prompt_id,
+                text=str(prompt_row["text"]),
+                feature_name=feature_name,
+                dataset=dataset,
+                get_progress=get_progress,
+            )
+        )
+        return unique_id
+
+    def export_similarity(
+        self, prompt_id: str, dataset: str, format: str, col_id: str | None
+    ) -> tuple[Path, str]:
+        """
+        Prepare the similarity file produced by `compute_similarity` for
+        download and return (path, file_name) — the caller (export
+        router) wraps it in a FileResponse. Same format conversion
+        convention as `QuickModels.export_prediction_file`.
+        """
+        path = self.similarity_file(prompt_id, dataset)
+        if not path.exists():
+            raise FileNotFoundError(
+                f"No similarity computed on dataset '{dataset}' for this prompt, "
+                "please compute it first."
+            )
+
+        if format not in ("parquet", "csv", "xlsx"):
+            raise ValueError("Format not supported")
+
+        file_name = f"similarity_{dataset}.parquet"
+        if format == "parquet":
+            return path, file_name
+
+        ext = "csv" if format == "csv" else "xlsx"
+        out_name = f"{file_name}.{ext}"
+        out_path = self._similarity_dir(prompt_id).joinpath(out_name)
+        if not out_path.exists() or out_path.stat().st_mtime < path.stat().st_mtime:
+            df = pd.read_parquet(path)
+            target_col = col_id.removeprefix("dataset_") if col_id else "id_external"
+            df = df.reset_index()
+            first_col = df.columns[0]
+            if first_col != target_col:
+                df.rename(columns={first_col: target_col}, inplace=True)
+            df = df[[target_col] + [c for c in df.columns if c != target_col]]
+            if format == "csv":
+                df.to_csv(out_path, index=False)
+            else:
+                df.to_excel(out_path, index=False)
+
+        return out_path, out_name
+
+    def current_similarity_computing(self) -> dict[str, dict[str, str | None]]:
+        out: dict[str, dict[str, str | None]] = {}
+        for e in self.computing:
+            if e.kind != "prompt_similarity":
+                continue
+            progress = e.get_progress() if e.get_progress is not None else None
+            out[e.prompt_id] = {
+                "prompt_id": e.prompt_id,
+                "text": e.text,
+                "feature_name": e.feature_name,
+                "dataset": e.dataset,
+                "progress": str(progress) if progress is not None else None,
+            }
+        return out
+
     def current_computing(self) -> dict[str, dict[str, str | None]]:
         out: dict[str, dict[str, str | None]] = {}
         for e in self.computing:
@@ -295,4 +496,5 @@ class Prompts:
             available=self.list(),
             bindable_features=bindable,
             training=self.current_computing(),
+            similarity_computing=self.current_similarity_computing(),
         )

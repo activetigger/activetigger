@@ -1,22 +1,25 @@
 import cx from 'classnames';
-import { FC, useEffect, useState } from 'react';
+import { FC, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
 import PulseLoader from 'react-spinners/PulseLoader';
 import { ProjectPageLayout } from '../components/layout/ProjectPageLayout';
 import { ModelsPillDisplay } from '../components/ModelsPillDisplay';
 import {
+  useComputePromptSimilarity,
   useGetAnnotationsFile,
   useGetFeaturesFile,
   useGetModelFile,
   useGetPredictionsFile,
   useGetProjectionFile,
   useGetProjectSummary,
+  useGetPromptSimilarityFile,
   useGetRawDataFile,
 } from '../core/api';
 import { downloadSummaryJson, downloadSummaryMd, ProjectSummary } from '../core/projectSummary';
 import { useAppContext } from '../core/useAppContext';
 import { sortDatesAsStrings } from '../core/utils';
+import { PromptsProjectStateModel } from '../types';
 
 /**
  * Component to display the export page
@@ -26,7 +29,7 @@ export const ProjectExportPage: FC = () => {
 
   // get the current state of the project
   const {
-    appContext: { currentProject: project, currentScheme },
+    appContext: { currentProject: project, currentScheme, developmentMode },
   } = useAppContext();
 
   const [format, setFormat] = useState<string>('csv');
@@ -122,6 +125,42 @@ export const ProjectExportPage: FC = () => {
       model &&
       modelAvailabilityMap?.[currentScheme]?.[model]?.['predicted_external']) ??
     false;
+
+  // Prompt similarity on the complete dataset (issue #1120). The prompts
+  // state is not in the generated OpenAPI types yet — same cast as
+  // AnnotationManagement.
+  const promptsState = (project as unknown as { prompts?: PromptsProjectStateModel | null })
+    ?.prompts;
+  const availablePrompts = useMemo(() => promptsState?.available || [], [promptsState]);
+  const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null);
+  const [similarityDownloading, setSimilarityDownloading] = useState<boolean>(false);
+  useEffect(() => {
+    if (!selectedPromptId && availablePrompts.length > 0) {
+      setSelectedPromptId(availablePrompts[0].prompt_id);
+    } else if (
+      selectedPromptId &&
+      !availablePrompts.some((p) => p.prompt_id === selectedPromptId)
+    ) {
+      setSelectedPromptId(availablePrompts[0]?.prompt_id || null);
+    }
+  }, [availablePrompts, selectedPromptId]);
+  const selectedPrompt = availablePrompts.find((p) => p.prompt_id === selectedPromptId);
+  const similarityComputing = selectedPromptId
+    ? promptsState?.similarity_computing?.[selectedPromptId]
+    : undefined;
+  const similarityAvailable = Boolean(selectedPrompt?.computed_datasets?.includes('all'));
+  const computePromptSimilarity = useComputePromptSimilarity(projectName || null);
+  const getPromptSimilarityFile = useGetPromptSimilarityFile(projectName || null);
+
+  const downloadPromptSimilarity = async () => {
+    if (!selectedPromptId) return;
+    setSimilarityDownloading(true);
+    try {
+      await getPromptSimilarityFile(selectedPromptId, 'all', format);
+    } finally {
+      setSimilarityDownloading(false);
+    }
+  };
 
   const { getFeaturesFile } = useGetFeaturesFile(projectName || null);
   const { getAnnotationsFile } = useGetAnnotationsFile(projectName || null);
@@ -325,6 +364,65 @@ export const ProjectExportPage: FC = () => {
                           >
                             Export prediction external dataset
                             {quickPredictionLoading === 'external' && (
+                              <PulseLoader color="white" size={6} className="ms-2" />
+                            )}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
+              </section>
+            )}
+
+            {developmentMode && promptsState && availablePrompts.length > 0 && (
+              <section className="mt-4">
+                <h5 className="fw-semibold">Prompt similarity (experimental)</h5>
+                <hr className="mt-1" />
+                <div className="text-muted small mb-2">
+                  Cosine similarity between a saved prompt and every element of the complete
+                  dataset, as a numeric value for further analysis.
+                </div>
+                <select
+                  className="form-select form-select-sm mb-2"
+                  style={{ maxWidth: '40rem' }}
+                  value={selectedPromptId || ''}
+                  onChange={(e) => setSelectedPromptId(e.currentTarget.value || null)}
+                >
+                  {availablePrompts.map((p) => (
+                    <option key={p.prompt_id} value={p.prompt_id}>
+                      {p.text.length > 80 ? `${p.text.slice(0, 80)}…` : p.text} ({p.feature_name})
+                    </option>
+                  ))}
+                </select>
+                {selectedPrompt && (
+                  <>
+                    {similarityComputing ? (
+                      <div className="text-muted small mt-2">
+                        Computing similarity on the complete dataset
+                        {similarityComputing.progress
+                          ? ` (${Math.round(Number(similarityComputing.progress))}%)`
+                          : ''}
+                        <PulseLoader size={6} className="ms-2" />
+                      </div>
+                    ) : (
+                      <div className="d-flex flex-wrap gap-2 mt-2">
+                        <button
+                          className="btn-secondary-action"
+                          onClick={() => computePromptSimilarity(selectedPrompt.prompt_id, 'all')}
+                        >
+                          {similarityAvailable
+                            ? 'Recompute similarity complete dataset'
+                            : 'Compute similarity complete dataset'}
+                        </button>
+                        {similarityAvailable && (
+                          <button
+                            className="btn-secondary-action"
+                            disabled={similarityDownloading}
+                            onClick={downloadPromptSimilarity}
+                          >
+                            Export similarity complete dataset
+                            {similarityDownloading && (
                               <PulseLoader color="white" size={6} className="ms-2" />
                             )}
                           </button>

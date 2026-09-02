@@ -209,6 +209,33 @@ def export_raw(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/export/prompts/similarity", dependencies=[Depends(verified_user)])
+def export_prompt_similarity(
+    project: Annotated[Project, Depends(get_project)],
+    current_user: Annotated[UserInDBModel, Depends(verified_user)],
+    prompt_id: str = Query(),
+    dataset: str = Query("all"),
+    format: str = Query("csv"),
+) -> FileResponse:
+    """
+    Export the similarity file computed for a prompt on a dataset
+    (see /prompts/similarity/compute).
+    """
+    test_rights(ProjectAction.EXPORT_DATA, current_user.username, project.name)
+    if project.prompts is None:
+        raise HTTPException(status_code=400, detail="Prompts are not available on this project.")
+    try:
+        path, file_name = project.prompts.export_similarity(
+            prompt_id=prompt_id,
+            dataset=dataset,
+            format=format,
+            col_id=project.params.col_id,
+        )
+        return FileResponse(path=path, filename=file_name)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/export/generations", dependencies=[Depends(verified_user)])
 def export_generations(
     project: Annotated[Project, Depends(get_project)],

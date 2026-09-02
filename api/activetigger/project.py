@@ -2719,6 +2719,10 @@ class Project:
                         prompt_computation = cast(PromptComputing, e)
                         if self.prompts is not None and results is not None:
                             self.prompts.receive_result(prompt_computation, results)
+                    case "prompt_similarity":
+                        # the task already saved the similarity parquet;
+                        # availability is derived from the file on disk
+                        pass
                     case "projection":
                         projection = cast(ProjectionComputing, e)
                         self.projections.add(projection, results)

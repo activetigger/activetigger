@@ -64,6 +64,34 @@ def list_prompts(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/prompts/similarity/compute", dependencies=[Depends(verified_user)])
+def compute_prompt_similarity(
+    project: Annotated[Project, Depends(get_project)],
+    current_user: Annotated[UserInDBModel, Depends(verified_user)],
+    prompt_id: str = Query(),
+    dataset: str = Query("all"),
+) -> dict[str, str | None]:
+    """
+    Compute the cosine similarity between a prompt and every element of a
+    dataset, saved as an exportable file. For `dataset="all"` (the complete
+    dataset) the bound embedding feature is recomputed by a queued task and
+    the returned unique_id identifies it; for train/valid/test the file is
+    written synchronously and unique_id is null.
+    """
+    test_rights(ProjectAction.ADD, current_user.username, project.name)
+    prompts = _require_prompts(project)
+    try:
+        unique_id = prompts.compute_similarity(prompt_id, dataset, current_user.username)
+        get_orchestrator().log_action(
+            current_user.username,
+            f"COMPUTE PROMPT SIMILARITY: {prompt_id} on {dataset}",
+            project.name,
+        )
+        return {"unique_id": unique_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/prompts/delete", dependencies=[Depends(verified_user)])
 def delete_prompt(
     project: Annotated[Project, Depends(get_project)],

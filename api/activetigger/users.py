@@ -63,6 +63,7 @@ class Users:
     ANNOTATION_GAP_MIN_SECONDS = 1.0  # gaps below this are batch/import writes
     ANNOTATION_TIMES_LIMIT = 5000  # bound the timestamps query on large tables
     ACTIVITY_DAYS = 7
+    GPU_TIME_MIN_GB = 2.0  # device-wide readings below this are driver/baseline noise
 
     db_manager: DatabaseManager
     users_parameters: dict
@@ -419,7 +420,9 @@ class Users:
         """
         (gpu_time_seconds, compute_time_seconds) over the user's completed
         processes. GPU time sums the durations of processes whose events
-        report GPU usage; compute time sums all durations.
+        report a peak GPU memory above GPU_TIME_MIN_GB (the reading is
+        device-wide, so lower values are baseline noise); compute time
+        sums all durations.
         """
         processes = self.db_manager.monitoring_service.get_completed_processes(
             kind="all", username=username, limit=1000
@@ -440,7 +443,7 @@ class Users:
                 )
             except (TypeError, ValueError):
                 max_used_gb = 0.0
-            if max_used_gb > 0:
+            if max_used_gb > self.GPU_TIME_MIN_GB:
                 gpu_time += float(process.duration)
         return gpu_time, compute_time
 

@@ -3157,6 +3157,63 @@ export function useDeleteImagePrompt(projectSlug: string | null) {
   return deletePrompt;
 }
 
+/**
+ * Compute the similarity between a prompt and every element of a dataset
+ * ("all" = the complete dataset, recomputed by a queued task).
+ */
+export function useComputePromptSimilarity(projectSlug: string | null) {
+  const { notify } = useNotifications();
+  const computeSimilarity = useCallback(
+    async (promptId: string, dataset: string = 'all') => {
+      if (!projectSlug || !promptId) return false;
+      const baseUrl = config.api.url.replace(/\/+$/, '');
+      const url = `${baseUrl}/prompts/similarity/compute?project_slug=${encodeURIComponent(
+        projectSlug,
+      )}&prompt_id=${encodeURIComponent(promptId)}&dataset=${encodeURIComponent(dataset)}`;
+      const res = await fetch(url, { method: 'POST', headers: _authHeaders() });
+      if (!res.ok) {
+        const detail = await res.json().catch(() => null);
+        notify({ type: 'error', message: detail?.detail || `HTTP ${res.status}` });
+        return false;
+      }
+      notify({ type: 'info', message: 'Similarity is computing.' });
+      return true;
+    },
+    [projectSlug, notify],
+  );
+  return computeSimilarity;
+}
+
+/**
+ * Download the similarity file computed for a prompt on a dataset.
+ */
+export function useGetPromptSimilarityFile(projectSlug: string | null) {
+  const { notify } = useNotifications();
+  const getPromptSimilarityFile = useCallback(
+    async (promptId: string, dataset: string, format: string) => {
+      if (!projectSlug || !promptId) return false;
+      const baseUrl = config.api.url.replace(/\/+$/, '');
+      const url = `${baseUrl}/export/prompts/similarity?project_slug=${encodeURIComponent(
+        projectSlug,
+      )}&prompt_id=${encodeURIComponent(promptId)}&dataset=${encodeURIComponent(
+        dataset,
+      )}&format=${encodeURIComponent(format)}`;
+      const res = await fetch(url, { headers: _authHeaders() });
+      if (!res.ok) {
+        const detail = await res.json().catch(() => null);
+        notify({ type: 'error', message: detail?.detail || `HTTP ${res.status}` });
+        return false;
+      }
+      const blob = await res.blob();
+      saveAs(blob, `similarity_${projectSlug}_${dataset}.${format}`);
+      notify({ type: 'success', message: 'Exporting similarity file.' });
+      return true;
+    },
+    [projectSlug, notify],
+  );
+  return getPromptSimilarityFile;
+}
+
 /***** MANAGE Files ******/
 
 /**

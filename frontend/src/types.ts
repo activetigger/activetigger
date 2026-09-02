@@ -179,12 +179,16 @@ export interface PromptOutModel {
   feature_name: string;
   user: string;
   created_at: string;
+  // datasets ("all", "train", ...) with an exportable similarity file
+  computed_datasets?: string[];
 }
 
 export interface PromptsProjectStateModel {
   available: PromptOutModel[];
   bindable_features: string[];
   training: Record<string, Record<string, string | null>>;
+  // in-flight full-dataset similarity computations, keyed by prompt_id
+  similarity_computing?: Record<string, Record<string, string | null>>;
 }
 
 export interface GenerateConfig {

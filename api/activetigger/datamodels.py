@@ -785,6 +785,15 @@ class PromptComputing(ProcessComputing):
     hf_name: str
 
 
+class PromptSimilarityComputing(ProcessComputing):
+    kind: Literal["prompt_similarity"]
+    prompt_id: str
+    text: str
+    feature_name: str
+    dataset: str
+    get_progress: Callable[[], float | None] | None = None
+
+
 class PromptInModel(BaseModel):
     text: str
     feature_name: str
@@ -796,6 +805,8 @@ class PromptOutModel(BaseModel):
     feature_name: str
     user: str
     created_at: str
+    # datasets for which a similarity file has been computed and can be exported
+    computed_datasets: list[str] = []
 
 
 class GenerationComputing(ProcessComputing):
@@ -1006,6 +1017,7 @@ class PromptsProjectStateModel(BaseModel):
     available: list[PromptOutModel]
     bindable_features: list[str]
     training: dict[str, dict[str, str | None]]
+    similarity_computing: dict[str, dict[str, str | None]] = {}
 
 
 class ModelDescriptionModel(BaseModel):
