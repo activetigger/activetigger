@@ -5,7 +5,8 @@
 // untagged elements are skipped (recorded in the session history so they
 // are not served again during this session).
 // Activated from the annotation Configuration modal (image projects in
-// experimental mode only). Designed for computer screens.
+// experimental mode only). Works on the train, valid and test datasets.
+// Designed for computer screens.
 import chroma from 'chroma-js';
 import classNames from 'classnames';
 import { CSSProperties, FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';

@@ -199,13 +199,12 @@ export const AnnotationManagement: FC = () => {
   );
 
   // experimental image grid batch annotation: image projects, multiclass
-  // schemes, train dataset, experimental mode only
+  // schemes, experimental mode only (works on train, valid and test datasets)
   const imageGridActive =
     !!displayConfig.imageGridMode &&
     project?.params?.kind === 'image' &&
     kindScheme === 'multiclass' &&
-    developmentMode &&
-    effectivePhase === 'train';
+    developmentMode;
 
   // turn the grid mode off when experimental mode is disabled or the current
   // project is not an image project (same pattern as the prompt selection mode)

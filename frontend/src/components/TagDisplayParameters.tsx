@@ -3,7 +3,7 @@ import { useAppContext } from '../core/useAppContext';
 
 export const TagDisplayParameters: FC = () => {
   const {
-    appContext: { displayConfig, currentProject, developmentMode, phase },
+    appContext: { displayConfig, currentProject, developmentMode },
     setAppContext,
   } = useAppContext();
   const isImageProject = currentProject?.params?.kind === 'image';
@@ -256,7 +256,7 @@ export const TagDisplayParameters: FC = () => {
       {isImageProject && developmentMode && (
         <>
           <hr />
-          <label title="Experimental: annotate images in batch on a N x N grid. Multiclass schemes on the train dataset only. Designed for computer screens.">
+          <label title="Experimental: annotate images in batch on a N x N grid. Multiclass schemes only. Designed for computer screens.">
             <input
               type="checkbox"
               checked={!!displayConfig.imageGridMode}
@@ -272,11 +272,6 @@ export const TagDisplayParameters: FC = () => {
             />
             Grid display 🧪
           </label>
-          {displayConfig.imageGridMode && phase !== 'train' && (
-            <div className="text-muted small">
-              Grid annotation only applies to the train dataset
-            </div>
-          )}
           {displayConfig.imageGridMode && (
             <div className="horizontal">
               <span className="text-nowrap me-1">
