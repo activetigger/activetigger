@@ -1,17 +1,11 @@
-import cx from 'classnames';
 import { FC, useEffect, useMemo, useState } from 'react';
 import { Modal } from 'react-bootstrap';
 import { SubmitHandler, useForm } from 'react-hook-form';
-import { FaPlusCircle } from 'react-icons/fa';
 import { FaGear } from 'react-icons/fa6';
 import { IoIosRefresh } from 'react-icons/io';
 import { MdDriveFileRenameOutline } from 'react-icons/md';
 import { useParams } from 'react-router-dom';
-import { Tooltip } from 'react-tooltip';
 import {
-  useDeleteBertModel,
-  useDeleteNerModel,
-  useDeleteQuickModel,
   useGetQuickModel,
   useModelInformations,
   useRenameBertModel,
@@ -22,13 +16,11 @@ import {
 import { useNotifications } from '../core/notifications';
 import { useAppContext } from '../core/useAppContext';
 import { useAuth } from '../core/useAuth';
-import { sortDatesAsStrings } from '../core/utils';
 import { MLStatisticsModel } from '../types';
 import { DisplayNerScores } from './DisplayNerScores';
 import { DisplayScores } from './DisplayScores';
 import { DisplayTrainingProcesses } from './DisplayTrainingProcesses';
 import { ModelParametersTab } from './ModelParametersTab';
-import { ModelsPillDisplay } from './ModelsPillDisplay';
 import { ValidateButtons } from './ValidateButton';
 import { ModelCreationForm } from './forms/ModelCreationForm';
 import { NerModelForm } from './forms/NerModelForm';
@@ -45,12 +37,23 @@ interface LossData {
   val_eval_loss: { [key: string]: number };
 }
 
-export const ModelManagement: FC = () => {
+/**
+ * Training view of the model selected in the pills above the tabs.
+ * For span schemes the "bert" slot holds a NER model. createRequest asks
+ * this component to open one of its creation modals (the create buttons
+ * live in the pill rows of the page).
+ */
+export const ModelManagement: FC<{
+  selectedQuickModel: string | null;
+  selectedBertModel: string | null;
+  createRequest: 'quick' | 'bert' | 'ner' | null;
+  onCreateHandled: () => void;
+}> = ({ selectedQuickModel, selectedBertModel, createRequest, onCreateHandled }) => {
   const { notify } = useNotifications();
   const { projectName: projectSlug } = useParams();
   const { authenticatedUser } = useAuth();
   const {
-    appContext: { currentScheme, currentProject, isComputing, activeModel, developmentMode },
+    appContext: { currentScheme, currentProject, isComputing, activeModel },
     setAppContext,
   } = useAppContext();
   const availableFeatures = currentProject?.features.available
@@ -77,7 +80,7 @@ export const ModelManagement: FC = () => {
     () => currentProject?.quickmodel.available[currentScheme || ''] || [],
     [currentProject?.quickmodel, currentScheme],
   );
-  const [currentQuickModelName, setCurrentQuickModelName] = useState<string | null>(null);
+  const currentQuickModelName = selectedQuickModel;
   const { retrainQuickModel } = useRetrainQuickModel(projectSlug || null, currentScheme || null);
 
   // bertmodel
@@ -86,8 +89,7 @@ export const ModelManagement: FC = () => {
     () => currentProject?.languagemodels.available[currentScheme || ''] || {},
     [currentProject?.languagemodels, currentScheme],
   );
-  const [currentBertModel, setCurrentBertModel] = useState<string | null>(null);
-  const { deleteBertModel } = useDeleteBertModel(projectSlug || null);
+  const currentBertModel = selectedBertModel;
   const { model: currentBertModelInformations } = useModelInformations(
     projectSlug || null,
     currentBertModel || null,
@@ -95,14 +97,8 @@ export const ModelManagement: FC = () => {
     isComputing,
   );
 
-  // NER models (experimental — span schemes only, gated by developmentMode)
-  const showNer = kindScheme === 'span' && developmentMode;
+  // NER models (experimental — span schemes only)
   const [displayNewNerModel, setDisplayNewNerModel] = useState(false);
-  const availableNerModels = useMemo(
-    () => currentProject?.nermodels?.available?.[currentScheme || ''] || {},
-    [currentProject?.nermodels, currentScheme],
-  );
-  const { deleteNerModel } = useDeleteNerModel(projectSlug || null);
   const { renameNerModel } = useRenameNerModel(projectSlug || null);
 
   // Modal rename and form to rename
@@ -154,11 +150,17 @@ export const ModelManagement: FC = () => {
     }
   }, [isComputing, currentQuickModelName, reFetchQuickModel]);
 
-  // delete quickmodel
-  const { deleteQuickModel } = useDeleteQuickModel(projectSlug || null);
-
   // state for new feature
   const [displayNewModel, setDisplayNewModel] = useState<boolean>(false);
+
+  // open the creation modal requested by the create pills of the page
+  useEffect(() => {
+    if (createRequest === null) return;
+    if (createRequest === 'quick') setDisplayNewModel(true);
+    if (createRequest === 'bert') setDisplayNewBertModel(true);
+    if (createRequest === 'ner') setDisplayNewNerModel(true);
+    onCreateHandled();
+  }, [createRequest, onCreateHandled]);
 
   const [showParametersQuickModel, setShowParametersQuickModel] = useState(false);
   const [showParametersBertModel, setShowParametersBertModel] = useState(false);
@@ -181,21 +183,6 @@ export const ModelManagement: FC = () => {
   const loss = currentBertModelInformations?.loss
     ? (currentBertModelInformations?.loss as unknown as LossData)
     : null;
-
-  // meta selector
-  const [currentModel, setCurrentModel] = useState<{ name: string; kind: string } | null>(null);
-  useEffect(() => {
-    if (currentQuickModelName) {
-      setCurrentModel({ name: currentQuickModelName, kind: 'quick' });
-      setCurrentBertModel(null);
-    }
-  }, [currentQuickModelName]);
-  useEffect(() => {
-    if (currentBertModel) {
-      setCurrentModel({ name: currentBertModel, kind: 'bert' });
-      setCurrentQuickModelName(null);
-    }
-  }, [currentBertModel]);
 
   // deactivate currents active model if it has been deleted from the list
   useEffect(() => {
@@ -240,100 +227,6 @@ export const ModelManagement: FC = () => {
           BERT models support native multilabel classification.
         </div>
       )}
-      {/* Quick models do not apply to span (NER) schemes — token-classification
-          can't be served by the lightweight feature-based pipeline. */}
-      {kindScheme !== 'span' && (
-        <>
-          <span className="fw-semibold text-muted small">Quick Models</span>
-          <ModelsPillDisplay
-            modelNames={availableQuickModels
-              .sort((quickModelA, quickModelB) =>
-                sortDatesAsStrings(quickModelA?.time, quickModelB?.time, true),
-              )
-              .map((quickModel) => quickModel.name)}
-            currentModelName={currentQuickModelName}
-            setCurrentModelName={setCurrentQuickModelName}
-            deleteModelFunction={deleteQuickModel}
-          >
-            <button
-              onClick={() => {
-                setDisplayNewModel(true);
-                setCurrentQuickModelName(null);
-              }}
-              className={cx('model-pill create-pill', isComputing && 'disabled')}
-              id="create-new"
-            >
-              <FaPlusCircle size={20} /> Create new quick model
-            </button>
-          </ModelsPillDisplay>
-        </>
-      )}
-
-      {currentProject?.params?.kind !== 'image' && kindScheme !== 'span' && (
-        <>
-          <span className="fw-semibold text-muted small">Bert Models</span>
-          <ModelsPillDisplay
-            modelNames={Object.values(availableBertModels)
-              .sort((bertModelA, bertModelB) =>
-                sortDatesAsStrings(bertModelA?.time, bertModelB?.time, true),
-              )
-              .map((model) => (model ? model.name : ''))}
-            currentModelName={currentBertModel}
-            setCurrentModelName={setCurrentBertModel}
-            deleteModelFunction={deleteBertModel}
-          >
-            <button
-              onClick={() => {
-                setDisplayNewBertModel(true);
-                setCurrentBertModel(null);
-              }}
-              className={cx('model-pill create-pill', isComputing && 'disabled')}
-              id="create-new"
-            >
-              <FaPlusCircle size={20} /> Create new BERT model
-            </button>
-            <Tooltip anchorSelect="#create-new">Train a model</Tooltip>
-          </ModelsPillDisplay>
-        </>
-      )}
-
-      {kindScheme === 'span' && (
-        <>
-          <span className="fw-semibold text-muted small">
-            NER Models{!developmentMode && ' (experimental — enable experimental mode)'}
-          </span>
-          <ModelsPillDisplay
-            modelNames={Object.values(availableNerModels)
-              .sort((a, b) => sortDatesAsStrings(a?.time, b?.time, true))
-              .map((m) => (m ? m.name : ''))}
-            currentModelName={currentBertModel}
-            setCurrentModelName={setCurrentBertModel}
-            deleteModelFunction={deleteNerModel}
-          >
-            <button
-              onClick={() => {
-                if (!showNer || isComputing) return;
-                setDisplayNewNerModel(true);
-                setCurrentBertModel(null);
-              }}
-              className={cx('model-pill create-pill', (isComputing || !showNer) && 'disabled')}
-              disabled={!showNer || isComputing}
-              id="create-new-ner"
-              style={!showNer || isComputing ? { cursor: 'not-allowed' } : {}}
-            >
-              <FaPlusCircle size={20} /> Create new NER model
-            </button>
-            <Tooltip anchorSelect="#create-new-ner">
-              {!showNer
-                ? 'Enable experimental mode to train NER models'
-                : isComputing
-                  ? 'A process is already running'
-                  : 'Train a NER model'}
-            </Tooltip>
-          </ModelsPillDisplay>
-        </>
-      )}
-
       {isComputing && authenticatedUser?.username && (
         <DisplayTrainingProcesses
           projectSlug={projectSlug || null}
@@ -352,8 +245,13 @@ export const ModelManagement: FC = () => {
 
       <hr className="my-4" />
 
-      {currentModel &&
-        currentModel.kind === 'quick' &&
+      {!currentQuickModelName && !currentBertModel && (
+        <div className="text-muted my-3">
+          Select a model above to see its details, or create a new one
+        </div>
+      )}
+
+      {currentQuickModelName &&
         currentQuickModelInformations &&
         currentQuickModelInformations.params && (
           <>
@@ -407,7 +305,7 @@ export const ModelManagement: FC = () => {
           </>
         )}
 
-      {currentModel && currentModel.kind === 'bert' && currentBertModelInformations && (
+      {currentBertModel && currentBertModelInformations && (
         <div>
           <ValidateButtons
             modelName={currentBertModel}
