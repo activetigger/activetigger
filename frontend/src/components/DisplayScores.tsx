@@ -3,11 +3,13 @@ import { Modal } from 'react-bootstrap';
 import DataGrid, { Column } from 'react-data-grid';
 import { FaCloudDownloadAlt } from 'react-icons/fa';
 import { Link } from 'react-router-dom';
+import { useAppContext } from '../core/useAppContext';
 import { MLStatisticsModel } from '../types';
 import { DisplaySpanFalsePredictions, SpanFalsePredictionDoc } from './DisplaySpanFalsePredictions';
 import { DisplayTableStatistics } from './DisplayTableStatistics';
 import { DisplayTableStatisticsReact } from './DisplayTableStatisticsReact';
 import { DisplayTableStatisticsReactMultilabel } from './DisplayTableStatisticsReactMultiLabel';
+import { ImageThumbnailImagexp } from './ImageThumbnailImagexp';
 
 export interface DisplayScoresProps {
   title: string | null;
@@ -38,6 +40,8 @@ export const DisplayScores: FC<DisplayScoresProps> = ({
   exclude_labels,
 }) => {
   const [viewTable] = useState<boolean>(false);
+  const { appContext } = useAppContext();
+  const isImageKind = appContext.currentProject?.params.kind === 'image';
   const datasetClean = dataset.includes('test')
     ? 'test'
     : dataset.includes('valid')
@@ -90,22 +94,40 @@ export const DisplayScores: FC<DisplayScoresProps> = ({
       width: 120,
     },
     {
-      name: 'Text',
+      name: isImageKind ? 'Image' : 'Text',
       key: 'text',
       resizable: true,
-      renderCell: (props) => (
-        <div
-          style={{
-            maxHeight: '100%',
-            width: '100%',
-            whiteSpace: 'wrap',
-            overflowY: 'auto',
-            userSelect: 'none',
-          }}
-        >
-          {props.row.text}
-        </div>
-      ),
+      renderCell: (props) =>
+        isImageKind && projectSlug ? (
+          <div
+            style={{
+              width: '100%',
+              height: '100%',
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+            }}
+          >
+            <ImageThumbnailImagexp
+              projectSlug={projectSlug}
+              elementId={props.row.id}
+              maxWidth={160}
+              maxHeight={110}
+            />
+          </div>
+        ) : (
+          <div
+            style={{
+              maxHeight: '100%',
+              width: '100%',
+              whiteSpace: 'wrap',
+              overflowY: 'auto',
+              userSelect: 'none',
+            }}
+          >
+            {props.row.text}
+          </div>
+        ),
     },
   ];
   if (!scores) return;
@@ -186,7 +208,7 @@ export const DisplayScores: FC<DisplayScoresProps> = ({
               className="fill-grid rdg-light"
               columns={columns}
               rows={scores['false_predictions'] as Row[]}
-              rowHeight={80}
+              rowHeight={isImageKind ? 120 : 80}
             />
           )}
         </Modal.Body>
