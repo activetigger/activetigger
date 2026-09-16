@@ -2397,6 +2397,34 @@ class Project:
             col_text="text",
         )
 
+    GENERATION_DATASETS: dict[str, list[str]] = {
+        "train": ["train"],
+        "annotable": ["train", "valid", "test"],
+    }
+
+    def sample_for_generation(
+        self,
+        sampling_scheme: str,
+        n_elements: int,
+        mode: str,
+        dataset: str,
+        random: bool = False,
+    ) -> DataFrame:
+        """
+        Sampled elements with the context columns needed by prompt templates
+        (the scheme sample only carries the text)
+        """
+        datasets = self.GENERATION_DATASETS.get(dataset)
+        if datasets is None:
+            raise Exception(f"Dataset {dataset} cannot be sampled (use train or annotable)")
+        df = self.schemes.get_sample(
+            sampling_scheme, n_elements, mode, dataset=datasets, random=random
+        )
+        context = self.data.get_context_columns(datasets, self.params.cols_context)
+        if len(context.columns) > 0:
+            df = df.join(context)
+        return df
+
     def _generation_input(
         self, request: GenRunRequest, sampling_scheme: str, path_output: Path
     ) -> tuple[Path, int, bool]:
@@ -2404,13 +2432,20 @@ class Project:
         The file the generation task will read
         """
         full_dataset = request.mode == "all" and request.n_elements is None
+        if request.dataset == "all":
+            if not full_dataset:
+                raise Exception("The complete dataset only runs whole (no selection, no limit)")
+            dataset_path = self.data.get_dataset_path("all")
+            if dataset_path is None:
+                raise Exception("No complete dataset file available")
+            return dataset_path, self.data.count_rows(dataset_path), False
         dataset_path = self.data.get_dataset_path(request.dataset)
-        if full_dataset and dataset_path is not None:
+        if full_dataset and request.dataset == "train" and dataset_path is not None:
             n_elements = self.data.count_rows(dataset_path)
             if n_elements == 0:
                 raise Exception("No elements available for this selection")
             return dataset_path, n_elements, False
-        df = self.schemes.get_sample(
+        df = self.sample_for_generation(
             sampling_scheme,
             request.n_elements if request.n_elements is not None else 10**9,
             request.mode,

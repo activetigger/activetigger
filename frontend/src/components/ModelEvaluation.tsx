@@ -155,30 +155,43 @@ export const ModelEvaluation: FC = () => {
       {!isNer && (
         <div>
           <span className="fw-semibold text-muted small">Quick Models</span>
-          <ModelsPillDisplay
-            modelNames={availableQuickModels
-              .sort((quickModelA, quickModelB) =>
-                sortDatesAsStrings(quickModelA?.time, quickModelB?.time, true),
-              )
-              .map((quickModel) => quickModel.name)}
-            currentModelName={currentQuickModelName}
-            setCurrentModelName={setCurrentQuickModelName}
-            deleteModelFunction={deleteQuickModel}
-          />
+          {availableQuickModels.length === 0 ? (
+            <div className="text-muted small">
+              No quick model available for the current scheme. Train one in the Training tab first.
+            </div>
+          ) : (
+            <ModelsPillDisplay
+              modelNames={availableQuickModels
+                .sort((quickModelA, quickModelB) =>
+                  sortDatesAsStrings(quickModelA?.time, quickModelB?.time, true),
+                )
+                .map((quickModel) => quickModel.name)}
+              currentModelName={currentQuickModelName}
+              setCurrentModelName={setCurrentQuickModelName}
+              deleteModelFunction={deleteQuickModel}
+            />
+          )}
         </div>
       )}
       <div>
         <span className="fw-semibold text-muted small">{isNer ? 'NER Models' : 'BERT Models'}</span>
-        <ModelsPillDisplay
-          modelNames={Object.values(availableBertModels)
-            .sort((bertModelA, bertModelB) =>
-              sortDatesAsStrings(bertModelA?.time, bertModelB?.time, true),
-            )
-            .map((model) => (model ? model.name : ''))}
-          currentModelName={currentBertModel}
-          setCurrentModelName={setCurrentBertModel}
-          deleteModelFunction={isNer ? deleteNerModel : deleteBertModel}
-        />
+        {Object.keys(availableBertModels).length === 0 ? (
+          <div className="text-muted small">
+            No {isNer ? 'NER' : 'BERT'} model available for the current scheme. Train one in the
+            Training tab first.
+          </div>
+        ) : (
+          <ModelsPillDisplay
+            modelNames={Object.values(availableBertModels)
+              .sort((bertModelA, bertModelB) =>
+                sortDatesAsStrings(bertModelA?.time, bertModelB?.time, true),
+              )
+              .map((model) => (model ? model.name : ''))}
+            currentModelName={currentBertModel}
+            setCurrentModelName={setCurrentBertModel}
+            deleteModelFunction={isNer ? deleteNerModel : deleteBertModel}
+          />
+        )}
       </div>
 
       {isComputing && (

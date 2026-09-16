@@ -85,11 +85,27 @@ class Data:
         else:
             raise InvalidInputError(f"Unsupported file format: {file_path}")
 
+    def get_context_columns(self, datasets: list[str], cols_context: list[str]) -> DataFrame:
+        """
+        Context columns of datasets (only those present in them)
+        """
+        frames = {"train": self.train, "valid": self.valid, "test": self.test}
+        selected = [frames[d] for d in datasets if frames.get(d) is not None]
+        if len(selected) == 0:
+            return DataFrame()
+        content = pd.concat(selected)
+        return content[[c for c in cols_context if c in content.columns]]
+
     def get_dataset_path(self, dataset: str) -> Path | None:
         """
         Path of a complete dataset file, None when it does not exist
         """
-        paths = {"train": self.path_train, "valid": self.path_valid, "test": self.path_test}
+        paths = {
+            "train": self.path_train,
+            "valid": self.path_valid,
+            "test": self.path_test,
+            "all": self.path_data_all,
+        }
         path = paths.get(dataset)
         return path if path is not None and path.exists() else None
 

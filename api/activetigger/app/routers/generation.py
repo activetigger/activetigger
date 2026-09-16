@@ -227,7 +227,7 @@ def sandbox_pipeline(
     try:
         pipeline = project.generations.get_pipeline(pipeline_id)
         sampling_scheme, labels = resolve_sampling(project, pipeline.scheme_name, request.scheme)
-        df = project.schemes.get_sample(
+        df = project.sample_for_generation(
             sampling_scheme,
             min(request.n_elements, SANDBOX_MAX_ELEMENTS),
             request.mode,

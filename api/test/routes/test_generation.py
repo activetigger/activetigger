@@ -104,7 +104,7 @@ def test_generate_pipelines(client: TestClient, superuser_headers: dict[str, str
     """
 
     project_name = f"Test-genpipe-{int(time.time())}"
-    project = create_project(client, superuser_headers, project_name)
+    project = create_project(client, superuser_headers, project_name, cols_context=["guid"])
     project_slug = project["project_slug"]
     try:
         scheme_name = "scheme-gen"
@@ -130,7 +130,7 @@ def test_generate_pipelines(client: TestClient, superuser_headers: dict[str, str
             "scheme_name": scheme_name,
             "credentials_id": credentials_id,
             "model_slug": "test-model",
-            "prompt": "Classify this text: [[TEXT]]",
+            "prompt": "Classify this text (source [[dataset_guid]]): [[TEXT]]",
             "parameters": {"temperature": 0},
             "postprocess": [{"name": "strip"}, {"name": "exact_match"}],
         }
@@ -195,6 +195,9 @@ def test_generate_pipelines(client: TestClient, superuser_headers: dict[str, str
         assert len(sandbox["rows"]) == 2
         assert all(row["error"].startswith("generation failed") for row in sandbox["rows"])
         assert sandbox["n_na"] == 2
+        # the context column tag is filled with the element's value
+        assert all("[[dataset_guid]]" not in row["prompt"] for row in sandbox["rows"])
+        assert all("source " in row["prompt"] for row in sandbox["rows"])
 
         # run on the dataset: queued task, status flipped by the orchestrator
         r = client.post(
@@ -245,6 +248,15 @@ def test_generate_pipelines(client: TestClient, superuser_headers: dict[str, str
         assert r.status_code == 200, r.text
         r = client.get(f"/api/generate/runs?project_slug={project_slug}", headers=superuser_headers)
         assert r.json() == []
+
+        # the complete dataset only runs whole
+        r = client.post(
+            f"/api/generate/pipelines/{pipeline_id}/start?project_slug={project_slug}",
+            headers=superuser_headers,
+            json={"dataset": "all", "n_elements": 2},
+        )
+        assert r.status_code == 500
+        assert "runs whole" in r.json()["detail"]
 
         # full-dataset run (no limit, mode all): the task reads the project
         # train file directly instead of a written sample, and must not

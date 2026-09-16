@@ -394,7 +394,7 @@ class Schemes:
         scheme: str,
         n_elements: int,
         mode: str,
-        dataset: str = "train",
+        dataset: str | list[str] = "train",
         random: bool = False,
     ) -> DataFrame:
         """
@@ -404,7 +404,8 @@ class Schemes:
             raise Exception("Mode not available")
         if scheme not in self.available():
             raise NotFoundError("Scheme doesn't exist")
-        df = self.get_scheme(scheme, complete=True, datasets=[dataset])
+        datasets = dataset if isinstance(dataset, list) else [dataset]
+        df = self.get_scheme(scheme, complete=True, datasets=datasets)
         # build dataset
         if mode == "tagged":
             df = df[df["labels"].notnull()]

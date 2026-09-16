@@ -287,7 +287,8 @@ class Generations:
         if "[[TEXT]]" not in prompt:
             prompt += "\n\n[[TEXT]]"
         for col in cols_context:
-            prompt = prompt.replace(f"[[{col}]]", str(row[col]))
+            value = row.get(col, "")
+            prompt = prompt.replace(f"[[{col}]]", "" if pd.isna(value) else str(value))
         return prompt.replace("[[TEXT]]", str(row["text"]))
 
     def add_pipeline(

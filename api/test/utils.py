@@ -77,7 +77,10 @@ def create_user(
 
 
 def create_project(
-    client: TestClient, superuser_header: dict[str, str], project_name: str
+    client: TestClient,
+    superuser_header: dict[str, str],
+    project_name: str,
+    cols_context: list[str] = [],
 ) -> dict[str, str]:
     """
     Helper function to create a project and return the headers for that project.
@@ -93,7 +96,7 @@ def create_project(
         upload_id=upload_id,
         col_id="row_number",
         cols_text=["sentence", "label"],
-        cols_context=[],
+        cols_context=cols_context,
         cols_label=[],
         n_train=100,
         n_test=0,

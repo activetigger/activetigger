@@ -1,5 +1,5 @@
 import { FC, useEffect, useMemo, useState } from 'react';
-import { Modal } from 'react-bootstrap';
+import { Modal, Tab, Tabs } from 'react-bootstrap';
 import DataGrid, { Column } from 'react-data-grid';
 import { FaDownload, FaPlusCircle, FaRegTrashAlt } from 'react-icons/fa';
 import { HiOutlineSparkles } from 'react-icons/hi';
@@ -98,6 +98,7 @@ export const GenPage: FC = () => {
   const { deleteGenRun } = useDeleteGenRun(projectName);
   const { getGenerationsFile } = useGetGenerationsFile(projectName);
   const { stopProcesses } = useStopProcesses(projectName);
+  const [runDataset, setRunDataset] = useState('train');
   const [runMode, setRunMode] = useState('all');
   const [runN, setRunN] = useState<string>('');
   const [runWorkers, setRunWorkers] = useState(1);
@@ -129,6 +130,11 @@ export const GenPage: FC = () => {
     if (!isGenerating) setRunsRefresh((k) => k + 1);
   }, [isGenerating]);
 
+  // the sandbox results belong to the selected pipeline
+  useEffect(() => {
+    setSandboxRows(null);
+  }, [currentPipelineName]);
+
   const runSandbox = async () => {
     if (!currentPipeline) return;
     setSandboxLoading(true);
@@ -147,10 +153,11 @@ export const GenPage: FC = () => {
 
   const launchRun = async () => {
     if (!currentPipeline) return;
+    const wholeDataset = runDataset === 'all';
     const started = await startGenRun(currentPipeline.id, {
-      dataset: 'train',
-      mode: runMode,
-      n_elements: runN === '' ? null : Number(runN),
+      dataset: runDataset,
+      mode: wholeDataset ? 'all' : runMode,
+      n_elements: wholeDataset || runN === '' ? null : Number(runN),
       n_workers: runWorkers,
     });
     if (started !== null) setRunsRefresh((k) => k + 1);
@@ -209,227 +216,266 @@ export const GenPage: FC = () => {
           </button>
         </ModelsPillDisplay>
 
-        {currentPipeline && (
-          <>
-            <div className="card my-3">
-              <div className="card-body">
-                <h5 className="card-title">{currentPipeline.name}</h5>
-                <div className="small">
-                  <b>Model</b> {currentPipeline.model_slug} <b>via</b>{' '}
-                  {currentPipeline.credentials_name} ({currentPipeline.endpoint}) — <b>Scheme</b>{' '}
-                  {currentPipeline.scheme_name || <em>free generation (no scheme)</em>}
-                </div>
-                <div className="small mt-1">
-                  <b>Parameters</b>{' '}
-                  {Object.entries(currentPipeline.parameters || {})
-                    .filter(([, value]) => value !== null && value !== undefined)
-                    .map(([key, value]) => `${key}=${value}`)
-                    .join(', ') || 'provider defaults'}
-                </div>
-                <div className="small mt-1">
-                  <b>Post-treatment</b>{' '}
-                  {currentPipeline.postprocess.length > 0
-                    ? currentPipeline.postprocess.map((s) => s.name).join(' → ')
-                    : 'none'}
-                </div>
-                <details className="mt-1">
-                  <summary className="small">Prompt</summary>
-                  <pre className="small bg-light p-2 mt-1">{currentPipeline.prompt}</pre>
-                </details>
-              </div>
-            </div>
-
-            <div className="card my-3">
-              <div className="card-body">
-                <h5 className="card-title">
-                  <HiOutlineSparkles /> Sandbox
-                </h5>
-                <div className="d-flex align-items-end gap-2 mb-2">
-                  <div>
-                    <label className="form-label mb-0" htmlFor="sandbox-n">
-                      Elements
-                    </label>
-                    <input
-                      id="sandbox-n"
-                      type="number"
-                      min={1}
-                      max={10}
-                      className="form-control"
-                      style={{ width: '6em' }}
-                      value={sandboxN}
-                      onChange={(e) => setSandboxN(Number(e.target.value))}
-                    />
+        <Tabs id="generation-panel" className="mt-3" defaultActiveKey="pipelines">
+          <Tab eventKey="pipelines" title="Create & sandbox">
+            {currentPipeline ? (
+              <>
+                <div className="card my-3">
+                  <div className="card-body">
+                    <h5 className="card-title">{currentPipeline.name}</h5>
+                    <div className="small">
+                      <b>Model</b> {currentPipeline.model_slug} <b>via</b>{' '}
+                      {currentPipeline.credentials_name} ({currentPipeline.endpoint}) —{' '}
+                      <b>Scheme</b>{' '}
+                      {currentPipeline.scheme_name || <em>free generation (no scheme)</em>}
+                    </div>
+                    <div className="small mt-1">
+                      <b>Parameters</b>{' '}
+                      {Object.entries(currentPipeline.parameters || {})
+                        .filter(([, value]) => value !== null && value !== undefined)
+                        .map(([key, value]) => `${key}=${value}`)
+                        .join(', ') || 'provider defaults'}
+                    </div>
+                    <div className="small mt-1">
+                      <b>Post-treatment</b>{' '}
+                      {currentPipeline.postprocess.length > 0
+                        ? currentPipeline.postprocess.map((s) => s.name).join(' → ')
+                        : 'none'}
+                    </div>
+                    <details className="mt-1">
+                      <summary className="small">Prompt</summary>
+                      <pre className="small bg-light p-2 mt-1">{currentPipeline.prompt}</pre>
+                    </details>
                   </div>
-                  <button
-                    className="btn btn-primary"
-                    onClick={runSandbox}
-                    disabled={sandboxLoading}
-                  >
-                    {sandboxLoading ? <PulseLoader size={8} color="white" /> : 'Test on a sample'}
-                  </button>
-                  {sandboxRows && (
-                    <span className="badge bg-warning text-dark mb-2">
-                      {sandboxNa} / {sandboxRows.length} NA
-                    </span>
+                </div>
+
+                <div className="card my-3">
+                  <div className="card-body">
+                    <h5 className="card-title">
+                      <HiOutlineSparkles /> Sandbox
+                    </h5>
+                    <div className="d-flex align-items-end gap-2 mb-2">
+                      <div>
+                        <label className="form-label mb-0" htmlFor="sandbox-n">
+                          Elements
+                        </label>
+                        <input
+                          id="sandbox-n"
+                          type="number"
+                          min={1}
+                          max={10}
+                          className="form-control"
+                          style={{ width: '6em' }}
+                          value={sandboxN}
+                          onChange={(e) => setSandboxN(Number(e.target.value))}
+                        />
+                      </div>
+                      <button
+                        className="btn btn-primary"
+                        onClick={runSandbox}
+                        disabled={sandboxLoading}
+                      >
+                        {sandboxLoading ? (
+                          <PulseLoader size={8} color="white" />
+                        ) : (
+                          'Test on a sample'
+                        )}
+                      </button>
+                      {sandboxRows && (
+                        <span className="badge bg-warning text-dark mb-2">
+                          {sandboxNa} / {sandboxRows.length} NA
+                        </span>
+                      )}
+                    </div>
+                    {sandboxRows && (
+                      <DataGrid
+                        className="fill-grid"
+                        columns={generatedColumns}
+                        rows={sandboxRows as unknown as GeneratedTableRow[]}
+                        rowHeight={80}
+                      />
+                    )}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="text-muted my-3">
+                Select a pipeline or create a new one to test it in the sandbox
+              </div>
+            )}
+          </Tab>
+
+          <Tab eventKey="runs" title="Run & results">
+            {currentPipeline ? (
+              <div className="card my-3">
+                <div className="card-body">
+                  <h5 className="card-title">Run {currentPipeline.name} on the dataset</h5>
+                  {isGenerating ? (
+                    <div className="d-flex align-items-center gap-3">
+                      <PulseLoader />
+                      <span>
+                        Generating with <b>{training?.pipeline_name}</b> — progress{' '}
+                        {training?.progress ?? 0}%
+                      </span>
+                      <button
+                        className="btn btn-danger"
+                        onClick={() => stopProcesses('generation')}
+                      >
+                        Stop
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="d-flex align-items-end gap-2 flex-wrap">
+                      <div>
+                        <label className="form-label mb-0" htmlFor="run-dataset">
+                          Dataset
+                        </label>
+                        <select
+                          id="run-dataset"
+                          className="form-select"
+                          value={runDataset}
+                          onChange={(e) => setRunDataset(e.target.value)}
+                        >
+                          <option value="train">train</option>
+                          <option value="annotable">annotable (train+valid+test)</option>
+                          <option value="all">all (complete dataset)</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="form-label mb-0" htmlFor="run-mode">
+                          Elements
+                        </label>
+                        <select
+                          id="run-mode"
+                          className="form-select"
+                          value={runMode}
+                          disabled={runDataset === 'all'}
+                          onChange={(e) => setRunMode(e.target.value)}
+                        >
+                          <option value="all">all</option>
+                          <option value="tagged">tagged</option>
+                          <option value="untagged">untagged</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="form-label mb-0" htmlFor="run-n">
+                          Limit (empty = all)
+                        </label>
+                        <input
+                          id="run-n"
+                          type="number"
+                          min={1}
+                          className="form-control"
+                          style={{ width: '8em' }}
+                          value={runN}
+                          disabled={runDataset === 'all'}
+                          onChange={(e) => setRunN(e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <label className="form-label mb-0" htmlFor="run-workers">
+                          Parallel calls
+                        </label>
+                        <input
+                          id="run-workers"
+                          type="number"
+                          min={1}
+                          max={10}
+                          className="form-control"
+                          style={{ width: '6em' }}
+                          value={runWorkers}
+                          onChange={(e) => setRunWorkers(Number(e.target.value))}
+                        />
+                      </div>
+                      <button className="btn btn-primary" onClick={launchRun}>
+                        Start generation
+                      </button>
+                    </div>
                   )}
                 </div>
-                {sandboxRows && (
-                  <DataGrid
-                    className="fill-grid"
-                    columns={generatedColumns}
-                    rows={sandboxRows as unknown as GeneratedTableRow[]}
-                    rowHeight={80}
-                  />
-                )}
               </div>
-            </div>
+            ) : (
+              <div className="text-muted my-3">Select a pipeline to run it on the dataset</div>
+            )}
 
             <div className="card my-3">
               <div className="card-body">
-                <h5 className="card-title">Run on the dataset</h5>
-                {isGenerating ? (
-                  <div className="d-flex align-items-center gap-3">
-                    <PulseLoader />
-                    <span>
-                      Generating with <b>{training?.pipeline_name}</b> — progress{' '}
-                      {training?.progress ?? 0}%
-                    </span>
-                    <button className="btn btn-danger" onClick={() => stopProcesses('generation')}>
-                      Stop
-                    </button>
-                  </div>
+                <h5 className="card-title">Runs</h5>
+                {(genRuns || []).length === 0 ? (
+                  <em className="text-muted">No generation run yet</em>
                 ) : (
-                  <div className="d-flex align-items-end gap-2 flex-wrap">
-                    <div>
-                      <label className="form-label mb-0" htmlFor="run-mode">
-                        Elements
-                      </label>
-                      <select
-                        id="run-mode"
-                        className="form-select"
-                        value={runMode}
-                        onChange={(e) => setRunMode(e.target.value)}
-                      >
-                        <option value="all">all</option>
-                        <option value="tagged">tagged</option>
-                        <option value="untagged">untagged</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="form-label mb-0" htmlFor="run-n">
-                        Limit (empty = all)
-                      </label>
-                      <input
-                        id="run-n"
-                        type="number"
-                        min={1}
-                        className="form-control"
-                        style={{ width: '8em' }}
-                        value={runN}
-                        onChange={(e) => setRunN(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <label className="form-label mb-0" htmlFor="run-workers">
-                        Parallel calls
-                      </label>
-                      <input
-                        id="run-workers"
-                        type="number"
-                        min={1}
-                        max={10}
-                        className="form-control"
-                        style={{ width: '6em' }}
-                        value={runWorkers}
-                        onChange={(e) => setRunWorkers(Number(e.target.value))}
-                      />
-                    </div>
-                    <button className="btn btn-primary" onClick={launchRun}>
-                      Start generation
-                    </button>
-                  </div>
+                  <table className="table table-sm align-middle">
+                    <thead>
+                      <tr>
+                        <th>Pipeline</th>
+                        <th>Time</th>
+                        <th>By</th>
+                        <th>Selection</th>
+                        <th>Elements</th>
+                        <th>Status</th>
+                        <th>NA</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(genRuns || []).map((run) => (
+                        <tr key={run.id}>
+                          <td>{run.pipeline_name}</td>
+                          <td>{new Date(run.time).toLocaleString()}</td>
+                          <td>{run.user_name}</td>
+                          <td>
+                            {run.dataset} / {run.mode}
+                          </td>
+                          <td>{run.n_elements}</td>
+                          <td>
+                            <span
+                              className={
+                                'badge ' +
+                                (run.status === 'done'
+                                  ? 'bg-success'
+                                  : run.status === 'running'
+                                    ? 'bg-info'
+                                    : 'bg-danger')
+                              }
+                            >
+                              {run.status}
+                            </span>
+                          </td>
+                          <td>{run.n_na ?? ''}</td>
+                          <td className="text-end">
+                            <button
+                              className="btn btn-sm btn-outline-primary me-1"
+                              disabled={run.status === 'running'}
+                              onClick={() => setViewedRunId(run.id)}
+                            >
+                              View
+                            </button>
+                            <button
+                              className="btn btn-sm btn-outline-secondary me-1"
+                              disabled={run.status === 'running'}
+                              onClick={() => getGenerationsFile(run.id)}
+                            >
+                              <FaDownload />
+                            </button>
+                            <button
+                              className="btn btn-sm btn-outline-danger"
+                              disabled={run.status === 'running'}
+                              onClick={async () => {
+                                if (await deleteGenRun(run.id)) setRunsRefresh((k) => k + 1);
+                              }}
+                            >
+                              <FaRegTrashAlt />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 )}
               </div>
             </div>
-          </>
-        )}
-
-        <div className="card my-3">
-          <div className="card-body">
-            <h5 className="card-title">Runs</h5>
-            {(genRuns || []).length === 0 ? (
-              <em className="text-muted">No generation run yet</em>
-            ) : (
-              <table className="table table-sm align-middle">
-                <thead>
-                  <tr>
-                    <th>Pipeline</th>
-                    <th>Time</th>
-                    <th>By</th>
-                    <th>Selection</th>
-                    <th>Elements</th>
-                    <th>Status</th>
-                    <th>NA</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(genRuns || []).map((run) => (
-                    <tr key={run.id}>
-                      <td>{run.pipeline_name}</td>
-                      <td>{new Date(run.time).toLocaleString()}</td>
-                      <td>{run.user_name}</td>
-                      <td>
-                        {run.dataset} / {run.mode}
-                      </td>
-                      <td>{run.n_elements}</td>
-                      <td>
-                        <span
-                          className={
-                            'badge ' +
-                            (run.status === 'done'
-                              ? 'bg-success'
-                              : run.status === 'running'
-                                ? 'bg-info'
-                                : 'bg-danger')
-                          }
-                        >
-                          {run.status}
-                        </span>
-                      </td>
-                      <td>{run.n_na ?? ''}</td>
-                      <td className="text-end">
-                        <button
-                          className="btn btn-sm btn-outline-primary me-1"
-                          disabled={run.status === 'running'}
-                          onClick={() => setViewedRunId(run.id)}
-                        >
-                          View
-                        </button>
-                        <button
-                          className="btn btn-sm btn-outline-secondary me-1"
-                          disabled={run.status === 'running'}
-                          onClick={() => getGenerationsFile(run.id)}
-                        >
-                          <FaDownload />
-                        </button>
-                        <button
-                          className="btn btn-sm btn-outline-danger"
-                          disabled={run.status === 'running'}
-                          onClick={async () => {
-                            if (await deleteGenRun(run.id)) setRunsRefresh((k) => k + 1);
-                          }}
-                        >
-                          <FaRegTrashAlt />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </div>
+          </Tab>
+        </Tabs>
 
         <Modal show={viewedRunId !== null} size="xl" onHide={() => setViewedRunId(null)}>
           <Modal.Header closeButton>
