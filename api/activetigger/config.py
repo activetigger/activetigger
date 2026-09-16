@@ -159,7 +159,7 @@ class Config(metaclass=_Singleton):
             self.mail_available = True
         self.mail_server_port = parse_environ("MAIL_SERVER_PORT", int, 465)
         self.models_embeddings = self._load_models_embeddings()
-        self.models_generative = self._load_models_generative()
+        self.generative_credentials = self._load_generative_credentials()
 
     def resolve_file(self, filename: str) -> str:
         """
@@ -201,10 +201,17 @@ class Config(metaclass=_Singleton):
     def _get_generative_path(self) -> Path:
         return Path(self.data_path) / self.file_generative_models
 
-    def _load_models_generative(self) -> dict:
+    def _load_generative_credentials(self) -> dict:
         """
-        Load preconfigured generative models that will be auto-added to every
-        new project. Missing file is OK and means no defaults.
+        Load the instance-level generative credentials shared with every user
+        (synced into the gen_credentials table at startup).
+
+        Expected YAML schema:
+            credentials:
+              <display-name>:
+                endpoint: https://...   # OpenAI-compatible base URL
+                key: <api-key>          # optional
+                models: [slug, ...]     # optional: restrict/suggest models
         """
         path = self._get_generative_path()
         if not path.exists():
@@ -215,18 +222,31 @@ class Config(metaclass=_Singleton):
         except Exception as e:
             print(f"Failed to read {path}: {e}")
             return {}
-        if not isinstance(content, dict) or "models" not in content:
-            print(f"Invalid generative config {path}: expected a 'models' key")
+        if not isinstance(content, dict):
+            print(f"Invalid generative config {path}: expected a mapping")
             return {}
-        models = content.get("models") or {}
-        if not isinstance(models, dict):
-            print(f"Invalid generative config {path}: 'models' must be a mapping")
+        entries = content.get("credentials") or content.get("models") or {}
+        if not isinstance(entries, dict):
+            print(f"Invalid generative config {path}: 'credentials' must be a mapping")
             return {}
-        return models
+        credentials = {}
+        for name, params in entries.items():
+            params = params or {}
+            endpoint = params.get("endpoint") or params.get("url")
+            if not endpoint:
+                print(f"Skipping generative credentials {name!r}: no endpoint")
+                continue
+            models = params.get("models") or ([params["model"]] if params.get("model") else None)
+            credentials[str(name)] = {
+                "endpoint": str(endpoint),
+                "key": str(params.get("key", "") or ""),
+                "models": models,
+            }
+        return credentials
 
     def reload_generative(self) -> None:
-        """Reload preconfigured generative models from the YAML file."""
-        self.models_generative = self._load_models_generative()
+        """Reload the instance generative credentials from the YAML file."""
+        self.generative_credentials = self._load_generative_credentials()
 
 
 # the configuration is safe to share as it's a singleton (initialized only once)

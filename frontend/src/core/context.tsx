@@ -4,7 +4,6 @@ import {
   ActiveModel,
   DisplayConfig,
   ElementHistoryPoint,
-  GenerateConfig,
   NotificationType,
   ProjectStateModel,
   ProjectionOutModel,
@@ -16,7 +15,6 @@ import { DEFAULT_CONTEXT } from './useAppContext';
 export type AppContextValue = {
   notifications: NotificationType[]; // manage notification
   selectionConfig: SelectionConfig; // selection for the next element
-  generateConfig: GenerateConfig;
   displayConfig: DisplayConfig; // config for the visual
   currentProject?: ProjectStateModel | null; // current project selected
   currentScheme?: string; // scheme selected to annotate

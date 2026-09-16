@@ -8,178 +8,293 @@ from sqlalchemy.orm import joinedload, sessionmaker
 
 from activetigger.config import config
 from activetigger.datamodels import (
-    GenerationCreationModel,
-    PromptModel,
+    GenCredentialsInput,
+    GenCredentialsOut,
+    GenerationParams,
+    GenPipelineCreate,
+    GenPipelineOut,
+    PostprocessStep,
 )
-from activetigger.db.models import Generations, GenModels, Prompts
+from activetigger.db.models import GenCredentials, Generations, GenPipelines
+from activetigger.errors import NotFoundError
 from activetigger.functions import decrypt, encrypt
 
 
+def _credentials_out(entry: GenCredentials) -> GenCredentialsOut:
+    return GenCredentialsOut(
+        id=entry.id,
+        kind=entry.kind,
+        name=entry.name,
+        endpoint=entry.endpoint,
+        models=entry.models,
+        last_tested=entry.last_tested,
+    )
+
+
+def _pipeline_out(pipeline: GenPipelines) -> GenPipelineOut:
+    return GenPipelineOut(
+        id=pipeline.id,
+        name=pipeline.name,
+        user_name=pipeline.user_name,
+        scheme_name=pipeline.scheme_name,
+        credentials_id=pipeline.credentials_id,
+        credentials_name=pipeline.credentials.name,
+        endpoint=pipeline.credentials.endpoint,
+        model_slug=pipeline.model_slug,
+        parameters=GenerationParams(**pipeline.parameters),
+        prompt=pipeline.prompt,
+        postprocess=[PostprocessStep(**s) for s in pipeline.postprocess.get("steps", [])],
+        time=pipeline.time,
+    )
+
+
 class GenerationsService:
+    """
+    Database access for generative pipelines: credentials (user or
+    instance level), pipelines, and runs.
+    """
+
     Session: sessionmaker[SessionType]
 
     def __init__(self, sessionmaker: sessionmaker[SessionType]):
         self.Session = sessionmaker
 
-    def add_generated(
-        self,
-        user_name: str,
-        project_slug: str,
-        element_id: str,
-        model_id: int,
-        prompt: str,
-        answer: str,
-        batch: str | None = None,
-    ):
-        session = self.Session()
-        generation = Generations(
-            user_name=user_name,
-            time=datetime.datetime.now(timezone.utc),
-            project_slug=project_slug,
-            element_id=element_id,
-            model_id=model_id,
-            prompt=prompt,
-            answer=answer,
-            batch=batch,
-        )
-        session.add(generation)
-        session.commit()
-        session.close()
+    # ------------------------------------------------------------------
+    # credentials
+    # ------------------------------------------------------------------
 
-    def get_generated(
-        self, project_slug: str, user_name: str, n_elements: int | None = None
-    ) -> list[list]:
+    def list_credentials(self, user_name: str) -> list[GenCredentialsOut]:
         """
-        Get elements from generated table by order desc
+        Credentials visible to a user: their own entries + instance entries
         """
         with self.Session() as session:
-            if n_elements is None:
-                generated = session.scalars(
-                    select(Generations)
-                    .filter_by(project_slug=project_slug, user_name=user_name)
-                    .options(joinedload(Generations.model))  # join with the model table
-                    .order_by(Generations.time.desc())
-                ).all()
-            else:
-                generated = session.scalars(
-                    select(Generations)
-                    .filter_by(project_slug=project_slug, user_name=user_name)
-                    .options(joinedload(Generations.model))  # join with the model table
-                    .order_by(Generations.time.desc())
-                    .limit(n_elements)
-                ).all()
-            return [
-                [
-                    el.time,
-                    el.element_id,
-                    el.batch,
-                    el.prompt,
-                    el.answer,
-                    el.model.name if el.model else None,
-                ]
-                for el in generated
-            ]
-
-    def get_batch(self, batch_id: str) -> list[Generations] | None:
-        """
-        Get all generations for a given batch ID
-        """
-        with self.Session() as session:
-            generations = session.scalars(
-                select(Generations).filter_by(batch=batch_id).order_by(Generations.time.desc())
+            entries = session.scalars(
+                select(GenCredentials)
+                .where(
+                    (GenCredentials.user_name == user_name) | (GenCredentials.kind == "instance")
+                )
+                .order_by(GenCredentials.kind, GenCredentials.name)
             ).all()
-        return list(generations) if generations is not None else None
+            return [_credentials_out(e) for e in entries]
 
-    def get_project_gen_models(self, project_slug: str) -> Sequence[GenModels]:
+    def get_credentials(self, credentials_id: int, user_name: str | None = None) -> GenCredentials:
         """
-        Get the GenAI model configured for the given project
-
-        Returns a list of GenerationModel
-        """
-        with self.Session() as session:
-            models = session.scalars(select(GenModels).filter_by(project_slug=project_slug)).all()
-        return models
-
-    def get_gen_model(self, model_id: int) -> GenModels:
-        with self.Session() as session:
-            result = session.scalars(select(GenModels).filter_by(id=model_id)).first()
-            if result is None:
-                raise Exception("Generation model not found")
-            result.credentials = decrypt(result.credentials, config.secret_key)
-            return result
-
-    def add_project_gen_model(
-        self, project_slug: str, model: GenerationCreationModel, user_name: str
-    ) -> int:
-        """
-        Add a new GenAI model for the given project
+        Get one entry with the api_key decrypted.
+        If user_name is given, restrict to entries visible to this user.
         """
         with self.Session() as session:
-            if model.credentials is None:
-                model.credentials = ""
-            if model.name is None or model.name == "":
-                raise Exception("You should provide a name")
-            new_model = GenModels(
-                project_slug=project_slug,
-                slug=model.slug,
-                name=model.name,
-                api=model.api,
-                endpoint=model.endpoint,
-                credentials=encrypt(model.credentials, config.secret_key),
-                user_name=user_name,
-            )
-            session.add(new_model)
-            session.commit()
-            session.refresh(new_model)
-            return new_model.id
+            entry = session.scalars(select(GenCredentials).filter_by(id=credentials_id)).first()
+            if entry is None:
+                raise NotFoundError("Credentials not found")
+            if user_name is not None and entry.kind == "user" and entry.user_name != user_name:
+                raise NotFoundError("Credentials not found")
+            entry.api_key = decrypt(entry.api_key, config.secret_key)
+            return entry
 
-    def delete_project_gen_model(self, project_slug: str, model_id: int) -> None:
+    def add_credentials(self, user_name: str, credentials: GenCredentialsInput) -> int:
         """
-        Delete a GenAI model from the given project
+        Save a user entry; an existing entry with the same name is replaced
         """
         with self.Session.begin() as session:
-            session.execute(delete(GenModels).filter_by(project_slug=project_slug, id=model_id))
+            entry = session.scalars(
+                select(GenCredentials).filter_by(
+                    kind="user", user_name=user_name, name=credentials.name
+                )
+            ).first()
+            if entry is None:
+                entry = GenCredentials(
+                    kind="user",
+                    user_name=user_name,
+                    name=credentials.name,
+                    endpoint=credentials.endpoint,
+                    api_key=encrypt(credentials.api_key, config.secret_key),
+                )
+                session.add(entry)
+            else:
+                entry.endpoint = credentials.endpoint
+                entry.api_key = encrypt(credentials.api_key, config.secret_key)
+                entry.last_tested = None
+            session.flush()
+            return entry.id
 
-    def add_prompt(
-        self,
-        project_slug: str,
-        user_name: str,
-        text: str,
-        parameters: dict = {},
-    ) -> None:
-        with self.Session() as session:
-            prompt = Prompts(
+    def delete_credentials(self, credentials_id: int, user_name: str) -> None:
+        """
+        Delete a user entry (instance entries are managed by the yaml).
+        Refused if a pipeline still uses it.
+        """
+        with self.Session.begin() as session:
+            entry = session.scalars(
+                select(GenCredentials).filter_by(
+                    id=credentials_id, kind="user", user_name=user_name
+                )
+            ).first()
+            if entry is None:
+                raise NotFoundError("Credentials not found")
+            used_by = session.scalars(
+                select(GenPipelines).filter_by(credentials_id=credentials_id)
+            ).first()
+            if used_by is not None:
+                raise Exception(
+                    f"These credentials are used by the pipeline '{used_by.name}' "
+                    f"of project '{used_by.project_slug}'"
+                )
+            session.delete(entry)
+
+    def set_last_tested(self, credentials_id: int) -> None:
+        with self.Session.begin() as session:
+            entry = session.scalars(select(GenCredentials).filter_by(id=credentials_id)).first()
+            if entry is not None:
+                entry.last_tested = datetime.datetime.now(timezone.utc)
+
+    def sync_instance_credentials(self, entries: dict[str, dict]) -> None:
+        """
+        Sync the instance-level entries with the generative.yaml content:
+        upsert by name; entries removed from the yaml are deleted when no
+        pipeline references them, otherwise kept with a warning.
+        """
+        with self.Session.begin() as session:
+            existing = {
+                e.name: e
+                for e in session.scalars(select(GenCredentials).filter_by(kind="instance")).all()
+            }
+            for name, params in entries.items():
+                entry = existing.pop(name, None)
+                if entry is None:
+                    entry = GenCredentials(kind="instance", user_name=None, name=name)
+                    session.add(entry)
+                entry.endpoint = params["endpoint"]
+                entry.api_key = encrypt(params.get("key", ""), config.secret_key)
+                entry.models = params.get("models")
+            for name, entry in existing.items():
+                used_by = session.scalars(
+                    select(GenPipelines).filter_by(credentials_id=entry.id)
+                ).first()
+                if used_by is None:
+                    session.delete(entry)
+                else:
+                    print(
+                        f"Instance credentials '{name}' removed from generative.yaml "
+                        f"but still used by pipeline '{used_by.name}': kept in database"
+                    )
+
+    # ------------------------------------------------------------------
+    # pipelines
+    # ------------------------------------------------------------------
+
+    def add_pipeline(self, project_slug: str, user_name: str, pipeline: GenPipelineCreate) -> int:
+        with self.Session.begin() as session:
+            exists = session.scalars(
+                select(GenPipelines).filter_by(project_slug=project_slug, name=pipeline.name)
+            ).first()
+            if exists is not None:
+                raise Exception("A pipeline with this name already exists")
+            new_pipeline = GenPipelines(
                 project_slug=project_slug,
                 user_name=user_name,
-                value=text,
-                parameters=parameters,
+                name=pipeline.name,
+                scheme_name=pipeline.scheme_name,
+                credentials_id=pipeline.credentials_id,
+                model_slug=pipeline.model_slug,
+                parameters=pipeline.parameters.model_dump(),
+                prompt=pipeline.prompt,
+                postprocess={"steps": [s.model_dump() for s in pipeline.postprocess]},
             )
-            session.add(prompt)
-            session.commit()
+            session.add(new_pipeline)
+            session.flush()
+            return new_pipeline.id
 
-    def delete_prompt(self, prompt_id: int) -> None:
-        with self.Session.begin() as session:
-            session.execute(delete(Prompts).filter_by(id=prompt_id))
+    def get_pipelines(self, project_slug: str) -> list[GenPipelineOut]:
+        with self.Session() as session:
+            pipelines = session.scalars(
+                select(GenPipelines)
+                .filter_by(project_slug=project_slug)
+                .options(joinedload(GenPipelines.credentials))
+                .order_by(GenPipelines.time.desc())
+            ).all()
+            return [_pipeline_out(p) for p in pipelines]
 
-    def get_prompts(self, project_slug: str) -> list[PromptModel]:
+    def get_pipeline(self, project_slug: str, pipeline_id: int) -> GenPipelines:
         """
-        Get all prompts for a project
+        Get one pipeline with its credentials loaded (api_key still encrypted)
         """
         with self.Session() as session:
-            elements = session.scalars(select(Prompts).filter_by(project_slug=project_slug)).all()
-        return [
-            PromptModel(
-                id=el.id,
-                text=el.value,
-                parameters=el.parameters,
-            )
-            for el in elements
-        ]
+            pipeline = session.scalars(
+                select(GenPipelines)
+                .filter_by(project_slug=project_slug, id=pipeline_id)
+                .options(joinedload(GenPipelines.credentials))
+            ).first()
+            if pipeline is None:
+                raise NotFoundError("Pipeline not found")
+            return pipeline
 
-    def drop_generated(self, project_slug: str, user_name: str) -> None:
+    def delete_pipeline(self, project_slug: str, pipeline_id: int) -> None:
         with self.Session.begin() as session:
             session.execute(
-                delete(Generations).filter_by(project_slug=project_slug, user_name=user_name)
+                delete(Generations).filter_by(project_slug=project_slug, pipeline_id=pipeline_id)
+            )
+            session.execute(
+                delete(GenPipelines).filter_by(project_slug=project_slug, id=pipeline_id)
             )
 
-        return None
+    # ------------------------------------------------------------------
+    # runs
+    # ------------------------------------------------------------------
+
+    def add_run(
+        self,
+        pipeline_id: int,
+        project_slug: str,
+        user_name: str,
+        dataset: str,
+        mode: str,
+        n_elements: int,
+        path: str,
+    ) -> int:
+        with self.Session.begin() as session:
+            run = Generations(
+                pipeline_id=pipeline_id,
+                project_slug=project_slug,
+                user_name=user_name,
+                dataset=dataset,
+                mode=mode,
+                n_elements=n_elements,
+                status="running",
+                path=path,
+            )
+            session.add(run)
+            session.flush()
+            return run.id
+
+    def get_runs(self, project_slug: str) -> Sequence[Generations]:
+        """
+        Runs of a project, most recent first, with their pipeline loaded
+        """
+        with self.Session() as session:
+            return session.scalars(
+                select(Generations)
+                .filter_by(project_slug=project_slug)
+                .options(joinedload(Generations.pipeline))
+                .order_by(Generations.time.desc())
+            ).all()
+
+    def get_run(self, project_slug: str, run_id: int) -> Generations:
+        with self.Session() as session:
+            run = session.scalars(
+                select(Generations).filter_by(project_slug=project_slug, id=run_id)
+            ).first()
+            if run is None:
+                raise NotFoundError("Generation run not found")
+            return run
+
+    def update_run_status(self, run_id: int, status: str, n_elements: int | None = None) -> None:
+        with self.Session.begin() as session:
+            run = session.scalars(select(Generations).filter_by(id=run_id)).first()
+            if run is None:
+                return
+            run.status = status
+            if n_elements is not None:
+                run.n_elements = n_elements
+
+    def delete_run(self, project_slug: str, run_id: int) -> None:
+        with self.Session.begin() as session:
+            session.execute(delete(Generations).filter_by(project_slug=project_slug, id=run_id))

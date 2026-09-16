@@ -1,38 +1,21 @@
-import { FC, useEffect, useState } from 'react';
+import { FC } from 'react';
 import { SubmitHandler, useForm } from 'react-hook-form';
-import { useAddUserCredentials, useGetGenModels } from '../../core/api';
-import { GenerationModelApi } from '../../types';
+import { useAddGenCredentials } from '../../core/api';
+import { GenCredentialsInput } from '../../types';
 
-type CredentialsForm = {
-  name: string;
-  api: string;
-  endpoint: string;
-  credentials: string;
-};
-
+/**
+ * Save an OpenAI-compatible endpoint/key pair for the current user.
+ * The entry is tested against the endpoint when saved.
+ */
 export const AddCredentials: FC<{ onSuccess?: () => void }> = ({ onSuccess }) => {
-  const { addUserCredentials } = useAddUserCredentials();
-  const { models } = useGetGenModels();
-  const [availableAPIs, setAvailableAPIs] = useState<GenerationModelApi[]>([]);
-  const { handleSubmit, register, reset } = useForm<CredentialsForm>({
-    defaultValues: { name: '', api: '', endpoint: '', credentials: '' },
+  const { addGenCredentials } = useAddGenCredentials();
+  const { handleSubmit, register, reset } = useForm<GenCredentialsInput>({
+    defaultValues: { name: '', endpoint: '', api_key: '' },
   });
 
-  useEffect(() => {
-    const fetchModels = async () => {
-      setAvailableAPIs(await models());
-    };
-    fetchModels();
-  }, [models]);
-
-  const onSubmit: SubmitHandler<CredentialsForm> = async (data) => {
-    const ok = await addUserCredentials({
-      name: data.name,
-      api: data.api,
-      endpoint: data.endpoint || null,
-      credentials: data.credentials,
-    });
-    if (ok) {
+  const onSubmit: SubmitHandler<GenCredentialsInput> = async (data) => {
+    const saved = await addGenCredentials(data);
+    if (saved) {
       reset();
       onSuccess?.();
     }
@@ -51,38 +34,27 @@ export const AddCredentials: FC<{ onSuccess?: () => void }> = ({ onSuccess }) =>
         />
       </div>
       <div className="mb-2">
-        <label className="form-label">API</label>
-        <select className="form-select" required {...register('api', { required: true })}>
-          <option value="">Select an API</option>
-          {availableAPIs.map((api) => (
-            <option key={api.name} value={api.name}>
-              {api.name}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div className="mb-2">
-        <label className="form-label">Endpoint (optional)</label>
+        <label className="form-label">Endpoint (OpenAI-compatible base URL)</label>
         <input
           type="text"
           className="form-control"
-          placeholder="e.g. https://api.example.com/v1"
-          {...register('endpoint')}
+          placeholder="e.g. https://openrouter.ai/api/v1"
+          required
+          {...register('endpoint', { required: true })}
         />
       </div>
       <div className="mb-2">
-        <label className="form-label">API key</label>
+        <label className="form-label">API key (optional for local servers)</label>
         <input
           type="password"
           className="form-control"
           placeholder="Stored encrypted, never displayed again"
           autoComplete="off"
-          required
-          {...register('credentials', { required: true })}
+          {...register('api_key')}
         />
       </div>
       <button type="submit" className="btn-submit">
-        Save credentials
+        Save & test credentials
       </button>
     </form>
   );

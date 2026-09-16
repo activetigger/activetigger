@@ -7,9 +7,9 @@ import { PageLayout } from '../components/layout/PageLayout';
 import { UserActivityChart } from '../components/UserActivityChart';
 import {
   useCurrentUser,
-  useDeleteUserCredentials,
+  useDeleteGenCredentials,
+  useGenCredentials,
   useGetUserStatistics,
-  useUserCredentials,
 } from '../core/api';
 import { useAuth } from '../core/useAuth';
 
@@ -29,15 +29,15 @@ export const AccountPage: FC = () => {
   const { currentUser } = useCurrentUser(refreshKey);
 
   const [credentialsRefreshKey, setCredentialsRefreshKey] = useState(0);
-  const { userCredentials } = useUserCredentials(credentialsRefreshKey);
-  const { deleteUserCredentials } = useDeleteUserCredentials();
+  const { genCredentials } = useGenCredentials(credentialsRefreshKey);
+  const { deleteGenCredentials } = useDeleteGenCredentials();
 
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [showCredentialsModal, setShowCredentialsModal] = useState(false);
 
-  const handleDeleteCredentials = async (name: string) => {
-    const ok = await deleteUserCredentials(name);
+  const handleDeleteCredentials = async (credentialsId: number) => {
+    const ok = await deleteGenCredentials(credentialsId);
     if (ok) setCredentialsRefreshKey((k) => k + 1);
   };
 
@@ -98,35 +98,46 @@ export const AccountPage: FC = () => {
               <div className="card mb-3">
                 <div className="card-body">
                   <p className="text-muted small mb-2">
-                    Saved endpoint/key pairs for generative APIs. Keys are stored encrypted and can
-                    be reused when configuring a generative model, but never displayed again.
+                    Saved endpoint/key pairs for generative pipelines (OpenAI-compatible APIs). Keys
+                    are stored encrypted and never displayed again. Instance entries are provided by
+                    the server and managed by its administrator.
                   </p>
-                  {(userCredentials || []).length === 0 ? (
+                  {(genCredentials || []).length === 0 ? (
                     <em className="text-muted">No saved credentials</em>
                   ) : (
                     <table className="table table-sm align-middle mb-2">
                       <thead>
                         <tr>
                           <th>Name</th>
-                          <th>API</th>
+                          <th>Kind</th>
                           <th>Endpoint</th>
+                          <th>Last tested</th>
                           <th></th>
                         </tr>
                       </thead>
                       <tbody>
-                        {(userCredentials || []).map((credential) => (
-                          <tr key={credential.name}>
+                        {(genCredentials || []).map((credential) => (
+                          <tr key={credential.id}>
                             <td>{credential.name}</td>
-                            <td>{credential.api}</td>
-                            <td>{credential.endpoint || <em className="text-muted">none</em>}</td>
+                            <td>{credential.kind}</td>
+                            <td>{credential.endpoint}</td>
+                            <td>
+                              {credential.last_tested ? (
+                                new Date(credential.last_tested).toLocaleString()
+                              ) : (
+                                <em className="text-muted">never</em>
+                              )}
+                            </td>
                             <td className="text-end">
-                              <button
-                                type="button"
-                                className="btn btn-outline-danger btn-sm"
-                                onClick={() => handleDeleteCredentials(credential.name)}
-                              >
-                                Delete
-                              </button>
+                              {credential.kind === 'user' && (
+                                <button
+                                  type="button"
+                                  className="btn btn-outline-danger btn-sm"
+                                  onClick={() => handleDeleteCredentials(credential.id)}
+                                >
+                                  Delete
+                                </button>
+                              )}
                             </td>
                           </tr>
                         ))}

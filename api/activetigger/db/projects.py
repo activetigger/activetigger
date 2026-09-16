@@ -12,11 +12,9 @@ from activetigger.db.models import (
     Annotations,
     Auths,
     Features,
-    Generations,
-    GenModels,
+    GenPipelines,
     Models,
     Projects,
-    Prompts,
     Schemes,
     Tokens,
 )
@@ -285,53 +283,22 @@ class ProjectsService:
                     )
                 )
 
-            # gen_models must be inserted (and flushed) before generations so we
-            # can remap generations.model_id → the new gen_models.id.
-            gen_model_id_map: dict[int, int] = {}
-            source_gen_models = session.scalars(
-                select(GenModels).filter_by(project_slug=source_slug)
-            ).all()
-            for gm in source_gen_models:
-                new_gm = GenModels(
-                    project_slug=target_slug,
-                    user_name=gm.user_name,
-                    slug=gm.slug,
-                    name=gm.name,
-                    api=gm.api,
-                    endpoint=gm.endpoint,
-                    credentials=gm.credentials,
-                )
-                session.add(new_gm)
-                session.flush()
-                gen_model_id_map[gm.id] = new_gm.id
-
-            for g in session.scalars(select(Generations).filter_by(project_slug=source_slug)).all():
-                new_model_id = gen_model_id_map.get(g.model_id)
-                if new_model_id is None:
-                    # generation pointed at a gen_model not in this project; skip
-                    continue
+            # copy generative pipelines
+            for p in session.scalars(
+                select(GenPipelines).filter_by(project_slug=source_slug)
+            ).all():
                 session.add(
-                    Generations(
-                        time=g.time,
-                        user_name=g.user_name,
-                        project_slug=target_slug,
-                        element_id=g.element_id,
-                        model_id=new_model_id,
-                        prompt=g.prompt,
-                        answer=g.answer,
-                        batch=g.batch,
-                    )
-                )
-
-            for p in session.scalars(select(Prompts).filter_by(project_slug=source_slug)).all():
-                session.add(
-                    Prompts(
+                    GenPipelines(
                         time=p.time,
-                        time_modified=p.time_modified,
                         user_name=p.user_name,
                         project_slug=target_slug,
-                        value=p.value,
+                        name=p.name,
+                        scheme_name=p.scheme_name,
+                        credentials_id=p.credentials_id,
+                        model_slug=p.model_slug,
                         parameters=p.parameters,
+                        prompt=p.prompt,
+                        postprocess=p.postprocess,
                     )
                 )
 

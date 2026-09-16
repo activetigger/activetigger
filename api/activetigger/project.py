@@ -26,12 +26,10 @@ from activetigger.datamodels import (
     EvalSetDataModel,
     EvalSetImageModel,
     EventsModel,
-    ExportGenerationsParams,
     FeatureComputing,
     GenerationComputing,
-    GenerationModel,
-    GenerationRequest,
-    GenerationResult,
+    GenRunRequest,
+    GenRunSummary,
     ImageModelModel,
     LexicometricsComputing,
     LMComputing,
@@ -68,7 +66,7 @@ from activetigger.functions import (
     remove_labels_without_enough_annotations,
     sanitize_query_expression,
 )
-from activetigger.generation.generations import Generations
+from activetigger.generations import Generations
 from activetigger.imagemodels import ImageModels
 from activetigger.languagemodels import LanguageModels
 from activetigger.lexicometrics import Lexicometrics
@@ -351,7 +349,7 @@ class Project:
             features=self.features,
         )
         self.generations = Generations(
-            self.db_manager, cast(list[GenerationComputing], self.computing)
+            project_slug, self.params.dir, self.computing, self.db_manager
         )
         self.projections = Projections(
             project_slug, self.params.dir, self.computing, self.queue, self.db_manager
@@ -365,13 +363,6 @@ class Project:
             self.features,
             self.db_manager,
         )
-
-        # Persist any generation checkpoints left behind by a crashed worker or
-        # a previous server restart. At load time self.computing is empty, so
-        # every gen_*.jsonl file in the project dir is an orphan.
-        if self.params.dir is not None:
-            for jsonl_path in self.params.dir.glob("gen_*.jsonl"):
-                self._recover_generations_from_jsonl(jsonl_path)
 
     def start_project_creation(self, params: ProjectBaseModel, username: str, path: Path) -> None:
         """
@@ -542,13 +533,6 @@ class Project:
         self.users.set_auth(
             AuthUserModel(username=username, project_slug=project.project_slug, status="manager")
         )
-
-        # pre-populate the project with the generative models declared in
-        # generative.yaml (no-op if the file is missing or empty)
-        try:
-            Generations(self.db_manager, []).add_default_models(project.project_slug, username)
-        except Exception as e:
-            print(f"Failed to add default generative models for {project.project_slug}: {e}")
 
         self.status = "created"
 
@@ -1888,60 +1872,6 @@ class Project:
 
         return FileResponse(path.joinpath(file_name), filename=file_name)
 
-    def _rename_generated_id_column(self, table: DataFrame) -> DataFrame:
-        """
-        Rename the generated id column and add the external id.
-
-        The "index" column from the generation table holds the slugged
-        id_internal. We expose it as id_internal and add a column with the
-        original id, named after col_id with the "dataset_" prefix stripped.
-        """
-        col_name_id = self.params.col_id if self.params.col_id else "id"
-        col_name_id = col_name_id.removeprefix("dataset_")
-        table[col_name_id] = table["index"].map(self.data.index["id_external"])
-        table = table.rename(columns={"index": "id_internal"})
-        # put col_id first, then id_internal, then the rest
-        ordered = [col_name_id, "id_internal"] + [
-            c for c in table.columns if c not in (col_name_id, "id_internal")
-        ]
-        return table[ordered]
-
-    def get_generated(
-        self, project_slug: str, username: str, params: ExportGenerationsParams
-    ) -> DataFrame:
-        """
-        Get generated elements with the original unslugged ids.
-        """
-        table = self.generations.get_generated(
-            project_slug=project_slug,
-            user_name=username,
-            params=params,
-        )
-        table_with_id = self._rename_generated_id_column(table)
-
-        return table_with_id
-
-    def export_generations(
-        self, project_slug: str, username: str, params: ExportGenerationsParams
-    ) -> DataFrame:
-        # get the elements
-        table = self.generations.get_generated(
-            project_slug=project_slug,
-            user_name=username,
-            params=params,
-        )
-
-        # apply filters on the generated
-        table["answer"] = self.generations.filter(table["answer"], params.filters)
-
-        # join the text on the internal id before we swap it out
-        if self.data.train is None:
-            raise Exception("No train data available")
-        table = table.join(self.data.train["text"], on="index")
-
-        # expose id_internal as the frame index so it lands as the CSV index
-        return self._rename_generated_id_column(table).set_index("id_internal")
-
     def get_process(
         self, kind: str | list, user: str
     ) -> list[FeatureComputing | LMComputing | QuickModelComputing]:
@@ -2467,41 +2397,85 @@ class Project:
             col_text="text",
         )
 
-    def start_generation(self, request: GenerationRequest, username: str) -> None:
+    def _generation_input(
+        self, request: GenRunRequest, sampling_scheme: str, path_output: Path
+    ) -> tuple[Path, int, bool]:
         """
-        Start a generation process
+        The file the generation task will read
         """
-        extract = self.schemes.get_sample(
-            request.scheme, request.n_batch, request.mode, dataset=request.dataset
+        full_dataset = request.mode == "all" and request.n_elements is None
+        dataset_path = self.data.get_dataset_path(request.dataset)
+        if full_dataset and dataset_path is not None:
+            n_elements = self.data.count_rows(dataset_path)
+            if n_elements == 0:
+                raise Exception("No elements available for this selection")
+            return dataset_path, n_elements, False
+        df = self.schemes.get_sample(
+            sampling_scheme,
+            request.n_elements if request.n_elements is not None else 10**9,
+            request.mode,
+            dataset=request.dataset,
         )
-        if len(extract) == 0:
-            raise Exception("No elements available for generation")
-        model = self.generations.generations_service.get_gen_model(request.model_id)
-        # add task to the queue
+        if len(df) == 0:
+            raise Exception("No elements available for this selection")
+        return self.generations.write_run_input(df, path_output), len(df), True
+
+    def start_generation(
+        self,
+        pipeline_id: int,
+        request: GenRunRequest,
+        sampling_scheme: str,
+        labels: list[str] | None,
+        username: str,
+    ) -> int:
+        """
+        Launch a pipeline on a dataset (sample). Returns the run id.
+        """
+        if any(e.kind == "generation" and e.user == username for e in self.computing):
+            raise Exception("A generation is already running for this user")
+        pipeline, params, steps, api_key = self.generations.load_pipeline(pipeline_id)
+        path_output = self.generations.new_run_path()
+        path_input, n_elements, delete_input = self._generation_input(
+            request, sampling_scheme, path_output
+        )
+        run_id = self.generations.generations_service.add_run(
+            pipeline_id=pipeline_id,
+            project_slug=self.name,
+            user_name=username,
+            dataset=request.dataset,
+            mode=request.mode,
+            n_elements=n_elements,
+            path=str(path_output),
+        )
         unique_id = self.queue.add_task(
             "generation",
             self.name,
             GenerateCall(
                 path_process=self.params.dir,
-                username=username,
-                project_slug=self.name,
-                df=extract,
-                prompt=request.prompt,
-                model=GenerationModel(**model.__dict__),
+                run_id=run_id,
+                path_input=path_input,
+                delete_input=delete_input,
+                prompt=pipeline.prompt,
+                model_slug=pipeline.model_slug,
+                endpoint=pipeline.credentials.endpoint,
+                api_key=api_key,
+                params=params,
+                steps=steps,
+                labels=labels,
                 cols_context=self.params.cols_context,
-                dataset=request.dataset,
-                prompt_name=request.prompt_name if request.prompt_name else "",
+                path_output=path_output,
                 n_workers=request.n_workers,
             ),
         )
         self.computing.append(
             GenerationComputing(
                 unique_id=unique_id,
-                prompt_name=request.prompt_name if request.prompt_name else "",
                 user=username,
                 project=self.name,
-                model_id=request.model_id,
-                number=request.n_batch,
+                run_id=run_id,
+                pipeline_id=pipeline_id,
+                pipeline_name=pipeline.name,
+                number=n_elements,
                 dataset=request.dataset,
                 time=datetime.now(timezone.utc),
                 kind="generation",
@@ -2510,6 +2484,18 @@ class Project:
                 ),
             )
         )
+        return run_id
+
+    def export_generations(self, run_id: int) -> DataFrame:
+        """
+        Outputs of a run, with the original (unslugged) ids when available
+        """
+        table = self.generations.run_data(run_id)
+        try:
+            table.insert(0, "id_external", table["element_id"].map(self.data.index["id_external"]))
+        except Exception:
+            pass
+        return table
 
     def clean_process(self, e: ProcessComputing) -> None:
         """
@@ -2517,37 +2503,6 @@ class Project:
         """
         self.computing.remove(e)
         self.queue.delete(e.unique_id)
-
-    def _recover_generations_from_jsonl(self, path: Path) -> None:
-        """
-        Persist any results left behind in a generation recovery file.
-
-        Rows are inserted into the DB and the file is deleted. Missing file is a no-op.
-        """
-        if not path.exists():
-            return
-        try:
-            with open(path, "r") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        data = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    self.generations.add(
-                        user=data["user"],
-                        project_slug=data["project_slug"],
-                        element_id=data["element_id"],
-                        model_id=data["model_id"],
-                        prompt=data["prompt"],
-                        answer=data["answer"],
-                        batch=data.get("batch"),
-                    )
-            path.unlink()
-        except Exception as ex:
-            print(f"Failed to recover generation checkpoint {path}: {ex}")
 
     def update_processes(self) -> None:
         """
@@ -2578,6 +2533,10 @@ class Project:
                     print(f"Process {e.kind} cancelled by user")
                     if e.kind == "extend_features":
                         self._recover_features_after_failed_extension()
+                    if e.kind == "generation":
+                        self.generations.finish_run(
+                            cast(GenerationComputing, e).run_id, "interrupted"
+                        )
                     self.clean_process(e)
                     continue
                 print(f"Error in {e.kind} : {exception}")
@@ -2601,12 +2560,6 @@ class Project:
                     message = f"Error for process {e.kind} : {exception}"
                 self.errors.add(message)
 
-                # recover partial generation results from the checkpoint file
-                if e.kind == "generation" and self.params.dir is not None:
-                    self._recover_generations_from_jsonl(
-                        self.params.dir.joinpath(f"gen_{e.unique_id}.jsonl")
-                    )
-
                 # specific case for project creation ; delete the project
                 if e.kind == "create_project":
                     print("Error in project creation")
@@ -2616,6 +2569,9 @@ class Project:
                 # pre-eval-set shape; reset to the safe empty state
                 if e.kind == "extend_features":
                     self._recover_features_after_failed_extension()
+
+                if e.kind == "generation":
+                    self.generations.finish_run(cast(GenerationComputing, e).run_id, "error")
 
                 self.clean_process(e)
                 continue
@@ -2737,25 +2693,12 @@ class Project:
                         self.lexicometrics.add(lexicometrics_computation, results)
                     case "generation":
                         e = cast(GenerationComputing, e)
-                        r = cast(
-                            list[GenerationResult],
-                            results,
+                        summary = cast(GenRunSummary, results)
+                        self.generations.finish_run(
+                            summary.run_id,
+                            "interrupted" if summary.interrupted else "done",
+                            n_elements=summary.n_elements,
                         )
-                        batch = e.dataset + "_" + str(e.prompt_name) + "_" + e.unique_id
-                        for row in r:
-                            self.generations.add(
-                                user=row.user,
-                                project_slug=row.project_slug,
-                                element_id=row.element_id,
-                                model_id=row.model_id,
-                                prompt=row.prompt,
-                                answer=row.answer,
-                                batch=batch,
-                            )
-                        if self.params.dir is not None:
-                            jsonl = self.params.dir.joinpath(f"gen_{e.unique_id}.jsonl")
-                            if jsonl.exists():
-                                jsonl.unlink()
                     case "bertopic":
                         bertopic_model = cast(BertopicComputing, e)
                         events = cast(EventsModel, results)

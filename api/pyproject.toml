@@ -69,6 +69,7 @@ dependencies = [
 		"nltk",
 		"peft>=0.18.1",
 		"regex>=2024.0.0",
+		"rapidfuzz>=3.0.0",
 		"open-clip-torch>=3.3.0",
 		"codecarbon>=2.7.0",
 		"wtpsplit>=2.1.0",

@@ -40,6 +40,7 @@ from activetigger.app.routers import (
 )
 from activetigger.config import config
 from activetigger.datamodels import (
+    ApiErrorModel,
     ServerStateModel,
     TableOutModel,
     TokenModel,
@@ -147,14 +148,14 @@ app.mount(
     "/static", StaticFiles(directory=Path(config.data_path) / "projects" / "static"), name="static"
 )
 
-# error statuses any authenticated route can answer, documented in the OpenAPI schema
+# error statuses any authenticated route can answer, documented in the OpenAPI
 COMMON_ERROR_RESPONSES: dict[int | str, dict] = {
-    400: {"description": "Invalid request"},
-    401: {"description": "Not authenticated"},
-    403: {"description": "Not enough rights"},
-    404: {"description": "Resource not found"},
-    409: {"description": "Resource already exists"},
-    500: {"description": "Internal server error"},
+    400: {"description": "Invalid request", "model": ApiErrorModel},
+    401: {"description": "Not authenticated", "model": ApiErrorModel},
+    403: {"description": "Not enough rights", "model": ApiErrorModel},
+    404: {"description": "Resource not found", "model": ApiErrorModel},
+    409: {"description": "Resource already exists", "model": ApiErrorModel},
+    500: {"description": "Internal server error", "model": ApiErrorModel},
 }
 
 # add routers

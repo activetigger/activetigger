@@ -4,7 +4,7 @@ import { useDeleteMessage, useGetMessages } from '../core/api';
 import { displayTime } from '../core/utils';
 
 export const ManageMessages: FC = () => {
-  const [kind, setKind] = useState<string>('system');
+  const [kind, setKind] = useState<'user' | 'system' | 'project'>('system');
   const { messages, reFetchMessages } = useGetMessages(kind, null);
   const { deleteMessage } = useDeleteMessage();
 
@@ -12,7 +12,10 @@ export const ManageMessages: FC = () => {
     <>
       <div className="horizontal">
         <div style={{ margin: '0px 20px' }}>Kind</div>
-        <select onChange={(e) => setKind(e.target.value)} style={{ maxWidth: '300px' }}>
+        <select
+          onChange={(e) => setKind(e.target.value as 'user' | 'system' | 'project')}
+          style={{ maxWidth: '300px' }}
+        >
           <option value="system">System</option>
         </select>
       </div>

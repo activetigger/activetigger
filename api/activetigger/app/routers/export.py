@@ -15,7 +15,6 @@ from fastapi.responses import Response as FastAPIResponse
 from activetigger.app.dependencies import ProjectAction, get_project, test_rights, verified_user
 from activetigger.config import config
 from activetigger.datamodels import (
-    ExportGenerationsParams,
     UserInDBModel,
 )
 from activetigger.errors import APIError
@@ -257,7 +256,7 @@ def export_prompt_similarity(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post(
+@router.get(
     "/export/generations",
     dependencies=[Depends(verified_user)],
     responses={200: {"content": {"text/csv": {}}}},
@@ -265,28 +264,22 @@ def export_prompt_similarity(
 def export_generations(
     project: Annotated[Project, Depends(get_project)],
     current_user: Annotated[UserInDBModel, Depends(verified_user)],
-    params: ExportGenerationsParams,
+    run_id: int,
 ) -> Response:
     """
-    Export annotations
+    Export the outputs of a generation run as CSV
     """
+    test_rights(ProjectAction.EXPORT_DATA, current_user.username, project.name)
     try:
-        table = project.export_generations(
-            project_slug=project.name,
-            username=current_user.username,
-            params=params,
-        )
-
-        # convert to payload
+        table = project.export_generations(run_id)
         output = StringIO()
-        table.to_csv(output, index=True)
+        table.to_csv(output, index=False)
         csv_data = output.getvalue()
         output.close()
         headers = {
-            "Content-Disposition": 'attachment; filename="data.csv"',
+            "Content-Disposition": 'attachment; filename="generations.csv"',
             "Content-Type": "text/csv",
         }
-
         return Response(content=csv_data, media_type="text/csv", headers=headers)
     except (HTTPException, APIError, OverflowError):
         raise

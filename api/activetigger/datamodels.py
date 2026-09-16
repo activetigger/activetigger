@@ -1,10 +1,11 @@
 import datetime
+import re
 from enum import Enum, StrEnum
 from pathlib import Path
 from typing import Annotated, Any, Callable, Literal, Optional
 
 from pandas import DataFrame
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field  # for dataframe
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
 from sklearn.base import BaseEstimator
 
 # Data model to use of the API
@@ -312,25 +313,14 @@ class UserInDBModel(UserModel):
     hashed_password: str
 
 
-class UserCredentialInput(BaseModel):
+class GenCredentialsTestOut(BaseModel):
     """
-    Endpoint/credentials pair saved in the user account
-    """
-
-    name: str
-    api: str
-    endpoint: str | None = None
-    credentials: str
-
-
-class UserCredentialPublic(BaseModel):
-    """
-    Saved credentials entry without the secret
+    Result of testing a credentials entry against its endpoint
     """
 
-    name: str
-    api: str
-    endpoint: str | None = None
+    id: int
+    success: bool
+    detail: str | None = None
 
 
 class CompareSchemesModel(BaseModel):
@@ -584,26 +574,187 @@ class Multi_naivebayesParams(BaseModel):
     class_prior: str | None = None
 
 
-class GenerationCreationModel(BaseModel):
+class GenerationParams(BaseModel):
     """
-    GenAI model used in generation
+    Generation parameters for an OpenAI-compatible API.
     """
 
-    slug: str
-    api: str
+    temperature: float | None = None
+    seed: int | None = None
+    max_tokens: int | None = None
+    thinking: bool | None = None
+    top_p: float | None = None
+    presence_penalty: float | None = None
+    frequency_penalty: float | None = None
+
+
+class PostprocessStep(BaseModel):
+    """
+    One post-treatment step
+    """
+
     name: str
-    endpoint: str | None = None
-    credentials: str | None = None
-    # name of a credentials entry saved in the user account, resolved server-side
-    saved_credentials: str | None = None
+    params: dict[str, Any] = {}
 
 
-class GenerationModel(GenerationCreationModel):
+class EmptyParams(BaseModel):
+    pass
+
+
+class RegexParams(BaseModel):
+    pattern: str
+    ignore_case: bool = False
+
+    @field_validator("pattern")
+    @classmethod
+    def pattern_must_compile(cls, value: str) -> str:
+        re.compile(value)
+        return value
+
+
+class RegexSubParams(RegexParams):
+    replacement: str = ""
+
+
+class RegexAssignParams(RegexParams):
+    label: str
+
+
+class JsonKeyParams(BaseModel):
+    key: str
+
+
+class ExactMatchParams(BaseModel):
+    ignore_case: bool = True
+
+
+class FuzzyMatchParams(BaseModel):
+    max_distance: int = 2
+    ignore_case: bool = True
+
+
+class GenCredentialsInput(BaseModel):
     """
-    GenAI model used in generation
+    Endpoint/key pair saved by a user
+    """
+
+    name: str
+    endpoint: str
+    api_key: str = ""
+
+
+class GenCredentialsOut(BaseModel):
+    """
+    Credentials entry without the secret
     """
 
     id: int
+    kind: str  # "user" | "instance"
+    name: str
+    endpoint: str
+    models: list[str] | None = None
+    last_tested: datetime.datetime | None = None
+
+
+class GenPipelineCreate(BaseModel):
+    """
+    A generative pipeline: model + parameters + prompt + post-treatment
+    """
+
+    name: str
+    scheme_name: str | None = None
+    credentials_id: int
+    model_slug: str
+    parameters: GenerationParams = GenerationParams()
+    prompt: str
+    postprocess: list[PostprocessStep] = []
+
+
+class GenPipelineOut(GenPipelineCreate):
+    id: int
+    user_name: str
+    credentials_name: str
+    endpoint: str
+    time: datetime.datetime
+
+
+class GeneratedRow(BaseModel):
+    """
+    Output of a pipeline on one element (sandbox row / parquet row)
+    """
+
+    element_id: str
+    prompt: str
+    raw: str
+    predicted: str | None = None
+    error: str | None = None
+
+
+class GenSandboxRequest(BaseModel):
+    """
+    Synchronous test of a pipeline on a few elements
+    """
+
+    n_elements: int = 5
+    mode: str = "all"  # "all" | "tagged" | "untagged"
+    dataset: str = "train"
+    scheme: str | None = None
+
+
+class GenSandboxOut(BaseModel):
+    rows: list[GeneratedRow]
+    n_na: int
+
+
+class PostprocessPreviewRequest(BaseModel):
+    """
+    Re-apply a candidate list of steps on raw outputs already generated
+    """
+
+    scheme_name: str | None = None
+    steps: list[PostprocessStep]
+    raws: list[str]
+
+
+class GenRunRequest(BaseModel):
+    """
+    Launch a pipeline on a dataset (n_elements=None : the whole dataset)
+    """
+
+    dataset: str = "train"
+    mode: str = "all"  # "all" | "tagged" | "untagged"
+    n_elements: int | None = None
+    n_workers: int = 1
+    # sampling scheme for free pipelines (scheme-bound pipelines use theirs)
+    scheme: str | None = None
+
+
+class GenRunOut(BaseModel):
+    """
+    One run of a pipeline on a dataset
+    """
+
+    id: int
+    pipeline_id: int
+    pipeline_name: str
+    user_name: str
+    dataset: str
+    mode: str
+    n_elements: int
+    status: str
+    n_na: int | None = None
+    time: datetime.datetime
+
+
+class GenRunSummary(BaseModel):
+    """
+    Returned by the generation task
+    """
+
+    run_id: int
+    n_elements: int
+    n_na: int
+    interrupted: bool = False
 
 
 class BertopicParamsModel(BaseModel):
@@ -654,25 +805,6 @@ class ComputeBertopicModel(BertopicParamsModel):
     n_gram_range: tuple[int, int] = (1, 2)
 
 
-class GenerationAvailableModel(BaseModel):
-    """
-    GenAI models available for generation
-    """
-
-    slug: str
-    api: str
-    name: str
-
-
-class GenerationModelApi(BaseModel):
-    """
-    GenAI API available for generation
-    """
-
-    name: str
-    models: list[GenerationAvailableModel]
-
-
 class MLStatisticsModel(BaseModel):
     training_kind: str | None = None
     f1_label: dict[str, float | None] | None = None
@@ -686,22 +818,6 @@ class MLStatisticsModel(BaseModel):
     confusion_matrix: list[list[int]] | None = None
     false_predictions: dict[str, Any] | list[Any] | None = None
     table: dict[str, Any] | None = None
-
-
-class GenerationRequest(BaseModel):
-    """
-    To start a generating prompt
-    """
-
-    model_id: int
-    token: str | None = None
-    prompt: str
-    n_batch: int = 1
-    n_workers: int = 1
-    scheme: str
-    mode: str = "all"
-    dataset: str = "train"
-    prompt_name: str | None = None
 
 
 class ProjectUpdateModel(BaseModel):
@@ -812,11 +928,12 @@ class PromptOutModel(BaseModel):
 class GenerationComputing(ProcessComputing):
     kind: Literal["generation"]
     project: str
+    run_id: int
+    pipeline_id: int
+    pipeline_name: str
     number: int
-    model_id: int
     dataset: str = "train"
     get_progress: Callable[[], float | None] | None = None
-    prompt_name: str | None = None
 
 
 class BertopicComputing(ProcessComputing):
@@ -923,10 +1040,12 @@ class QuickModelOutModel(BaseModel):
 
 class GenerationComputingOut(BaseModel):
     """
-    Response for generation
+    Progress of a running generation
     """
 
-    model_id: int
+    run_id: int
+    pipeline_id: int
+    pipeline_name: str
     progress: float | None
 
 
@@ -1159,6 +1278,7 @@ class BertopicProjectStateModel(BaseModel):
 
 class GenerationsProjectStateModel(BaseModel):
     training: dict[str, GenerationComputingOut]
+    available: list[GenPipelineOut] = []
 
 
 class ErrorsProjectStateModel(BaseModel):
@@ -1229,6 +1349,14 @@ class WaitingModel(BaseModel):
     status: str = "waiting"
 
 
+class ApiErrorModel(BaseModel):
+    """
+    Error payload of the API (documented in the OpenAPI schema)
+    """
+
+    detail: str
+
+
 class DocumentationModel(BaseModel):
     """
     Documentation model
@@ -1286,15 +1414,6 @@ class CodebookModel(BaseModel):
     content: str
     scheme: str
     time: str
-
-
-class GenerationResult(BaseModel):
-    user: str
-    project_slug: str
-    model_id: int
-    element_id: str
-    prompt: str
-    answer: str
 
 
 class GpuInformationModel(BaseModel):
@@ -1408,17 +1527,6 @@ class UserStatistics(BaseModel):
     annotation_activity: list[UserActivityPointModel] = []
 
 
-class PromptInputModel(BaseModel):
-    text: str
-    name: str | None = None
-
-
-class PromptModel(BaseModel):
-    id: int
-    text: str
-    parameters: dict[str, Any]
-
-
 class TextDatasetModel(BaseModel):
     """
     External dataset for prediction
@@ -1430,15 +1538,6 @@ class TextDatasetModel(BaseModel):
     upload_id: str
     filename: str | None = None
     path: Path | None = None
-
-
-class GeneratedElementsIn(BaseModel):
-    n_elements: int
-    filters: list[str] = []
-
-
-class ExportGenerationsParams(BaseModel):
-    filters: list[str] = []
 
 
 class ProjectCreatingModel(BaseModel):

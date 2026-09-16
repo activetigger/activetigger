@@ -1,11 +1,6 @@
 from typing import Annotated
 
-from fastapi import (
-    APIRouter,
-    Depends,
-    HTTPException,
-    Path,
-)
+from fastapi import APIRouter, Depends, HTTPException, Path
 
 from activetigger.app.dependencies import (
     ProjectAction,
@@ -14,251 +9,338 @@ from activetigger.app.dependencies import (
     verified_user,
 )
 from activetigger.datamodels import (
-    ExportGenerationsParams,
-    GenerationCreationModel,
-    GenerationModel,
-    GenerationModelApi,
-    GenerationRequest,
-    PromptInputModel,
-    PromptModel,
+    GenCredentialsInput,
+    GenCredentialsOut,
+    GenCredentialsTestOut,
+    GenPipelineCreate,
+    GenPipelineOut,
+    GenRunOut,
+    GenRunRequest,
+    GenSandboxOut,
+    GenSandboxRequest,
+    PostprocessPreviewRequest,
     TableOutModel,
     UserInDBModel,
 )
 from activetigger.errors import APIError
-from activetigger.generation.generations import Generations
-from activetigger.generation.ollama import Ollama
-from activetigger.generation.openapi import OpenAPI
+from activetigger.generations import POSTPROCESS_STEPS, Generations
 from activetigger.orchestrator import get_orchestrator
 from activetigger.project import Project
 
 router = APIRouter(tags=["generation"])
 
-
-@router.get("/generate/models/available")
-def list_generation_models() -> list[GenerationModelApi]:
-    """
-    Returns the list of the available GenAI models for generation
-    API (not the models themselves)
-    """
-    try:
-        return Generations.get_available_models()
-    except (HTTPException, APIError, OverflowError):
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+SANDBOX_MAX_ELEMENTS = 10
 
 
-@router.get("/generate/ollama/models")
-def list_ollama_models(endpoint: str) -> list[dict[str, str]]:
-    """
-    Query an Ollama server endpoint to list available models
-    """
-    try:
-        return Ollama.list_models(endpoint)
-    except (HTTPException, APIError, OverflowError):
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/generate/openai/models", dependencies=[Depends(verified_user)])
-def list_openai_compatible_models(
+@router.get("/generate/credentials", dependencies=[Depends(verified_user)])
+def list_credentials(
     current_user: Annotated[UserInDBModel, Depends(verified_user)],
-    endpoint: str | None = None,
-    credentials: str | None = None,
-    saved_credentials: str | None = None,
-) -> list[dict[str, str]]:
+) -> list[GenCredentialsOut]:
     """
-    Query an OpenAI-compatible endpoint to list available models via /v1/models.
-    If saved_credentials is given, the endpoint/secret saved in the user account are used.
+    List the credentials visible to the current user
     """
     try:
-        if saved_credentials is not None:
-            saved_endpoint, credentials = get_orchestrator().users.resolve_credentials(
-                current_user.username, saved_credentials
-            )
-            endpoint = endpoint or saved_endpoint
-        if endpoint is None:
-            raise Exception("You should provide an endpoint")
-        return OpenAPI.list_models(endpoint, credentials)
+        return Generations.list_user_credentials(
+            get_orchestrator().db_manager, current_user.username
+        )
     except (HTTPException, APIError, OverflowError):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/generate/models", dependencies=[Depends(verified_user)])
-def list_project_generation_models(
+@router.post("/generate/credentials", dependencies=[Depends(verified_user)])
+def add_credentials(
     current_user: Annotated[UserInDBModel, Depends(verified_user)],
+    credentials: GenCredentialsInput,
+) -> GenCredentialsTestOut:
+    """
+    Save a user entry (an entry with the same name is replaced) and test it
+    """
+    try:
+        return Generations.save_user_credentials(
+            get_orchestrator().db_manager, current_user.username, credentials
+        )
+    except (HTTPException, APIError, OverflowError):
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/generate/credentials/test", dependencies=[Depends(verified_user)])
+def test_credentials(
+    current_user: Annotated[UserInDBModel, Depends(verified_user)],
+    credentials_id: int,
+) -> GenCredentialsTestOut:
+    """
+    Re-test an entry against its endpoint
+    """
+    try:
+        return Generations.test_user_credentials(
+            get_orchestrator().db_manager, credentials_id, current_user.username
+        )
+    except (HTTPException, APIError, OverflowError):
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/generate/credentials/delete", dependencies=[Depends(verified_user)])
+def delete_credentials(
+    current_user: Annotated[UserInDBModel, Depends(verified_user)],
+    credentials_id: int,
+) -> None:
+    """
+    Delete a user entry (instance entries are managed through generative.yaml).
+    Refused if a pipeline still uses it.
+    """
+    try:
+        Generations.delete_user_credentials(
+            get_orchestrator().db_manager, credentials_id, current_user.username
+        )
+    except (HTTPException, APIError, OverflowError):
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/generate/credentials/{credentials_id}/models", dependencies=[Depends(verified_user)])
+def list_endpoint_models(
+    current_user: Annotated[UserInDBModel, Depends(verified_user)],
+    credentials_id: int = Path(ge=0),
+) -> list[str]:
+    """
+    List the models available with a credentials entry
+    """
+    try:
+        return Generations.models_for_credentials(
+            get_orchestrator().db_manager, credentials_id, current_user.username
+        )
+    except (HTTPException, APIError, OverflowError):
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/generate/postprocess/steps")
+def list_postprocess_steps() -> dict[str, dict]:
+    """
+    Available post-treatment steps available in the server
+    """
+    return {
+        name: params_model.model_json_schema()
+        for name, (function, params_model) in POSTPROCESS_STEPS.items()
+    }
+
+
+@router.get("/generate/pipelines", dependencies=[Depends(verified_user)])
+def list_pipelines(
     project: Annotated[Project, Depends(get_project)],
-) -> list[GenerationModel]:
+    current_user: Annotated[UserInDBModel, Depends(verified_user)],
+) -> list[GenPipelineOut]:
     """
-    Returns the list of the available GenAI models configure for a project
+    Pipelines of the project
     """
     test_rights(ProjectAction.GENERATE, current_user.username, project.name)
     try:
-        return project.generations.available_models(project.name)
+        return project.generations.available()
     except (HTTPException, APIError, OverflowError):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/generate/models", dependencies=[Depends(verified_user)])
-def add_project_generation_models(
+@router.post("/generate/pipelines", dependencies=[Depends(verified_user)])
+def add_pipeline(
     project: Annotated[Project, Depends(get_project)],
     current_user: Annotated[UserInDBModel, Depends(verified_user)],
-    model: GenerationCreationModel,
+    pipeline: GenPipelineCreate,
 ) -> int:
     """
-    Add a new GenAI model for the project
+    Create a new pipeline
     """
     test_rights(ProjectAction.UPDATE, current_user.username, project.name)
     try:
-        # resolve credentials saved in the user account, so the secret never transits by the client
-        if model.saved_credentials is not None:
-            endpoint, credentials = get_orchestrator().users.resolve_credentials(
-                current_user.username, model.saved_credentials
-            )
-            model.endpoint = model.endpoint or endpoint
-            model.credentials = credentials
-        return project.generations.add_model(project.name, model, current_user.username)
-    except (HTTPException, APIError, OverflowError):
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.delete(
-    "/generate/models/{model_id}",
-    dependencies=[Depends(verified_user)],
-)
-def delete_project_generation_models(
-    project: Annotated[Project, Depends(get_project)],
-    current_user: Annotated[UserInDBModel, Depends(verified_user)],
-    model_id: int = Path(ge=0),
-) -> None:
-    """
-    Delete a GenAI model from the project
-    """
-    test_rights(ProjectAction.UPDATE, current_user.username, project.name)
-    try:
-        project.generations.delete_model(project.name, model_id)
-    except (HTTPException, APIError, OverflowError):
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/generate/start", dependencies=[Depends(verified_user)])
-def postgenerate(
-    project: Annotated[Project, Depends(get_project)],
-    current_user: Annotated[UserInDBModel, Depends(verified_user)],
-    request: GenerationRequest,
-) -> None:
-    """
-    Launch a call to generate from a prompt
-    """
-
-    try:
-        project.generations.check_prompts(request.prompt, project.params.cols_context)
-        project.start_generation(request, current_user.username)
-        get_orchestrator().log_action(
-            current_user.username,
-            "START GENERATE",
-            project.params.project_slug,
+        schemes_kinds = {name: s.kind for name, s in project.schemes.available().items()}
+        pipeline_id = project.generations.add_pipeline(
+            pipeline, current_user.username, schemes_kinds, project.params.cols_context
         )
-        return None
-
+        get_orchestrator().log_action(
+            current_user.username, "CREATE GENERATIVE PIPELINE", project.name
+        )
+        return pipeline_id
     except (HTTPException, APIError, OverflowError):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/generate/elements", dependencies=[Depends(verified_user)])
-def getgenerate(
+@router.post("/generate/pipelines/delete", dependencies=[Depends(verified_user)])
+def delete_pipeline(
     project: Annotated[Project, Depends(get_project)],
     current_user: Annotated[UserInDBModel, Depends(verified_user)],
-    params: ExportGenerationsParams,
+    pipeline_id: int,
+) -> None:
+    """
+    Delete a pipeline, its runs and their output files
+    """
+    test_rights(ProjectAction.UPDATE, current_user.username, project.name)
+    try:
+        project.generations.delete_pipeline(pipeline_id)
+        get_orchestrator().log_action(
+            current_user.username, "DELETE GENERATIVE PIPELINE", project.name
+        )
+    except (HTTPException, APIError, OverflowError):
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def resolve_sampling(
+    project: Project, scheme_name: str | None, request_scheme: str | None
+) -> tuple[str, list[str] | None]:
+    """
+    The scheme used to sample elements, and the labels for post-treatment.
+    """
+    schemes = project.schemes.available()
+    if scheme_name is not None:
+        if scheme_name not in schemes:
+            raise Exception(f"Scheme {scheme_name} does not exist anymore")
+        return scheme_name, schemes[scheme_name].labels
+    sampling_scheme = request_scheme or next(iter(schemes), None)
+    if sampling_scheme is None or sampling_scheme not in schemes:
+        raise Exception("No scheme available to sample elements")
+    return sampling_scheme, None
+
+
+@router.post("/generate/pipelines/{pipeline_id}/sandbox", dependencies=[Depends(verified_user)])
+def sandbox_pipeline(
+    project: Annotated[Project, Depends(get_project)],
+    current_user: Annotated[UserInDBModel, Depends(verified_user)],
+    request: GenSandboxRequest,
+    pipeline_id: int = Path(ge=0),
+) -> GenSandboxOut:
+    """
+    Test a pipeline synchronously on a few sampled elements.
+    """
+    test_rights(ProjectAction.GENERATE, current_user.username, project.name)
+    try:
+        pipeline = project.generations.get_pipeline(pipeline_id)
+        sampling_scheme, labels = resolve_sampling(project, pipeline.scheme_name, request.scheme)
+        df = project.schemes.get_sample(
+            sampling_scheme,
+            min(request.n_elements, SANDBOX_MAX_ELEMENTS),
+            request.mode,
+            dataset=request.dataset,
+            random=True,
+        )
+        if len(df) == 0:
+            raise Exception("No elements available for this selection")
+        return project.generations.sandbox(pipeline_id, df, project.params.cols_context, labels)
+    except (HTTPException, APIError, OverflowError):
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/generate/postprocess/preview", dependencies=[Depends(verified_user)])
+def preview_postprocess(
+    project: Annotated[Project, Depends(get_project)],
+    current_user: Annotated[UserInDBModel, Depends(verified_user)],
+    request: PostprocessPreviewRequest,
+) -> GenSandboxOut:
+    """
+    Apply a candidate list of steps on raw outputs already generated
+    """
+    test_rights(ProjectAction.GENERATE, current_user.username, project.name)
+    try:
+        labels = None
+        if request.scheme_name is not None:
+            schemes = project.schemes.available()
+            if request.scheme_name not in schemes:
+                raise Exception(f"Scheme {request.scheme_name} does not exist")
+            labels = schemes[request.scheme_name].labels
+        return Generations.preview_postprocess(request.steps, request.raws, labels)
+    except (HTTPException, APIError, OverflowError):
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/generate/pipelines/{pipeline_id}/start", dependencies=[Depends(verified_user)])
+def start_run(
+    project: Annotated[Project, Depends(get_project)],
+    current_user: Annotated[UserInDBModel, Depends(verified_user)],
+    request: GenRunRequest,
+    pipeline_id: int = Path(ge=0),
+) -> int:
+    """
+    Launch a pipeline on a dataset sample
+    """
+    test_rights(ProjectAction.GENERATE, current_user.username, project.name)
+    try:
+        pipeline = project.generations.get_pipeline(pipeline_id)
+        sampling_scheme, labels = resolve_sampling(project, pipeline.scheme_name, request.scheme)
+        run_id = project.start_generation(
+            pipeline_id, request, sampling_scheme, labels, current_user.username
+        )
+        get_orchestrator().log_action(current_user.username, "START GENERATION RUN", project.name)
+        return run_id
+    except (HTTPException, APIError, OverflowError):
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/generate/runs", dependencies=[Depends(verified_user)])
+def list_runs(
+    project: Annotated[Project, Depends(get_project)],
+    current_user: Annotated[UserInDBModel, Depends(verified_user)],
+) -> list[GenRunOut]:
+    """
+    Runs of the project with their status and NA counts
+    """
+    test_rights(ProjectAction.GENERATE, current_user.username, project.name)
+    try:
+        return project.generations.runs()
+    except (HTTPException, APIError, OverflowError):
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/generate/runs/{run_id}/elements", dependencies=[Depends(verified_user)])
+def get_run_elements(
+    project: Annotated[Project, Depends(get_project)],
+    current_user: Annotated[UserInDBModel, Depends(verified_user)],
+    run_id: int = Path(ge=0),
+    limit: int = 100,
+    offset: int = 0,
 ) -> TableOutModel:
     """
-    Get elements generated
+    Paginated outputs of a run
     """
     test_rights(ProjectAction.GENERATE, current_user.username, project.name)
     try:
-        table = project.get_generated(project.name, current_user.username, params)
-        return TableOutModel(items=table.to_dict(orient="records"), total=len(table))
-    except (HTTPException, APIError, OverflowError):
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="Error in loading generated data" + str(e))
-
-
-@router.post("/generate/elements/drop", dependencies=[Depends(verified_user)])
-def dropgenerate(
-    project: Annotated[Project, Depends(get_project)],
-    current_user: Annotated[UserInDBModel, Depends(verified_user)],
-) -> None:
-    """
-    Drop all elements from prediction for a user
-    """
-    test_rights(ProjectAction.GENERATE, current_user.username, project.name)
-    try:
-        project.generations.drop_generated(project.name, current_user.username)
+        return project.generations.run_table(run_id, limit=limit, offset=offset)
     except (HTTPException, APIError, OverflowError):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/generate/prompts", dependencies=[Depends(verified_user)])
-def get_prompts(
+@router.post("/generate/runs/delete", dependencies=[Depends(verified_user)])
+def delete_run(
     project: Annotated[Project, Depends(get_project)],
     current_user: Annotated[UserInDBModel, Depends(verified_user)],
-) -> list[PromptModel]:
+    run_id: int,
+) -> None:
     """
-    Get the list of prompts for the project
+    Delete a run and its output file
     """
     test_rights(ProjectAction.GENERATE, current_user.username, project.name)
     try:
-        return project.generations.get_prompts(project.name)
-    except (HTTPException, APIError, OverflowError):
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/generate/prompts/add", dependencies=[Depends(verified_user)])
-def add_prompt(
-    project: Annotated[Project, Depends(get_project)],
-    current_user: Annotated[UserInDBModel, Depends(verified_user)],
-    prompt: PromptInputModel,
-) -> None:
-    """
-    Add a prompt to the project
-    """
-    test_rights(ProjectAction.GENERATE, current_user.username, project.name)
-    try:
-        project.generations.save_prompt(prompt, current_user.username, project.name)
-    except (HTTPException, APIError, OverflowError):
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/generate/prompts/delete", dependencies=[Depends(verified_user)])
-def delete_prompt(
-    project: Annotated[Project, Depends(get_project)],
-    current_user: Annotated[UserInDBModel, Depends(verified_user)],
-    prompt_id: str,
-) -> None:
-    """
-    Delete a prompt from the project
-    """
-    test_rights(ProjectAction.UPDATE, current_user.username, project.name)
-    try:
-        project.generations.delete_prompt(int(prompt_id))
+        project.generations.delete_run(run_id)
     except (HTTPException, APIError, OverflowError):
         raise
     except Exception as e:

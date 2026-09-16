@@ -62,11 +62,8 @@ class Projects(Base):
     features: Mapped[list["Features"]] = relationship(
         "Features", cascade="all,delete,delete-orphan", back_populates="project"
     )
-    gen_models: Mapped[list["GenModels"]] = relationship(
-        "GenModels", cascade="all, delete-orphan", back_populates="project"
-    )
-    prompts: Mapped[list["Prompts"]] = relationship(
-        "Prompts", cascade="all,delete,delete-orphan", back_populates="project"
+    gen_pipelines: Mapped[list["GenPipelines"]] = relationship(
+        "GenPipelines", cascade="all,delete,delete-orphan", back_populates="project"
     )
 
 
@@ -184,48 +181,100 @@ class Tokens(Base):
     time_revoked: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True))
 
 
-class GenModels(Base):
-    __tablename__ = "gen_models"
+class GenCredentials(Base):
+    """
+    Endpoint/key pair for an OpenAI-compatible API.
+
+    kind "user": saved by a user, visible only to them.
+    kind "instance": synced from generative.yaml at startup (user_name is
+    NULL), visible to every user, managed only through the yaml.
+    """
+
+    __tablename__ = "gen_credentials"
     __table_args__ = (
         UniqueConstraint(
-            "project_slug",
+            "user_name",
             "name",
-            name="fkc_project_slug_name",
+            name="uq_gen_credentials_user_name_name",
         ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    time: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    kind: Mapped[str]  # "user" | "instance"
+    user_name: Mapped[str | None] = mapped_column(ForeignKey("users.user_name", ondelete="CASCADE"))
+    name: Mapped[str]
+    endpoint: Mapped[str]
+    api_key: Mapped[str]  # encrypted with config.secret_key
+    # optional list of model slugs suggested by the instance yaml
+    models: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    last_tested: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class GenPipelines(Base):
+    """
+    A generative pipeline: credentials + model + generation parameters +
+    prompt template + ordered post-treatment steps. The functional
+    equivalent of a fine-tuned model for a scheme.
+    """
+
+    __tablename__ = "gen_pipelines"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_slug",
+            "name",
+            name="uq_gen_pipelines_project_slug_name",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    time: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
     project_slug: Mapped[str] = mapped_column(
         ForeignKey("projects.project_slug", ondelete="CASCADE")
     )
+    project: Mapped[Projects] = relationship(back_populates="gen_pipelines")
     user_name: Mapped[str] = mapped_column(ForeignKey("users.user_name"))
-    project: Mapped[Projects] = relationship(back_populates="gen_models")
-    slug: Mapped[str]
+    user: Mapped[Users] = relationship()
     name: Mapped[str]
-    api: Mapped[str]
-    endpoint: Mapped[str | None]
-    credentials: Mapped[str | None]
+    # NULL = free generation (no matching to a scheme)
+    scheme_name: Mapped[str | None]
+    credentials_id: Mapped[int] = mapped_column(ForeignKey("gen_credentials.id"))
+    credentials: Mapped[GenCredentials] = relationship()
+    model_slug: Mapped[str]
+    parameters: Mapped[dict[str, Any]]  # GenerationParams
+    prompt: Mapped[str] = mapped_column(Text)
+    postprocess: Mapped[dict[str, Any]]  # {"steps": [PostprocessStep, ...]}
 
 
 class Generations(Base):
+    """
+    One row per run of a pipeline on a dataset. Raw outputs are stored in a
+    parquet file under the project directory, not in the database.
+    """
+
     __tablename__ = "generations"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     time: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+    pipeline_id: Mapped[int] = mapped_column(ForeignKey("gen_pipelines.id", ondelete="CASCADE"))
+    pipeline: Mapped[GenPipelines] = relationship()
     user_name: Mapped[str] = mapped_column(ForeignKey("users.user_name"))
     user: Mapped[Users] = relationship()
     project_slug: Mapped[str] = mapped_column(
         ForeignKey("projects.project_slug", ondelete="CASCADE")
     )
     project: Mapped[Projects] = relationship(back_populates="generations")
-    element_id: Mapped[str]
-    model_id: Mapped[int] = mapped_column(ForeignKey("gen_models.id"))
-    model: Mapped[GenModels] = relationship()
-    prompt: Mapped[str]
-    answer: Mapped[str]
-    batch: Mapped[str | None]
+    dataset: Mapped[str]  # "train" | "all"
+    mode: Mapped[str]  # "all" | "tagged" | "untagged"
+    n_elements: Mapped[int]
+    status: Mapped[str]  # "running" | "done" | "error" | "interrupted"
+    path: Mapped[str]  # parquet file with the outputs
 
 
 class Features(Base):
@@ -280,28 +329,6 @@ class Models(Base):
     status: Mapped[str]
     statistics: Mapped[str | None]
     test: Mapped[str | None]
-
-
-class Prompts(Base):
-    __tablename__ = "prompts"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    time: Mapped[datetime.datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
-    time_modified: Mapped[datetime.datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.current_timestamp(),
-        onupdate=func.current_timestamp(),
-    )
-    user_name: Mapped[str] = mapped_column(ForeignKey("users.user_name"))
-    user: Mapped[Users] = relationship()
-    project_slug: Mapped[str] = mapped_column(
-        ForeignKey("projects.project_slug", ondelete="CASCADE")
-    )
-    project: Mapped[Projects] = relationship(back_populates="prompts")
-    value: Mapped[str]
-    parameters: Mapped[dict[str, Any]]
 
 
 class Messages(Base):

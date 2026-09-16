@@ -1,560 +1,454 @@
-import { FC, useEffect, useState } from 'react';
+import { FC, useEffect, useMemo, useState } from 'react';
 import { Modal } from 'react-bootstrap';
 import DataGrid, { Column } from 'react-data-grid';
-import { FaPlusCircle, FaRegSave, FaRegTrashAlt } from 'react-icons/fa';
-import { HiOutlineQuestionMarkCircle, HiOutlineSparkles } from 'react-icons/hi';
+import { FaDownload, FaPlusCircle, FaRegTrashAlt } from 'react-icons/fa';
+import { HiOutlineSparkles } from 'react-icons/hi';
 import { useParams } from 'react-router-dom';
-import Select from 'react-select';
 import PulseLoader from 'react-spinners/PulseLoader';
-import { Tooltip } from 'react-tooltip';
-import { GenModelSetupForm } from '../components/forms/GenModelSetupForm';
+import { GenPipelineForm } from '../components/forms/GenPipelineForm';
 import { ProjectPageLayout } from '../components/layout/ProjectPageLayout';
 import { ModelsPillDisplay } from '../components/ModelsPillDisplay';
 import {
-  createGenModel,
-  deleteGenModel,
-  getProjectGenModels,
-  useDeletePrompts,
-  useDropGeneratedElements,
-  useGenerate,
-  useGeneratedElements,
+  useDeleteGenPipeline,
+  useDeleteGenRun,
+  useGenPipelines,
+  useGenRunElements,
+  useGenRuns,
   useGetGenerationsFile,
-  useGetPrompts,
-  useSavePrompts,
+  useSandboxGenPipeline,
+  useStartGenRun,
   useStopProcesses,
 } from '../core/api';
-import { useNotifications } from '../core/notifications';
 import { useAppContext } from '../core/useAppContext';
 import { useAuth } from '../core/useAuth';
-import { GenModel, SupportedAPI } from '../types';
+import { GeneratedRow, GenPipeline } from '../types';
 
-interface Row {
-  time: string;
-  batch: string;
-  prompt: string;
-  answer: string;
-  endpoint: string;
-  model: string;
-  model_name: string;
-  [key: string]: string;
+interface GeneratedTableRow {
+  element_id: string;
+  predicted?: string | null;
+  raw: string;
+  error?: string | null;
+  [key: string]: unknown;
 }
 
-const buildColumns = (idColumnName: string): readonly Column<Row>[] => [
-  {
-    name: 'Time',
-    key: 'time',
-    resizable: true,
-    width: '10%',
-  },
-  {
-    name: idColumnName.replace('dataset_', ''),
-    key: idColumnName,
-    resizable: true,
-    width: '10%',
-  },
-  {
-    name: 'Batch',
-    key: 'batch',
-    resizable: true,
-    width: '10%',
-  },
-  {
-    name: 'Answer',
-    key: 'answer',
-    resizable: true,
-    width: '30%',
-    renderCell: ({ row }) => (
-      <div
-        style={{
-          maxHeight: '100%',
-          width: '100%',
-          whiteSpace: 'wrap',
-          overflowY: 'auto',
-          userSelect: 'none',
-        }}
-      >
-        {row.answer}
-      </div>
-    ),
-  },
+const scrollableCell = (content: string | null | undefined) => (
+  <div style={{ maxHeight: '100%', whiteSpace: 'wrap', overflowY: 'auto', userSelect: 'none' }}>
+    {content}
+  </div>
+);
 
+const generatedColumns: readonly Column<GeneratedTableRow>[] = [
+  { name: 'Element', key: 'element_id', resizable: true, width: '12%' },
   {
-    name: 'Prompt',
-    key: 'prompt',
-    resizable: true,
-    width: '25%',
-    renderCell: ({ row }) => (
-      <div
-        style={{
-          maxHeight: '100%',
-          width: '100%',
-          whiteSpace: 'wrap',
-          overflowY: 'auto',
-          userSelect: 'none',
-        }}
-      >
-        {row.prompt}
-      </div>
-    ),
-  },
-
-  {
-    name: 'Model name',
-    key: 'model_name',
+    name: 'Predicted',
+    key: 'predicted',
     resizable: true,
     width: '15%',
-    renderCell: ({ row }) => (
-      <div
-        style={{
-          width: '100%',
-          whiteSpace: 'nowrap',
-          overflowX: 'auto',
-          userSelect: 'none',
-        }}
-      >
-        {row.model_name}
-      </div>
-    ),
+    renderCell: ({ row }) =>
+      row.predicted === null || row.predicted === undefined ? (
+        <span className="badge bg-warning text-dark">NA</span>
+      ) : (
+        scrollableCell(row.predicted)
+      ),
+  },
+  {
+    name: 'Raw output',
+    key: 'raw',
+    resizable: true,
+    width: '40%',
+    renderCell: ({ row }) => scrollableCell(row.raw),
+  },
+  {
+    name: 'Error',
+    key: 'error',
+    resizable: true,
+    renderCell: ({ row }) => scrollableCell(row.error),
   },
 ];
 
+/**
+ * Panel to build and use generative pipelines (issue #1100):
+ * pipeline pills, creation modal, sandbox, runs on the dataset.
+ */
 export const GenPage: FC = () => {
-  //------------------------------------
-  // hooks for the app
   const { projectName } = useParams() as { projectName: string };
   const { authenticatedUser } = useAuth();
   const {
-    appContext: { generateConfig, currentScheme, currentProject },
-    setAppContext,
+    appContext: { currentProject },
   } = useAppContext();
-  const { notify } = useNotifications();
 
-  //------------------------------------
-  // states of the page
-  const [currentModel, setCurrentModel] = useState<string | null>(null);
-  const [configuredModels, setConfiguredModels] = useState<Array<GenModel & { api: string }>>([]);
-  const [showFormAddModel, setShowFormAddModel] = useState<boolean>(false);
-  const [isGenerating, setIsGenerating] = useState<boolean>(false);
-  const [filters, setFilters] = useState<string[]>([]);
-  const [showRecordPromptForm, setShowRecordPromptForm] = useState<boolean>(false);
-  const [promptName, setPromptName] = useState<string>('');
+  // pipelines
+  const [pipelinesRefresh, setPipelinesRefresh] = useState(0);
+  const { pipelines } = useGenPipelines(projectName, pipelinesRefresh);
+  const [currentPipelineName, setCurrentPipelineName] = useState<string | null>(null);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const { deleteGenPipeline } = useDeleteGenPipeline(projectName);
 
-  //------------------------------------
-  // call api
-  // to post generation
-  const { generate } = useGenerate(
-    projectName || null,
-    currentScheme || null,
-    generateConfig.selectedModel?.id || null,
-    generateConfig.n_batch || null,
-    generateConfig.prompt || null,
-    generateConfig.selectionMode || null,
-    generateConfig.dataset || 'train',
-    generateConfig.token,
-    promptName,
-    generateConfig.n_workers || 1,
-  );
+  // sandbox
+  const { sandboxGenPipeline } = useSandboxGenPipeline(projectName);
+  const [sandboxN, setSandboxN] = useState(5);
+  const [sandboxRows, setSandboxRows] = useState<GeneratedRow[] | null>(null);
+  const [sandboxNa, setSandboxNa] = useState<number>(0);
+  const [sandboxLoading, setSandboxLoading] = useState(false);
 
-  // to stop generation
+  // runs
+  const { startGenRun } = useStartGenRun(projectName);
+  const [runsRefresh, setRunsRefresh] = useState(0);
+  const { genRuns } = useGenRuns(projectName, runsRefresh);
+  const { deleteGenRun } = useDeleteGenRun(projectName);
+  const { getGenerationsFile } = useGetGenerationsFile(projectName);
   const { stopProcesses } = useStopProcesses(projectName);
+  const [runMode, setRunMode] = useState('all');
+  const [runN, setRunN] = useState<string>('');
+  const [runWorkers, setRunWorkers] = useState(1);
+  const [viewedRunId, setViewedRunId] = useState<number | null>(null);
+  const { runElements } = useGenRunElements(projectName, viewedRunId, 500);
 
-  // to get a sample of elements
-  const { generated, reFetchGenerated } = useGeneratedElements(
-    projectName || null,
-    100,
-    filters,
-    isGenerating,
+  const currentPipeline: GenPipeline | undefined = useMemo(
+    () => (pipelines || []).find((p) => p.name === currentPipelineName),
+    [pipelines, currentPipelineName],
   );
 
-  // to download a batch of elements
-  const { getGenerationsFile } = useGetGenerationsFile(projectName || null, filters);
-
-  // to drop generated elements
-  const dropGeneratedElements = useDropGeneratedElements(
-    projectName || null,
-    authenticatedUser?.username || null,
+  const schemes = useMemo(
+    () =>
+      Object.entries(currentProject?.schemes.available || {}).map(([name, scheme]) => ({
+        name,
+        kind: (scheme as { kind?: string }).kind || 'multiclass',
+      })),
+    [currentProject],
   );
 
-  // to get/save/delete prompts
-  const { prompts, reFetchPrompts } = useGetPrompts(projectName || null);
-  const savePrompts = useSavePrompts(projectName || null);
-  const deletePrompts = useDeletePrompts(projectName || null);
+  // generation in progress for the current user (from the project state)
+  const training = authenticatedUser?.username
+    ? currentProject?.generations.training?.[authenticatedUser.username]
+    : undefined;
+  const isGenerating = training !== undefined;
 
-  // check if the user is generating and change the state
+  // refresh the runs table when a generation ends
   useEffect(() => {
-    setIsGenerating(
-      authenticatedUser?.username !== undefined &&
-        currentProject?.generations.training[authenticatedUser?.username] != undefined,
-    );
-  }, [authenticatedUser, currentProject]);
+    if (!isGenerating) setRunsRefresh((k) => k + 1);
+  }, [isGenerating]);
 
-  // get existing models from the API
-  useEffect(() => {
-    const fetchModels = async () => {
-      const models = await getProjectGenModels(projectName);
-      setConfiguredModels(models);
-    };
-    fetchModels();
-  }, [projectName, currentModel]);
-
-  // function to add a model
-  const addModel = async (model: Omit<GenModel & { api: SupportedAPI }, 'id'>) => {
-    const id = await createGenModel(projectName, model);
-    notify({ type: 'success', message: 'Model added.' });
-    setConfiguredModels([...configuredModels, { ...model, id }]);
-    setShowFormAddModel(false);
-  };
-
-  // update the model in the configGeneration
-  useEffect(() => {
-    if (currentModel) {
-      const model = configuredModels.filter((m) => m.name === currentModel)[0];
-      setAppContext((prev) => ({
-        ...prev,
-        generateConfig: { ...prev.generateConfig, selectedModel: model },
-      }));
-    }
-  }, [currentModel, configuredModels, setAppContext]);
-
-  // function to delete a model
-  const deleteModel = async (name: string) => {
-    const id = configuredModels.filter((m) => m.name === name)[0].id;
-    await deleteGenModel(projectName, id).then(() => {
-      setCurrentModel(null);
-      notify({ type: 'success', message: 'Model removed.' });
-      return true;
+  const runSandbox = async () => {
+    if (!currentPipeline) return;
+    setSandboxLoading(true);
+    setSandboxRows(null);
+    const result = await sandboxGenPipeline(currentPipeline.id, {
+      n_elements: sandboxN,
+      mode: 'all',
+      dataset: 'train',
     });
+    setSandboxLoading(false);
+    if (result) {
+      setSandboxRows(result.rows);
+      setSandboxNa(result.n_na);
+    }
   };
 
-  // function to add a context tag
-  const addContextTagToPrompt = (context: string) => {
-    setAppContext((prev) => ({
-      ...prev,
-      generateConfig: {
-        ...generateConfig,
-        prompt: (generateConfig.prompt =
-          (generateConfig.prompt ? generateConfig.prompt : '') + '[[' + context + ']]'),
-      },
-    }));
+  const launchRun = async () => {
+    if (!currentPipeline) return;
+    const started = await startGenRun(currentPipeline.id, {
+      dataset: 'train',
+      mode: runMode,
+      n_elements: runN === '' ? null : Number(runN),
+      n_workers: runWorkers,
+    });
+    if (started !== null) setRunsRefresh((k) => k + 1);
   };
-  const addContextButtons = (contextColumns: string[] | undefined) => {
-    let listOfTags: string[] = ['TEXT'];
-    if (contextColumns) listOfTags = listOfTags.concat(contextColumns);
-
-    return (
-      <div id="button-context-wrapper">
-        <a className="context-tag-help">
-          <HiOutlineQuestionMarkCircle />
-        </a>
-        <Tooltip anchorSelect=".context-tag-help" place="top" style={{ zIndex: 99 }}>
-          Add contextual information to your prompt by clicking on the tags, or by typing [[column
-          name]]
-        </Tooltip>
-        {listOfTags.map((context) => (
-          <button
-            className="context-link"
-            id="context-button"
-            key={'add-context-button-' + context}
-            onClick={() => addContextTagToPrompt(context)}
-          >
-            {context}
-          </button>
-        ))}
-      </div>
-    );
-  };
-
-  console.log(promptName);
 
   return (
     <ProjectPageLayout projectName={projectName} currentAction="generate">
-      <div className="alert alert-info my-3" role="alert">
-        This panel is still under construction. Have comments? Send them our way.
-      </div>
       <div className="container-fluid mt-3">
-        <div className="explanations">Use external LLM models for generation</div>
+        <div className="explanations">
+          Build generative pipelines: a model + a prompt + post-treatments turning raw outputs into
+          labels of a scheme (or free text). Test in the sandbox, then run on the dataset.
+        </div>
 
         <Modal
-          show={showFormAddModel}
-          id="createmodel-modal"
+          show={showCreateModal}
+          id="createpipeline-modal"
           size="xl"
-          onHide={() => setShowFormAddModel(false)}
+          onHide={() => setShowCreateModal(false)}
         >
           <Modal.Header closeButton>
-            <Modal.Title>Add a new generative model</Modal.Title>
+            <Modal.Title>New generative pipeline</Modal.Title>
           </Modal.Header>
           <Modal.Body>
-            <GenModelSetupForm add={addModel} cancel={() => setShowFormAddModel(false)} />
+            <GenPipelineForm
+              projectSlug={projectName}
+              schemes={schemes}
+              contextColumns={currentProject?.params.cols_context || []}
+              onCreated={() => {
+                setShowCreateModal(false);
+                setPipelinesRefresh((k) => k + 1);
+              }}
+              cancel={() => setShowCreateModal(false)}
+            />
           </Modal.Body>
         </Modal>
+
         <ModelsPillDisplay
-          modelNames={configuredModels.map((m) => m.name)}
-          currentModelName={currentModel}
-          setCurrentModelName={setCurrentModel}
-          deleteModelFunction={deleteModel}
+          modelNames={(pipelines || []).map((p) => p.name)}
+          currentModelName={currentPipelineName}
+          setCurrentModelName={setCurrentPipelineName}
+          deleteModelFunction={async (name) => {
+            const pipeline = (pipelines || []).find((p) => p.name === name);
+            if (pipeline && (await deleteGenPipeline(pipeline.id))) {
+              setCurrentPipelineName(null);
+              setPipelinesRefresh((k) => k + 1);
+              setRunsRefresh((k) => k + 1);
+            }
+          }}
         >
           <button
-            onClick={() => setShowFormAddModel(true)}
+            onClick={() => setShowCreateModal(true)}
             className="model-pill create-pill"
             id="create-new"
           >
-            <FaPlusCircle size={20} /> Add new model
+            <FaPlusCircle size={20} /> New pipeline
           </button>
         </ModelsPillDisplay>
-        <hr className="my-3" />
 
-        {currentModel && (
+        {currentPipeline && (
           <>
-            <div className="row mt-3">
-              <div className="d-flex col-6">
-                <div className="me-3">
-                  <label htmlFor="batch">Elements</label>
-                  <input
-                    type="number"
-                    id="batch"
-                    className="form-control"
-                    placeholder=" "
-                    value={generateConfig.n_batch}
-                    onChange={(e) => {
-                      setAppContext((prev) => ({
-                        ...prev,
-                        generateConfig: { ...generateConfig, n_batch: Number(e.target.value) },
-                      }));
-                    }}
-                  />
+            <div className="card my-3">
+              <div className="card-body">
+                <h5 className="card-title">{currentPipeline.name}</h5>
+                <div className="small">
+                  <b>Model</b> {currentPipeline.model_slug} <b>via</b>{' '}
+                  {currentPipeline.credentials_name} ({currentPipeline.endpoint}) — <b>Scheme</b>{' '}
+                  {currentPipeline.scheme_name || <em>free generation (no scheme)</em>}
                 </div>
-                <div>
-                  <label htmlFor="dataset">Dataset </label>
-                  <select
-                    id="dataset"
-                    className="form-select"
-                    value={generateConfig.dataset || 'train'}
-                    onChange={(e) => {
-                      setAppContext((prev) => ({
-                        ...prev,
-                        generateConfig: { ...generateConfig, dataset: e.target.value },
-                      }));
-                    }}
-                  >
-                    <option key="train">train</option>
-                    {currentProject?.params.valid && <option key="valid">valid</option>}
-                    {currentProject?.params.test && <option key="test">test</option>}
-                  </select>
+                <div className="small mt-1">
+                  <b>Parameters</b>{' '}
+                  {Object.entries(currentPipeline.parameters || {})
+                    .filter(([, value]) => value !== null && value !== undefined)
+                    .map(([key, value]) => `${key}=${value}`)
+                    .join(', ') || 'provider defaults'}
                 </div>
-                <div className="ms-3">
-                  <label htmlFor="mode">From </label>
-                  <select
-                    id="mode"
-                    className="form-select"
-                    onChange={(e) => {
-                      setAppContext((prev) => ({
-                        ...prev,
-                        generateConfig: { ...generateConfig, selectionMode: e.target.value },
-                      }));
-                    }}
-                  >
-                    <option key="all">all</option>
-                    <option key="untagged">untagged</option>
-                  </select>
+                <div className="small mt-1">
+                  <b>Post-treatment</b>{' '}
+                  {currentPipeline.postprocess.length > 0
+                    ? currentPipeline.postprocess.map((s) => s.name).join(' → ')
+                    : 'none'}
                 </div>
+                <details className="mt-1">
+                  <summary className="small">Prompt</summary>
+                  <pre className="small bg-light p-2 mt-1">{currentPipeline.prompt}</pre>
+                </details>
               </div>
+            </div>
 
-              <div className="mt-2">
-                <label htmlFor="prompt" style={{ zIndex: 0 }}>
-                  Prompt
-                </label>
-                <div className="d-flex align-items-center my-2" style={{ zIndex: 1 }}>
-                  <Select
-                    id="select-prompt"
-                    options={(prompts || []).map((e) => ({
-                      value: e.id as unknown as string,
-                      label: e.parameters.name as unknown as string,
-                      text: e.text as unknown as string,
-                    }))}
-                    isClearable
-                    placeholder="Saved prompts"
-                    onChange={(e) => {
-                      setAppContext((prev) => ({
-                        ...prev,
-                        generateConfig: {
-                          ...generateConfig,
-                          prompt: e?.text || '',
-                          promptId: e?.value,
-                        },
-                      }));
-                      setPromptName(e?.label || '');
-                    }}
-                  />
-                  <button
-                    onClick={() => {
-                      setShowRecordPromptForm(true);
-                    }}
-                    className="btn btn-link p-0 savebutton ms-2"
-                    title="Save current prompt"
-                  >
-                    <FaRegSave size={20} />
-                  </button>
-                  <button
-                    onClick={() => {
-                      deletePrompts(generateConfig.promptId || null);
-                      reFetchPrompts();
-                    }}
-                    className="btn btn-link p-0"
-                    title="Delete saved prompt"
-                  >
-                    <FaRegTrashAlt size={20} />
-                  </button>
-                </div>
-                <textarea
-                  id="prompt"
-                  rows={5}
-                  placeholder="Enter your prompt"
-                  className="form-control"
-                  style={{ height: '200px', backgroundColor: '#fff0fe' }}
-                  value={generateConfig.prompt || ''}
-                  onChange={(e) => {
-                    setAppContext((prev) => ({
-                      ...prev,
-                      generateConfig: { ...generateConfig, prompt: e.target.value },
-                    }));
-                  }}
-                />
-                {/* <span style={{ color: 'gray' }}>
-                  The request will send the data to an external API. Be sure you can trust the API
-                  provider with respect to the level of privacy you need for you data
-                </span> */}
-              </div>
-
-              {addContextButtons(currentProject?.params.cols_context)}
-
-              <div className="col-12 text-center">
-                {isGenerating ? (
+            <div className="card my-3">
+              <div className="card-body">
+                <h5 className="card-title">
+                  <HiOutlineSparkles /> Sandbox
+                </h5>
+                <div className="d-flex align-items-end gap-2 mb-2">
                   <div>
-                    <button
-                      className="btn btn-secondary mt-3"
-                      onClick={() => stopProcesses('generation')}
-                    >
-                      <PulseLoader className="mx-2" />
-                      Stop (
-                      {String(
-                        currentProject?.generations?.training?.[authenticatedUser?.username || '']
-                          ?.progress ?? 0,
-                      )}
-                      % )
+                    <label className="form-label mb-0" htmlFor="sandbox-n">
+                      Elements
+                    </label>
+                    <input
+                      id="sandbox-n"
+                      type="number"
+                      min={1}
+                      max={10}
+                      className="form-control"
+                      style={{ width: '6em' }}
+                      value={sandboxN}
+                      onChange={(e) => setSandboxN(Number(e.target.value))}
+                    />
+                  </div>
+                  <button
+                    className="btn btn-primary"
+                    onClick={runSandbox}
+                    disabled={sandboxLoading}
+                  >
+                    {sandboxLoading ? <PulseLoader size={8} color="white" /> : 'Test on a sample'}
+                  </button>
+                  {sandboxRows && (
+                    <span className="badge bg-warning text-dark mb-2">
+                      {sandboxNa} / {sandboxRows.length} NA
+                    </span>
+                  )}
+                </div>
+                {sandboxRows && (
+                  <DataGrid
+                    className="fill-grid"
+                    columns={generatedColumns}
+                    rows={sandboxRows as unknown as GeneratedTableRow[]}
+                    rowHeight={80}
+                  />
+                )}
+              </div>
+            </div>
+
+            <div className="card my-3">
+              <div className="card-body">
+                <h5 className="card-title">Run on the dataset</h5>
+                {isGenerating ? (
+                  <div className="d-flex align-items-center gap-3">
+                    <PulseLoader />
+                    <span>
+                      Generating with <b>{training?.pipeline_name}</b> — progress{' '}
+                      {training?.progress ?? 0}%
+                    </span>
+                    <button className="btn btn-danger" onClick={() => stopProcesses('generation')}>
+                      Stop
                     </button>
                   </div>
                 ) : (
-                  <div className="d-flex align-items-end justify-content-center gap-3 mt-3">
+                  <div className="d-flex align-items-end gap-2 flex-wrap">
                     <div>
-                      <label htmlFor="n_workers" className="form-label mb-1">
-                        Workers
+                      <label className="form-label mb-0" htmlFor="run-mode">
+                        Elements
+                      </label>
+                      <select
+                        id="run-mode"
+                        className="form-select"
+                        value={runMode}
+                        onChange={(e) => setRunMode(e.target.value)}
+                      >
+                        <option value="all">all</option>
+                        <option value="tagged">tagged</option>
+                        <option value="untagged">untagged</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="form-label mb-0" htmlFor="run-n">
+                        Limit (empty = all)
                       </label>
                       <input
+                        id="run-n"
                         type="number"
-                        id="n_workers"
-                        className="form-control"
                         min={1}
-                        style={{ width: '6rem' }}
-                        value={generateConfig.n_workers ?? 1}
-                        title="Number of concurrent API calls (1 = sequential)"
-                        onChange={(e) => {
-                          const v = Math.max(1, Number(e.target.value) || 1);
-                          setAppContext((prev) => ({
-                            ...prev,
-                            generateConfig: { ...generateConfig, n_workers: v },
-                          }));
-                        }}
+                        className="form-control"
+                        style={{ width: '8em' }}
+                        value={runN}
+                        onChange={(e) => setRunN(e.target.value)}
                       />
                     </div>
-                    <button
-                      className="btn btn-secondary generatebutton"
-                      onClick={() => {
-                        generate();
-                      }}
-                    >
-                      <HiOutlineSparkles size={30} /> Generate
+                    <div>
+                      <label className="form-label mb-0" htmlFor="run-workers">
+                        Parallel calls
+                      </label>
+                      <input
+                        id="run-workers"
+                        type="number"
+                        min={1}
+                        max={10}
+                        className="form-control"
+                        style={{ width: '6em' }}
+                        value={runWorkers}
+                        onChange={(e) => setRunWorkers(Number(e.target.value))}
+                      />
+                    </div>
+                    <button className="btn btn-primary" onClick={launchRun}>
+                      Start generation
                     </button>
                   </div>
                 )}
               </div>
             </div>
-            <hr />
-            <div className="col-12 d-flex align-items-center justify-content-between">
-              <h4 className="subsection">Results</h4>
-              <div>
-                <button className="btn btn-primary mx-2" onClick={() => getGenerationsFile()}>
-                  Download all
-                </button>
-                <button
-                  className="btn btn-primary mx-2"
-                  onClick={() => {
-                    dropGeneratedElements().then(() => reFetchGenerated());
-                  }}
-                >
-                  Clear all
-                </button>
-              </div>
-            </div>
-            <Select
-              placeholder="Add treatment for the generated columns"
-              className="m-3"
-              options={[
-                { value: 'remove_punct', label: 'Remove punctuation' },
-                { value: 'remove_spaces', label: 'Remove spaces' },
-                { value: 'lowercase', label: 'Lowercase' },
-                { value: 'strip', label: 'Strip' },
-                { value: 'replace_accents', label: 'Replace accents characters' },
-              ]}
-              isMulti
-              onChange={(e) => {
-                setFilters(e.map((f) => f.value));
-              }}
-            />
-            <div className="explanations">Last 100 generated content for the current user</div>
-            <DataGrid
-              className="fill-grid rdg-light"
-              style={{ backgroundColor: 'white' }}
-              columns={buildColumns(
-                (currentProject?.params.col_id || 'id').replace(/^dataset_/, ''),
-              )}
-              rows={(generated as unknown as Row[]) || []}
-              rowHeight={80}
-            />
           </>
         )}
-      </div>
-      <Modal show={showRecordPromptForm} onHide={() => setShowRecordPromptForm(false)}>
-        <Modal.Header>
-          <Modal.Title>Record the current prompt</Modal.Title>
-        </Modal.Header>
-        <Modal.Body>
-          <div className="d-flex align-items-center">
-            <input
-              type="text"
-              id="promptname"
-              className="form-control"
-              value={promptName}
-              placeholder="Prompt name to save"
-              onChange={(e) => setPromptName(e.target.value)}
-            />
-            <button
-              className="btn btn-primary mx-2 savebutton"
-              onClick={() => {
-                if (!promptName) notify({ type: 'error', message: 'Prompt name required.' });
-                savePrompts(generateConfig.prompt || null, promptName);
-                reFetchPrompts();
-                setShowRecordPromptForm(false);
-                setPromptName(promptName);
-              }}
-            >
-              Save
-            </button>
-            <Tooltip anchorSelect=".savebutton" place="top" style={{ zIndex: 99 }}>
-              Save the prompt
-            </Tooltip>
+
+        <div className="card my-3">
+          <div className="card-body">
+            <h5 className="card-title">Runs</h5>
+            {(genRuns || []).length === 0 ? (
+              <em className="text-muted">No generation run yet</em>
+            ) : (
+              <table className="table table-sm align-middle">
+                <thead>
+                  <tr>
+                    <th>Pipeline</th>
+                    <th>Time</th>
+                    <th>By</th>
+                    <th>Selection</th>
+                    <th>Elements</th>
+                    <th>Status</th>
+                    <th>NA</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(genRuns || []).map((run) => (
+                    <tr key={run.id}>
+                      <td>{run.pipeline_name}</td>
+                      <td>{new Date(run.time).toLocaleString()}</td>
+                      <td>{run.user_name}</td>
+                      <td>
+                        {run.dataset} / {run.mode}
+                      </td>
+                      <td>{run.n_elements}</td>
+                      <td>
+                        <span
+                          className={
+                            'badge ' +
+                            (run.status === 'done'
+                              ? 'bg-success'
+                              : run.status === 'running'
+                                ? 'bg-info'
+                                : 'bg-danger')
+                          }
+                        >
+                          {run.status}
+                        </span>
+                      </td>
+                      <td>{run.n_na ?? ''}</td>
+                      <td className="text-end">
+                        <button
+                          className="btn btn-sm btn-outline-primary me-1"
+                          disabled={run.status === 'running'}
+                          onClick={() => setViewedRunId(run.id)}
+                        >
+                          View
+                        </button>
+                        <button
+                          className="btn btn-sm btn-outline-secondary me-1"
+                          disabled={run.status === 'running'}
+                          onClick={() => getGenerationsFile(run.id)}
+                        >
+                          <FaDownload />
+                        </button>
+                        <button
+                          className="btn btn-sm btn-outline-danger"
+                          disabled={run.status === 'running'}
+                          onClick={async () => {
+                            if (await deleteGenRun(run.id)) setRunsRefresh((k) => k + 1);
+                          }}
+                        >
+                          <FaRegTrashAlt />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
-        </Modal.Body>
-      </Modal>
+        </div>
+
+        <Modal show={viewedRunId !== null} size="xl" onHide={() => setViewedRunId(null)}>
+          <Modal.Header closeButton>
+            <Modal.Title>Run outputs</Modal.Title>
+          </Modal.Header>
+          <Modal.Body>
+            {runElements ? (
+              <DataGrid
+                className="fill-grid"
+                columns={generatedColumns}
+                rows={(runElements.items || []) as unknown as GeneratedTableRow[]}
+                rowHeight={80}
+              />
+            ) : (
+              <PulseLoader />
+            )}
+          </Modal.Body>
+        </Modal>
+      </div>
     </ProjectPageLayout>
   );
 };

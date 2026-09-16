@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import cast
 
 import pandas as pd
+import pyarrow.parquet
 from pandas import DataFrame
 
 from activetigger.errors import InvalidInputError
@@ -83,6 +84,21 @@ class Data:
             return Data._sanitize_dataset(pd.read_excel(file_path))
         else:
             raise InvalidInputError(f"Unsupported file format: {file_path}")
+
+    def get_dataset_path(self, dataset: str) -> Path | None:
+        """
+        Path of a complete dataset file, None when it does not exist
+        """
+        paths = {"train": self.path_train, "valid": self.path_valid, "test": self.path_test}
+        path = paths.get(dataset)
+        return path if path is not None and path.exists() else None
+
+    @staticmethod
+    def count_rows(path: Path) -> int:
+        """
+        Number of rows of a parquet file (metadata only, no data read)
+        """
+        return pyarrow.parquet.ParquetFile(path).metadata.num_rows
 
     def get_path(self, filename: str) -> Path:
         """

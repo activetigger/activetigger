@@ -110,6 +110,14 @@ class Orchestrator:
         )
         self.messages = Messages(self.db_manager)
         self.users = Users(self.db_manager, self.messages)
+
+        # propagate the instance-level generative credentials
+        try:
+            self.db_manager.generations_service.sync_instance_credentials(
+                config.generative_credentials
+            )
+        except Exception as e:
+            print(f"Failed to sync instance generative credentials: {e}")
         self.monitoring = Monitoring(self.db_manager)
         self.toolbox = Toolbox(self.queue)
 

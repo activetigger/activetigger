@@ -16,8 +16,12 @@ import {
   ComputeBertopicModel,
   ElementOutModel,
   EvalSetDataModel,
-  GenModel,
+  GenCredentialsInput,
+  GenPipelineCreate,
+  GenRunRequest,
+  GenSandboxRequest,
   LoginParams,
+  PostprocessStep,
   PrepareSessionModel,
   PrepareSplitModel,
   ProjectBaseModel,
@@ -27,9 +31,7 @@ import {
   PromptOutModel,
   QuickModelInModel,
   SelectionConfig,
-  SupportedAPI,
   TextDatasetModel,
-  UserCredentialInput,
   newBertModel,
   newImageModel,
   newNerModel,
@@ -2042,51 +2044,31 @@ export function useGetPredictionsFile(projectSlug: string | null) {
 // }
 
 /**
- * Get file generations
+ * Download the outputs of a generation run as CSV
  */
-export function useGetGenerationsFile(projectSlug: string | null, filters: string[]) {
+export function useGetGenerationsFile(projectSlug: string | null) {
   const { notify } = useNotifications();
-  const getGenerationsFile = useCallback(async () => {
-    if (projectSlug) {
-      const res = await api.POST('/export/generations', {
-        params: {
-          query: {
-            project_slug: projectSlug,
+  const getGenerationsFile = useCallback(
+    async (runId: number) => {
+      if (projectSlug) {
+        const res = await api.GET('/export/generations', {
+          params: {
+            query: { project_slug: projectSlug, run_id: runId },
           },
-        },
-        body: { filters: filters },
-        parseAs: 'blob',
-      });
-
-      if (!res.error) {
-        notify({ type: 'success', message: 'Exporting data from generation.' });
-        saveAs(res.data, 'generations.csv');
+          parseAs: 'blob',
+        });
+        if (!res.error) {
+          notify({ type: 'success', message: 'Exporting the generation run.' });
+          saveAs(res.data as Blob, 'generations.csv');
+        }
+        return true;
       }
-      return true;
-    }
-    return null;
-  }, [projectSlug, notify, filters]);
+      return null;
+    },
+    [projectSlug, notify],
+  );
 
   return { getGenerationsFile };
-}
-
-/**
- * Drop elements for a user/project
- */
-export function useDropGeneratedElements(projectSlug: string | null, username: string | null) {
-  const { notify } = useNotifications();
-  const dropGeneratedElements = useCallback(async () => {
-    if (!projectSlug) return;
-    // do the new projects POST call
-    const res = await api.POST('/generate/elements/drop', {
-      // POST has a body
-      params: {
-        query: { project_slug: projectSlug, username: username },
-      },
-    });
-    if (!res.error) notify({ type: 'success', message: 'Rows dropped.' });
-  }, [notify, projectSlug, username]);
-  return dropGeneratedElements;
 }
 
 // StreamSaver relies on a service worker registered from a third-party
@@ -2456,191 +2438,241 @@ export function useReconciliate(projectSlug: string, scheme: string | null, data
   return { postReconciliate };
 }
 
-export function useGetGenModels() {
-  const { notify } = useNotifications();
-  const models = useCallback(async () => {
-    const res = await api.GET('/generate/models/available');
-    if (res.error) {
-      notify({ type: 'error', message: 'Could not fetch available models.' });
-      return [];
-    } else return res.data;
-  }, [notify]);
-  return { models };
-}
-
-export async function getProjectGenModels(
-  project: string,
-): Promise<Array<GenModel & { api: string }>> {
-  const res = await api.GET(`/generate/models`, {
-    params: {
-      query: { project_slug: project },
-    },
-  });
-  if (res.error) {
-    console.error(res.error);
+export function useGenCredentials(refreshKey: unknown = 0) {
+  const result = useAsyncMemo(async () => {
+    const res = await api.GET('/generate/credentials', {});
+    if (res.data && !res.error) return res.data;
     return [];
-  } else
-    return res.data.map((model) => ({
-      ...model,
-      // Transform null to undefined
-      endpoint: model.endpoint || undefined,
-      credentials: model.credentials || undefined,
-      saved_credentials: model.saved_credentials || undefined,
-    }));
+  }, [refreshKey]);
+  return { genCredentials: getAsyncMemoData(result) };
 }
 
-export async function createGenModel(
-  project: string,
-  model: Omit<GenModel & { api: SupportedAPI }, 'id'>,
-): Promise<number> {
-  const res = await api.POST(`/generate/models`, {
-    params: { query: { project_slug: project } },
-    body: model,
-  });
-  if (res.error) throw new Error(formatApiError(res.error, 'Unable to create model'));
-  else return res.data;
-}
-
-export async function deleteGenModel(project: string, modelId: number) {
-  const res = await api.DELETE(`/generate/models/{model_id}`, {
-    params: { path: { model_id: modelId }, query: { project_slug: project } },
-  });
-  if (res.error) console.error(res.error);
-}
-
-export async function fetchOllamaModels(
-  endpoint: string,
-): Promise<Array<{ slug: string; name: string }>> {
-  const baseUrl = config.api.url.replace(/\/+$/, '');
-  const url = `${baseUrl}/generate/ollama/models?endpoint=${encodeURIComponent(endpoint)}`;
-  const auth = JSON.parse(localStorage.getItem('activeTigger.auth') || '{}');
-  const res = await fetch(url, {
-    headers: {
-      ...(auth.access_token ? { Authorization: `Bearer ${auth.access_token}` } : {}),
-    },
-  });
-  if (!res.ok) {
-    const detail = await res.json().catch(() => null);
-    throw new Error(detail?.detail || `HTTP ${res.status}`);
-  }
-  return res.json();
-}
-
-export async function fetchOpenAICompatibleModels(
-  endpoint?: string,
-  credentials?: string,
-  savedCredentials?: string,
-): Promise<Array<{ slug: string; name: string }>> {
-  const baseUrl = config.api.url.replace(/\/+$/, '');
-  const params = new URLSearchParams();
-  if (endpoint) params.append('endpoint', endpoint);
-  if (credentials) params.append('credentials', credentials);
-  if (savedCredentials) params.append('saved_credentials', savedCredentials);
-  const url = `${baseUrl}/generate/openai/models?${params.toString()}`;
-  const auth = JSON.parse(localStorage.getItem('activeTigger.auth') || '{}');
-  const res = await fetch(url, {
-    headers: {
-      ...(auth.access_token ? { Authorization: `Bearer ${auth.access_token}` } : {}),
-    },
-  });
-  if (!res.ok) {
-    const detail = await res.json().catch(() => null);
-    throw new Error(detail?.detail || `HTTP ${res.status}`);
-  }
-  return res.json();
-}
-
-/**
- * Post generate data
- */
-export function useGenerate(
-  projectSlug: string | null,
-  currentScheme: string | null,
-  modelId: number | null,
-  n_batch: number | null,
-  prompt: string | null,
-  mode: string | null,
-  dataset: string | null,
-  token?: string,
-  promptName?: string,
-  n_workers?: number | null,
-) {
+export function useAddGenCredentials() {
   const { notify } = useNotifications();
-  const generate = useCallback(async () => {
-    if (projectSlug && modelId && prompt && n_batch && currentScheme && mode && dataset) {
-      const res = await api.POST('/generate/start', {
-        params: {
-          query: {
-            project_slug: projectSlug,
-          },
-        },
-        body: {
-          model_id: modelId,
-          prompt: prompt,
-          n_batch: n_batch,
-          n_workers: n_workers && n_workers > 0 ? n_workers : 1,
-          token: token,
-          scheme: currentScheme,
-          mode: mode,
-          dataset: dataset,
-          prompt_name: promptName,
-        },
-      });
-      if (!res.error) notify({ type: 'warning', message: 'Starting API calls.' });
-      return true;
-    }
-    return null;
-  }, [
-    projectSlug,
-    modelId,
-    prompt,
-    n_batch,
-    n_workers,
-    currentScheme,
-    mode,
-    dataset,
-    token,
-    notify,
-    promptName,
-  ]);
-
-  return { generate };
+  const addGenCredentials = useCallback(
+    async (credentials: GenCredentialsInput) => {
+      const res = await api.POST('/generate/credentials', { body: credentials });
+      if (res.error) {
+        notify({ type: 'error', message: formatApiError(res.error) });
+        return null;
+      }
+      if (res.data.success) notify({ type: 'success', message: 'Credentials saved and tested.' });
+      else
+        notify({
+          type: 'warning',
+          message: `Credentials saved but the endpoint test failed: ${res.data.detail}`,
+        });
+      return res.data;
+    },
+    [notify],
+  );
+  return { addGenCredentials };
 }
 
-/**
- * Get generated elements
- */
-export function useGeneratedElements(
-  project_slug: string | null,
-  n_elements: number,
-  filters: string[],
-  isGenerating: boolean, // state for the user for refertching
-) {
-  const [fetchTrigger, setFetchTrigger] = useState<boolean>(false);
-
-  const getGeneratedElements = useAsyncMemo(async () => {
-    if (n_elements && project_slug) {
-      const res = await api.POST('/generate/elements', {
-        params: {
-          query: {
-            project_slug: project_slug,
-          },
-        },
-        body: {
-          n_elements: n_elements,
-          filters: filters,
-        },
+export function useDeleteGenCredentials() {
+  const { notify } = useNotifications();
+  const deleteGenCredentials = useCallback(
+    async (credentialsId: number) => {
+      const res = await api.POST('/generate/credentials/delete', {
+        params: { query: { credentials_id: credentialsId } },
       });
-      if (!res.error && res.data && 'items' in res.data) {
-        return res.data.items;
+      if (res.error) {
+        notify({ type: 'error', message: formatApiError(res.error) });
+        return false;
       }
-    }
+      notify({ type: 'success', message: 'Credentials deleted.' });
+      return true;
+    },
+    [notify],
+  );
+  return { deleteGenCredentials };
+}
+
+// models available behind a credentials entry (declared list or /v1/models)
+export async function getCredentialsModels(credentialsId: number): Promise<string[]> {
+  const res = await api.GET('/generate/credentials/{credentials_id}/models', {
+    params: { path: { credentials_id: credentialsId } },
+  });
+  if (res.error) throw new Error(formatApiError(res.error, 'Unable to list models'));
+  return res.data;
+}
+
+// post-treatment step registry with the JSON schema of each step's parameters
+export function usePostprocessSteps() {
+  const result = useAsyncMemo(async () => {
+    const res = await api.GET('/generate/postprocess/steps', {});
+    if (res.data && !res.error) return res.data as Record<string, Record<string, unknown>>;
+    return {};
+  }, []);
+  return { postprocessSteps: getAsyncMemoData(result) };
+}
+
+export function useGenPipelines(projectSlug: string | null, refreshKey: unknown = 0) {
+  const result = useAsyncMemo(async () => {
+    if (!projectSlug) return [];
+    const res = await api.GET('/generate/pipelines', {
+      params: { query: { project_slug: projectSlug } },
+    });
+    if (res.data && !res.error) return res.data;
+    return [];
+  }, [projectSlug, refreshKey]);
+  return { pipelines: getAsyncMemoData(result) };
+}
+
+export function useCreateGenPipeline(projectSlug: string | null) {
+  const { notify } = useNotifications();
+  const createGenPipeline = useCallback(
+    async (pipeline: GenPipelineCreate) => {
+      if (!projectSlug) return null;
+      const res = await api.POST('/generate/pipelines', {
+        params: { query: { project_slug: projectSlug } },
+        body: pipeline,
+      });
+      if (res.error) {
+        notify({ type: 'error', message: formatApiError(res.error) });
+        return null;
+      }
+      notify({ type: 'success', message: 'Pipeline created.' });
+      return res.data;
+    },
+    [projectSlug, notify],
+  );
+  return { createGenPipeline };
+}
+
+export function useDeleteGenPipeline(projectSlug: string | null) {
+  const { notify } = useNotifications();
+  const deleteGenPipeline = useCallback(
+    async (pipelineId: number) => {
+      if (!projectSlug) return false;
+      const res = await api.POST('/generate/pipelines/delete', {
+        params: { query: { project_slug: projectSlug, pipeline_id: pipelineId } },
+      });
+      if (res.error) {
+        notify({ type: 'error', message: formatApiError(res.error) });
+        return false;
+      }
+      notify({ type: 'success', message: 'Pipeline deleted.' });
+      return true;
+    },
+    [projectSlug, notify],
+  );
+  return { deleteGenPipeline };
+}
+
+// synchronous test of a pipeline on a few sampled elements
+export function useSandboxGenPipeline(projectSlug: string | null) {
+  const { notify } = useNotifications();
+  const sandboxGenPipeline = useCallback(
+    async (pipelineId: number, request: GenSandboxRequest) => {
+      if (!projectSlug) return null;
+      const res = await api.POST('/generate/pipelines/{pipeline_id}/sandbox', {
+        params: { path: { pipeline_id: pipelineId }, query: { project_slug: projectSlug } },
+        body: request,
+      });
+      if (res.error) {
+        notify({ type: 'error', message: formatApiError(res.error) });
+        return null;
+      }
+      return res.data;
+    },
+    [projectSlug, notify],
+  );
+  return { sandboxGenPipeline };
+}
+
+// re-apply candidate steps on raw outputs already generated
+export function usePreviewPostprocess(projectSlug: string | null) {
+  const { notify } = useNotifications();
+  const previewPostprocess = useCallback(
+    async (schemeName: string | null, steps: PostprocessStep[], raws: string[]) => {
+      if (!projectSlug) return null;
+      const res = await api.POST('/generate/postprocess/preview', {
+        params: { query: { project_slug: projectSlug } },
+        body: { scheme_name: schemeName, steps: steps, raws: raws },
+      });
+      if (res.error) {
+        notify({ type: 'error', message: formatApiError(res.error) });
+        return null;
+      }
+      return res.data;
+    },
+    [projectSlug, notify],
+  );
+  return { previewPostprocess };
+}
+
+export function useStartGenRun(projectSlug: string | null) {
+  const { notify } = useNotifications();
+  const startGenRun = useCallback(
+    async (pipelineId: number, request: GenRunRequest) => {
+      if (!projectSlug) return null;
+      const res = await api.POST('/generate/pipelines/{pipeline_id}/start', {
+        params: { path: { pipeline_id: pipelineId }, query: { project_slug: projectSlug } },
+        body: request,
+      });
+      if (res.error) {
+        notify({ type: 'error', message: formatApiError(res.error) });
+        return null;
+      }
+      notify({ type: 'success', message: 'Generation run started.' });
+      return res.data;
+    },
+    [projectSlug, notify],
+  );
+  return { startGenRun };
+}
+
+export function useGenRuns(projectSlug: string | null, refreshKey: unknown = 0) {
+  const result = useAsyncMemo(async () => {
+    if (!projectSlug) return [];
+    const res = await api.GET('/generate/runs', {
+      params: { query: { project_slug: projectSlug } },
+    });
+    if (res.data && !res.error) return res.data;
+    return [];
+  }, [projectSlug, refreshKey]);
+  return { genRuns: getAsyncMemoData(result) };
+}
+
+export function useGenRunElements(
+  projectSlug: string | null,
+  runId: number | null,
+  limit: number = 100,
+  offset: number = 0,
+) {
+  const result = useAsyncMemo(async () => {
+    if (!projectSlug || runId === null) return null;
+    const res = await api.GET('/generate/runs/{run_id}/elements', {
+      params: {
+        path: { run_id: runId },
+        query: { project_slug: projectSlug, limit: limit, offset: offset },
+      },
+    });
+    if (res.data && !res.error) return res.data;
     return null;
-  }, [project_slug, n_elements, isGenerating, fetchTrigger, filters]);
+  }, [projectSlug, runId, limit, offset]);
+  return { runElements: getAsyncMemoData(result) };
+}
 
-  const reFetch = useCallback(() => setFetchTrigger((f) => !f), []);
-
-  return { generated: getAsyncMemoData(getGeneratedElements), reFetchGenerated: reFetch };
+export function useDeleteGenRun(projectSlug: string | null) {
+  const { notify } = useNotifications();
+  const deleteGenRun = useCallback(
+    async (runId: number) => {
+      if (!projectSlug) return false;
+      const res = await api.POST('/generate/runs/delete', {
+        params: { query: { project_slug: projectSlug, run_id: runId } },
+      });
+      if (res.error) {
+        notify({ type: 'error', message: formatApiError(res.error) });
+        return false;
+      }
+      notify({ type: 'success', message: 'Run deleted.' });
+      return true;
+    },
+    [projectSlug, notify],
+  );
+  return { deleteGenRun };
 }
 
 /**
@@ -2732,56 +2764,6 @@ export function useChangeEmail() {
   );
 
   return { changeEmail };
-}
-
-/**
- * Saved endpoint/credentials of the current user (secrets stay in the backend)
- */
-export function useUserCredentials(refreshKey: unknown = 0) {
-  const result = useAsyncMemo(async () => {
-    const res = await api.GET('/users/credentials', {});
-    if (res.data && !res.error) return res.data;
-    return [];
-  }, [refreshKey]);
-  return { userCredentials: getAsyncMemoData(result) };
-}
-
-export function useAddUserCredentials() {
-  const { notify } = useNotifications();
-  const addUserCredentials = useCallback(
-    async (credential: UserCredentialInput) => {
-      const res = await api.POST('/users/credentials', {
-        body: credential,
-      });
-      if (res.error) {
-        notify({ type: 'error', message: formatApiError(res.error) });
-        return false;
-      }
-      notify({ type: 'success', message: 'Credentials saved.' });
-      return true;
-    },
-    [notify],
-  );
-  return { addUserCredentials };
-}
-
-export function useDeleteUserCredentials() {
-  const { notify } = useNotifications();
-  const deleteUserCredentials = useCallback(
-    async (name: string) => {
-      const res = await api.POST('/users/credentials/delete', {
-        params: { query: { name } },
-      });
-      if (res.error) {
-        notify({ type: 'error', message: formatApiError(res.error) });
-        return false;
-      }
-      notify({ type: 'success', message: 'Credentials deleted.' });
-      return true;
-    },
-    [notify],
-  );
-  return { deleteUserCredentials };
 }
 
 /**
@@ -3014,74 +2996,6 @@ export function useGetUserStatistics(username: string | null) {
   const reFetch = useCallback(() => setFetchTrigger((f) => !f), []);
 
   return { userStatistics: getAsyncMemoData(getUserStatistics), reFetchStatistics: reFetch };
-}
-
-/**
- * Get prompts
- */
-export function useGetPrompts(projectSlug: string | null) {
-  const [fetchTrigger, setFetchTrigger] = useState<boolean>(false);
-
-  const getPrompts = useAsyncMemo(async () => {
-    if (projectSlug) {
-      const res = await api.GET('/generate/prompts', {
-        params: {
-          query: {
-            project_slug: projectSlug,
-          },
-        },
-      });
-      return res.data;
-    }
-    return null;
-  }, [fetchTrigger]);
-
-  const reFetch = useCallback(() => setFetchTrigger((f) => !f), []);
-
-  return { prompts: getAsyncMemoData(getPrompts), reFetchPrompts: reFetch };
-}
-
-/**
- * Save prompts
- */
-export function useSavePrompts(projectSlug: string | null) {
-  const { notify } = useNotifications();
-  const savePrompts = useCallback(
-    async (prompt: string | null, name: string | null) => {
-      if (projectSlug && prompt) {
-        const res = await api.POST('/generate/prompts/add', {
-          params: {
-            query: { project_slug: projectSlug },
-          },
-          body: { text: prompt, name: name },
-        });
-        if (!res.error) notify({ type: 'success', message: 'Prompt saved.' });
-      }
-    },
-    [notify, projectSlug],
-  );
-  return savePrompts;
-}
-
-/**
- * Delete prompts
- */
-export function useDeletePrompts(projectSlug: string | null) {
-  const { notify } = useNotifications();
-  const deletePrompts = useCallback(
-    async (prompt_id: string | null) => {
-      if (projectSlug && prompt_id) {
-        const res = await api.POST('/generate/prompts/delete', {
-          params: {
-            query: { project_slug: projectSlug, prompt_id: prompt_id },
-          },
-        });
-        if (!res.error) notify({ type: 'success', message: 'Prompt deleted.' });
-      }
-    },
-    [notify, projectSlug],
-  );
-  return deletePrompts;
 }
 
 /**
@@ -3601,7 +3515,7 @@ export function useGetCodebookMessages(projectSlug: string | null) {
  * Get messages
  */
 
-export function useGetMessages(kind: string, from_user: string | null) {
+export function useGetMessages(kind: 'user' | 'system' | 'project', from_user: string | null) {
   const [fetchTrigger, setFetchTrigger] = useState<boolean>(false);
 
   const getMessages = useAsyncMemo(async () => {

@@ -10,8 +10,6 @@ import { components } from './generated/openapi';
  */
 
 export type UserModel = components['schemas']['UserModel'];
-export type UserCredentialInput = components['schemas']['UserCredentialInput'];
-export type UserCredentialPublic = components['schemas']['UserCredentialPublic'];
 
 export type ProjectModel = components['schemas']['ProjectModel'];
 export type ProjectBaseModel = components['schemas']['ProjectBaseModel'];
@@ -76,7 +74,18 @@ export type AnnotationsDataModel = components['schemas']['AnnotationsDataModel']
 
 export type ProjectionParametersModel = components['schemas']['ProjectionParametersModel'];
 
-export type GenerationModelApi = components['schemas']['GenerationModelApi'];
+export type GenCredentials = components['schemas']['GenCredentialsOut'];
+export type GenCredentialsInput = components['schemas']['GenCredentialsInput'];
+export type GenCredentialsTestOut = components['schemas']['GenCredentialsTestOut'];
+export type GenPipeline = components['schemas']['GenPipelineOut'];
+export type GenPipelineCreate = components['schemas']['GenPipelineCreate'];
+export type GenerationParams = components['schemas']['GenerationParams'];
+export type PostprocessStep = components['schemas']['PostprocessStep'];
+export type GenRun = components['schemas']['GenRunOut'];
+export type GenRunRequest = components['schemas']['GenRunRequest'];
+export type GenSandboxRequest = components['schemas']['GenSandboxRequest'];
+export type GenSandboxOut = components['schemas']['GenSandboxOut'];
+export type GeneratedRow = components['schemas']['GeneratedRow'];
 
 export type ProjectUpdateModel = components['schemas']['ProjectUpdateModel'];
 
@@ -191,19 +200,6 @@ export interface PromptsProjectStateModel {
   similarity_computing?: Record<string, Record<string, string | null>>;
 }
 
-export interface GenerateConfig {
-  api?: string;
-  endpoint?: string;
-  token?: string;
-  prompt?: string;
-  promptId?: string;
-  n_batch?: number;
-  n_workers?: number;
-  selectionMode?: string;
-  dataset?: string;
-  selectedModel?: GenModel & { api: string };
-}
-
 export interface DisplayConfig {
   interfaceType: string;
   displayAnnotation: boolean;
@@ -282,32 +278,4 @@ export interface EvalSetImageModel {
   col_id?: string | null;
   col_label?: string | null;
   scheme?: string | null;
-}
-
-export type SupportedAPI = 'Ollama' | 'OpenAI' | 'HuggingFace' | 'OpenAICompatible';
-
-export type GenModelAPI = { models: GenModel[] } & (
-  | {
-      name: 'Ollama';
-      endpoint: string;
-    }
-  | {
-      name: 'OpenAI';
-      credentials: string;
-    }
-  | {
-      name: 'HuggingFace';
-      endpoint: string;
-      credentials: string;
-    }
-);
-
-export interface GenModel {
-  id: number;
-  slug: string;
-  name: string;
-  endpoint?: string;
-  credentials?: string;
-  // name of a credentials entry saved in the user account, resolved server-side
-  saved_credentials?: string;
 }
