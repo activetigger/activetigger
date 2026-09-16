@@ -286,6 +286,15 @@ def test_generate_pipelines(client: TestClient, superuser_headers: dict[str, str
         # no temporary input file left behind
         assert list((project_dir / "generations").glob("*_input.parquet")) == []
 
+        # a run with only NA outputs cannot become a scheme
+        r = client.post(
+            f"/api/generate/runs/{full_run_id}/to-scheme?project_slug={project_slug}",
+            headers=superuser_headers,
+            params={"project_slug": project_slug, "scheme_name": "scheme-from-gen"},
+        )
+        assert r.status_code == 500
+        assert "No predicted labels" in r.json()["detail"]
+
         r = client.post(
             "/api/generate/runs/delete",
             headers=superuser_headers,

@@ -1,11 +1,18 @@
-import { FC, useEffect, useState } from 'react';
+import { FC, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { useModelInformations } from '../core/api';
+import {
+  useDeleteBertModel,
+  useDeleteNerModel,
+  useDeleteQuickModel,
+  useModelInformations,
+} from '../core/api';
 import { useAppContext } from '../core/useAppContext';
+import { sortDatesAsStrings } from '../core/utils';
 import { MLStatisticsModel } from '../types';
 import { DisplayNerScores } from './DisplayNerScores';
 import { DisplayScoresMenu } from './DisplayScoresMenu';
 import { DisplayTrainingProcesses } from './DisplayTrainingProcesses';
+import { ModelsPillDisplay } from './ModelsPillDisplay';
 import { ValidateButtons } from './ValidateButton';
 
 type NerSplitBundle = {
@@ -76,14 +83,7 @@ const NerSplitSelector: FC<{
   );
 };
 
-/**
- * Evaluation view of the model selected in the pills above the tabs.
- * For span schemes the "bert" slot holds a NER model.
- */
-export const ModelEvaluation: FC<{
-  selectedQuickModel: string | null;
-  selectedBertModel: string | null;
-}> = ({ selectedQuickModel, selectedBertModel }) => {
+export const ModelEvaluation: FC = () => {
   const { projectName: projectSlug } = useParams();
   const {
     appContext: { currentScheme, currentProject, isComputing },
@@ -94,8 +94,26 @@ export const ModelEvaluation: FC<{
       ? currentProject.schemes.available[currentScheme].kind || 'multiclass'
       : 'multiclass';
   const isNer = kindScheme === 'span';
-  const currentQuickModelName = selectedQuickModel;
-  const currentBertModel = selectedBertModel;
+
+  // quickmodel selector
+  const availableQuickModels = useMemo(
+    () => currentProject?.quickmodel.available[currentScheme || ''] || [],
+    [currentProject?.quickmodel, currentScheme],
+  );
+  const [currentQuickModelName, setCurrentQuickModelName] = useState<string | null>(null);
+  const { deleteQuickModel } = useDeleteQuickModel(projectSlug || null);
+
+  // bertmodel selector — for span schemes this slot displays NER models instead
+  const availableBertModels = useMemo(
+    () =>
+      isNer
+        ? currentProject?.nermodels?.available?.[currentScheme || ''] || {}
+        : currentProject?.languagemodels.available[currentScheme || ''] || {},
+    [currentProject?.languagemodels, currentProject?.nermodels, currentScheme, isNer],
+  );
+  const [currentBertModel, setCurrentBertModel] = useState<string | null>(null);
+  const { deleteBertModel } = useDeleteBertModel(projectSlug || null);
+  const { deleteNerModel } = useDeleteNerModel(projectSlug || null);
 
   // get model information from api
   const { model: bertModelInformations, reFetch: reFetchBertModelInformations } =
@@ -108,6 +126,21 @@ export const ModelEvaluation: FC<{
   const { model: quickModelInformations, reFetch: reFetchQuickModelInformations } =
     useModelInformations(projectSlug || null, currentQuickModelName || null, 'quick', isComputing);
 
+  // meta selector
+  const [currentModel, setCurrentModel] = useState<{ name: string; kind: string } | null>(null);
+  useEffect(() => {
+    if (currentQuickModelName) {
+      setCurrentModel({ name: currentQuickModelName, kind: 'quick' });
+      setCurrentBertModel(null);
+    }
+  }, [currentQuickModelName]);
+  useEffect(() => {
+    if (currentBertModel) {
+      setCurrentModel({ name: currentBertModel, kind: 'bert' });
+      setCurrentQuickModelName(null);
+    }
+  }, [currentBertModel]);
+
   // reFetch when model or isComputing change
   useEffect(() => {
     if (currentBertModel) reFetchBertModelInformations();
@@ -118,6 +151,49 @@ export const ModelEvaluation: FC<{
 
   return (
     <div>
+      {/* Display all the models */}
+      {!isNer && (
+        <div>
+          <span className="fw-semibold text-muted small">Quick Models</span>
+          {availableQuickModels.length === 0 ? (
+            <div className="text-muted small">
+              No quick model available for the current scheme. Train one in the Training tab first.
+            </div>
+          ) : (
+            <ModelsPillDisplay
+              modelNames={availableQuickModels
+                .sort((quickModelA, quickModelB) =>
+                  sortDatesAsStrings(quickModelA?.time, quickModelB?.time, true),
+                )
+                .map((quickModel) => quickModel.name)}
+              currentModelName={currentQuickModelName}
+              setCurrentModelName={setCurrentQuickModelName}
+              deleteModelFunction={deleteQuickModel}
+            />
+          )}
+        </div>
+      )}
+      <div>
+        <span className="fw-semibold text-muted small">{isNer ? 'NER Models' : 'BERT Models'}</span>
+        {Object.keys(availableBertModels).length === 0 ? (
+          <div className="text-muted small">
+            No {isNer ? 'NER' : 'BERT'} model available for the current scheme. Train one in the
+            Training tab first.
+          </div>
+        ) : (
+          <ModelsPillDisplay
+            modelNames={Object.values(availableBertModels)
+              .sort((bertModelA, bertModelB) =>
+                sortDatesAsStrings(bertModelA?.time, bertModelB?.time, true),
+              )
+              .map((model) => (model ? model.name : ''))}
+            currentModelName={currentBertModel}
+            setCurrentModelName={setCurrentBertModel}
+            deleteModelFunction={isNer ? deleteNerModel : deleteBertModel}
+          />
+        )}
+      </div>
+
       {isComputing && (
         <DisplayTrainingProcesses
           projectSlug={projectSlug || null}
@@ -126,11 +202,9 @@ export const ModelEvaluation: FC<{
         />
       )}
 
-      {!currentQuickModelName && !currentBertModel && (
-        <div className="text-muted my-3">Select a model above to see its evaluation scores</div>
-      )}
+      <hr className="my-4" />
 
-      {quickModelInformations && currentQuickModelName && (
+      {quickModelInformations && currentModel && (
         <>
           <ValidateButtons
             modelName={currentQuickModelName}
@@ -152,7 +226,7 @@ export const ModelEvaluation: FC<{
         </>
       )}
 
-      {bertModelInformations && currentBertModel && (
+      {bertModelInformations && currentModel && (
         <>
           <ValidateButtons
             modelName={currentBertModel}

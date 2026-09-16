@@ -329,6 +329,29 @@ def get_run_elements(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/generate/runs/{run_id}/to-scheme", dependencies=[Depends(verified_user)])
+def run_to_scheme(
+    project: Annotated[Project, Depends(get_project)],
+    current_user: Annotated[UserInDBModel, Depends(verified_user)],
+    scheme_name: str,
+    run_id: int = Path(ge=0),
+) -> int:
+    """
+    Create a new scheme from the outputs of a finished run
+    """
+    test_rights(ProjectAction.UPDATE, current_user.username, project.name)
+    try:
+        n_annotated = project.run_to_scheme(run_id, scheme_name, current_user.username)
+        get_orchestrator().log_action(
+            current_user.username, "GENERATION RUN TO SCHEME", project.name
+        )
+        return n_annotated
+    except (HTTPException, APIError, OverflowError):
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/generate/runs/delete", dependencies=[Depends(verified_user)])
 def delete_run(
     project: Annotated[Project, Depends(get_project)],

@@ -2635,24 +2635,31 @@ export function useGenRuns(projectSlug: string | null, refreshKey: unknown = 0) 
   return { genRuns: getAsyncMemoData(result) };
 }
 
-export function useGenRunElements(
-  projectSlug: string | null,
-  runId: number | null,
-  limit: number = 100,
-  offset: number = 0,
-) {
-  const result = useAsyncMemo(async () => {
-    if (!projectSlug || runId === null) return null;
-    const res = await api.GET('/generate/runs/{run_id}/elements', {
-      params: {
-        path: { run_id: runId },
-        query: { project_slug: projectSlug, limit: limit, offset: offset },
-      },
-    });
-    if (res.data && !res.error) return res.data;
-    return null;
-  }, [projectSlug, runId, limit, offset]);
-  return { runElements: getAsyncMemoData(result) };
+// create a new scheme from the outputs of a finished run
+export function useConvertGenRun(projectSlug: string | null) {
+  const { notify } = useNotifications();
+  const convertGenRun = useCallback(
+    async (runId: number, schemeName: string) => {
+      if (!projectSlug) return null;
+      const res = await api.POST('/generate/runs/{run_id}/to-scheme', {
+        params: {
+          path: { run_id: runId },
+          query: { project_slug: projectSlug, scheme_name: schemeName },
+        },
+      });
+      if (res.error) {
+        notify({ type: 'error', message: formatApiError(res.error) });
+        return null;
+      }
+      notify({
+        type: 'success',
+        message: `Scheme ${schemeName} created with ${res.data} annotated elements.`,
+      });
+      return res.data;
+    },
+    [projectSlug, notify],
+  );
+  return { convertGenRun };
 }
 
 export function useDeleteGenRun(projectSlug: string | null) {

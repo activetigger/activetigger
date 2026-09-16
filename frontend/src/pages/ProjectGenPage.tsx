@@ -9,10 +9,10 @@ import { GenPipelineForm } from '../components/forms/GenPipelineForm';
 import { ProjectPageLayout } from '../components/layout/ProjectPageLayout';
 import { ModelsPillDisplay } from '../components/ModelsPillDisplay';
 import {
+  useConvertGenRun,
   useDeleteGenPipeline,
   useDeleteGenRun,
   useGenPipelines,
-  useGenRunElements,
   useGenRuns,
   useGetGenerationsFile,
   useSandboxGenPipeline,
@@ -102,8 +102,9 @@ export const GenPage: FC = () => {
   const [runMode, setRunMode] = useState('all');
   const [runN, setRunN] = useState<string>('');
   const [runWorkers, setRunWorkers] = useState(1);
-  const [viewedRunId, setViewedRunId] = useState<number | null>(null);
-  const { runElements } = useGenRunElements(projectName, viewedRunId, 500);
+  const { convertGenRun } = useConvertGenRun(projectName);
+  const [runToConvert, setRunToConvert] = useState<number | null>(null);
+  const [newSchemeName, setNewSchemeName] = useState('');
 
   const currentPipeline: GenPipeline | undefined = useMemo(
     () => (pipelines || []).find((p) => p.name === currentPipelineName),
@@ -445,10 +446,13 @@ export const GenPage: FC = () => {
                           <td className="text-end">
                             <button
                               className="btn btn-sm btn-outline-primary me-1"
-                              disabled={run.status === 'running'}
-                              onClick={() => setViewedRunId(run.id)}
+                              disabled={run.status !== 'done'}
+                              onClick={() => {
+                                setNewSchemeName('');
+                                setRunToConvert(run.id);
+                              }}
                             >
-                              View
+                              To scheme
                             </button>
                             <button
                               className="btn btn-sm btn-outline-secondary me-1"
@@ -477,21 +481,33 @@ export const GenPage: FC = () => {
           </Tab>
         </Tabs>
 
-        <Modal show={viewedRunId !== null} size="xl" onHide={() => setViewedRunId(null)}>
+        <Modal show={runToConvert !== null} onHide={() => setRunToConvert(null)}>
           <Modal.Header closeButton>
-            <Modal.Title>Run outputs</Modal.Title>
+            <Modal.Title>Create a scheme from this run</Modal.Title>
           </Modal.Header>
           <Modal.Body>
-            {runElements ? (
-              <DataGrid
-                className="fill-grid"
-                columns={generatedColumns}
-                rows={(runElements.items || []) as unknown as GeneratedTableRow[]}
-                rowHeight={80}
-              />
-            ) : (
-              <PulseLoader />
-            )}
+            <p className="text-muted small">
+              The predicted labels of the run become annotations in a new scheme (NA outputs are
+              skipped)
+            </p>
+            <input
+              type="text"
+              className="form-control"
+              placeholder="Name of the new scheme"
+              value={newSchemeName}
+              onChange={(e) => setNewSchemeName(e.target.value)}
+            />
+            <button
+              className="btn btn-primary mt-2"
+              disabled={!newSchemeName}
+              onClick={async () => {
+                if (runToConvert !== null && (await convertGenRun(runToConvert, newSchemeName))) {
+                  setRunToConvert(null);
+                }
+              }}
+            >
+              Create scheme
+            </button>
           </Modal.Body>
         </Modal>
       </div>

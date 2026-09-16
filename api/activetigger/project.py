@@ -2521,6 +2521,44 @@ class Project:
         )
         return run_id
 
+    def run_to_scheme(self, run_id: int, scheme_name: str, username: str) -> int:
+        """
+        Create a new scheme from the outputs of a generation run
+        """
+        run = self.generations.generations_service.get_run(self.name, run_id)
+        if run.status != "done":
+            raise Exception("The run is not finished")
+        pipeline = self.generations.get_pipeline(run.pipeline_id)
+        if pipeline.scheme_name is None:
+            raise Exception("Free pipelines cannot be converted to a scheme")
+        table = self.generations.run_data(run_id)
+        predicted = table[table["predicted"].notna()].copy()
+        if len(predicted) == 0:
+            raise Exception("No predicted labels in this run")
+        predicted["dataset"] = predicted["element_id"].map(self.data.index["dataset"])
+        predicted = predicted[predicted["dataset"].notna()]
+
+        # same codebook as the source scheme, plus labels assigned outside it
+        source_labels = self.schemes.available()[pipeline.scheme_name].labels
+        labels = list(dict.fromkeys([*source_labels, *predicted["predicted"].unique()]))
+        self.schemes.add_scheme(scheme_name, labels, "multiclass", username)
+
+        n_annotated = 0
+        for dataset, group in predicted.groupby("dataset"):
+            self.schemes.projects_service.add_annotations(
+                dataset=str(dataset),
+                user_name=username,
+                project_slug=self.name,
+                scheme=scheme_name,
+                elements=[
+                    {"element_id": row.element_id, "annotation": row.predicted, "comment": ""}
+                    for row in group.itertuples()
+                ],
+                selection="generation",
+            )
+            n_annotated += len(group)
+        return n_annotated
+
     def export_generations(self, run_id: int) -> DataFrame:
         """
         Outputs of a run, with the original (unslugged) ids when available
