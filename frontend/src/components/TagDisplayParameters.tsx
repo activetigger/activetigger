@@ -3,7 +3,7 @@ import { useAppContext } from '../core/useAppContext';
 
 export const TagDisplayParameters: FC = () => {
   const {
-    appContext: { displayConfig, currentProject, developmentMode },
+    appContext: { displayConfig, currentProject, developmentMode, phase },
     setAppContext,
   } = useAppContext();
   const isImageProject = currentProject?.params?.kind === 'image';
@@ -272,6 +272,11 @@ export const TagDisplayParameters: FC = () => {
             />
             Grid display 🧪
           </label>
+          {displayConfig.imageGridMode && phase !== 'train' && (
+            <div className="text-muted small">
+              Grid annotation only applies to the train dataset
+            </div>
+          )}
           {displayConfig.imageGridMode && (
             <div className="horizontal">
               <span className="text-nowrap me-1">

@@ -85,11 +85,31 @@ export const ImageClassificationPanelImagexp: FC<ImageClassificationPanelImagexp
           </span>
         )}
         {src ? (
-          <img
-            src={src}
-            alt={elementId}
-            style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
-          />
+          // The wrapper takes the remaining frame height and the image is
+          // absolutely positioned inside it: a percent-sized <img> directly
+          // in the flex column makes Safari resolve the percentage against
+          // the previous layout, shrinking the image on every swap (#1127).
+          <div
+            style={{
+              position: 'relative',
+              flex: '1 1 auto',
+              minHeight: 0,
+              width: '100%',
+              alignSelf: 'stretch',
+            }}
+          >
+            <img
+              src={src}
+              alt={elementId}
+              style={{
+                position: 'absolute',
+                inset: 0,
+                margin: 'auto',
+                maxWidth: '100%',
+                maxHeight: '100%',
+              }}
+            />
+          </div>
         ) : (
           <p className="text-muted">No image</p>
         )}
