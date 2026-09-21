@@ -328,6 +328,17 @@ def regex_contains(
     return series.apply(lambda x: bool(compiled.search(str(x))) if pd.notna(x) else na)
 
 
+def id_contains(index: pd.Index, expr: str) -> pd.Series:
+    """
+    Match ids against a comma-separated list, * as wildcard (exact match otherwise)
+    """
+    patterns = [regex.escape(i.strip()).replace(r"\*", ".*") for i in expr.split(",") if i.strip()]
+    if not patterns:
+        raise InvalidInputError("No id given after ID=")
+    compiled = regex.compile("|".join(f"(?:{p})" for p in patterns))
+    return pd.Series([bool(compiled.fullmatch(str(i))) for i in index], index=index)
+
+
 def encrypt(text: str | None, secret_key: str | None) -> str:
     """
     Encrypt a string

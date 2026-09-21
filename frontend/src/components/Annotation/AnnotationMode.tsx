@@ -378,7 +378,11 @@ export const AnnotationModeForm: FC<AnnotationModeFormProps> = ({
             <input
               className={classNames(
                 'searchhelp',
-                filterDebounced && !isValidRegex(filterDebounced) ? 'is-invalid' : '',
+                filterDebounced &&
+                  !filterDebounced.startsWith('ID=') &&
+                  !isValidRegex(filterDebounced)
+                  ? 'is-invalid'
+                  : '',
               )}
               type="text"
               id="select_regex"
@@ -390,7 +394,8 @@ export const AnnotationModeForm: FC<AnnotationModeFormProps> = ({
             />
             <div className="invalid-feedback">Regex not valid</div>
             <Tooltip anchorSelect="#regex-tooltip">
-              Use CONTEXT= or QUERY= for specific requests
+              Use CONTEXT= or QUERY= for specific requests, ID= to search by id (e.g. ID=abc,
+              ID=abc*, ID=a1,b2)
             </Tooltip>
           </div>
         )}

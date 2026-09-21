@@ -64,6 +64,7 @@ from activetigger.functions import (
     dichotomize,
     get_dir_size,
     get_number_occurrences_per_label,
+    id_contains,
     regex_contains,
     remove_labels_without_enough_annotations,
     sanitize_query_expression,
@@ -1054,7 +1055,9 @@ class Project:
             # sanitize
             df["ID"] = df.index  # duplicate the id column
             filter_san = clean_regex(next.filter)
-            if "CONTEXT=" in filter_san:  # case to search in the context
+            if filter_san.startswith("ID="):  # case to search by id (* as wildcard)
+                f_regex = id_contains(df.index, filter_san[len("ID=") :])
+            elif "CONTEXT=" in filter_san:  # case to search in the context
                 f_regex = regex_contains(
                     df[existing_cols_contexts + ["ID"]].apply(
                         lambda row: " ".join(row.values.astype(str)), axis=1
