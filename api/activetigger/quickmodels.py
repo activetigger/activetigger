@@ -37,7 +37,12 @@ from activetigger.datamodels import (
 from activetigger.db.languagemodels import ModelsService
 from activetigger.db.manager import DatabaseManager
 from activetigger.errors import InvalidInputError, NotFoundError
-from activetigger.functions import concat_text_columns, get_model_metrics
+from activetigger.functions import (
+    concat_text_columns,
+    filter_prediction_labels,
+    get_model_metrics,
+    serve_temp_export,
+)
 from activetigger.queue_manager import Queue
 from activetigger.tasks.predict_ml import PredictMLMultiClass
 from activetigger.tasks.predict_with_features import PredictWithFeatures
@@ -416,9 +421,11 @@ class QuickModels:
         dataset: str = "all",
         format: str = "parquet",
         col_id: str | None = None,
+        labels: list[str] | None = None,
     ) -> FileResponse:
         """
-        Serve the prediction parquet produced by `predict_on_dataset`.
+        Serve the prediction parquet produced by `predict_on_dataset`,
+        optionally restricted to rows predicted with one of `labels`.
         """
         file_name = f"predict_{dataset}.parquet"
         path = self.path.joinpath(name).joinpath(file_name)
@@ -430,6 +437,23 @@ class QuickModels:
         if format not in ("parquet", "csv", "xlsx"):
             raise ValueError("Format not supported")
 
+        def load() -> DataFrame:
+            df = pd.read_parquet(path)
+            target_col = col_id.removeprefix("dataset_") if col_id else "id_external"
+            df = df.reset_index()
+            first_col = df.columns[0]
+            if first_col != target_col:
+                df.rename(columns={first_col: target_col}, inplace=True)
+            return df[[target_col] + [c for c in df.columns if c != target_col]]
+
+        # filtered export: one-off file, never cached
+        if labels:
+            df = pd.read_parquet(path) if format == "parquet" else load()
+            df = filter_prediction_labels(df, labels)
+            return serve_temp_export(
+                df, format, f"{file_name}.filtered.{format}", self.path.joinpath(name)
+            )
+
         if format == "parquet":
             return FileResponse(path=path, filename=file_name)
 
@@ -437,13 +461,7 @@ class QuickModels:
         out_name = f"{file_name}.{ext}"
         out_path = self.path.joinpath(name).joinpath(out_name)
         if not out_path.exists() or out_path.stat().st_mtime < path.stat().st_mtime:
-            df = pd.read_parquet(path)
-            target_col = col_id.removeprefix("dataset_") if col_id else "id_external"
-            df = df.reset_index()
-            first_col = df.columns[0]
-            if first_col != target_col:
-                df.rename(columns={first_col: target_col}, inplace=True)
-            df = df[[target_col] + [c for c in df.columns if c != target_col]]
+            df = load()
             if format == "csv":
                 df.to_csv(out_path, index=False)
             else:

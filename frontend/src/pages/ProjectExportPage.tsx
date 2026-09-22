@@ -1,6 +1,7 @@
 import cx from 'classnames';
 import { FC, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import Select from 'react-select';
 
 import PulseLoader from 'react-spinners/PulseLoader';
 import { ProjectPageLayout } from '../components/layout/ProjectPageLayout';
@@ -53,11 +54,35 @@ export const ProjectExportPage: FC = () => {
     ? project?.nermodels?.available
     : project?.languagemodels?.available;
 
+  // Advanced setting: restrict complete-dataset prediction exports to
+  // rows predicted with one of these labels (classification schemes only)
+  const schemeLabels = useMemo(
+    () =>
+      currentScheme && project?.schemes.available[currentScheme]
+        ? project.schemes.available[currentScheme].labels
+        : [],
+    [project, currentScheme],
+  );
+  const labelOptions = schemeLabels.map((l) => ({ value: l, label: l }));
+  const [exportLabels, setExportLabels] = useState<string[]>([]);
+  useEffect(() => {
+    setExportLabels((prev) => prev.filter((l) => schemeLabels.includes(l)));
+  }, [schemeLabels]);
+  const filterLabels = (dataset: string) =>
+    dataset === 'all' && !isNer && exportLabels.length > 0 ? exportLabels : [];
+
   const downloadPrediction = async (dataset: 'all' | 'test' | 'external') => {
     if (!model) return;
     setPredictionLoading(dataset);
     try {
-      await getPredictionsFile(model, format, dataset, currentScheme, exportKind);
+      await getPredictionsFile(
+        model,
+        format,
+        dataset,
+        currentScheme,
+        exportKind,
+        filterLabels(dataset),
+      );
     } finally {
       setPredictionLoading(null);
     }
@@ -110,7 +135,14 @@ export const ProjectExportPage: FC = () => {
     if (!quickModel) return;
     setQuickPredictionLoading(dataset);
     try {
-      await getPredictionsFile(quickModel, format, dataset, currentScheme, 'quick');
+      await getPredictionsFile(
+        quickModel,
+        format,
+        dataset,
+        currentScheme,
+        'quick',
+        filterLabels(dataset),
+      );
     } finally {
       setQuickPredictionLoading(null);
     }
@@ -549,6 +581,32 @@ export const ProjectExportPage: FC = () => {
                     )}
                   </>
                 )}
+              </section>
+            )}
+            {!isNer && schemeLabels.length > 0 && (
+              <section className="mt-4">
+                <hr className="mt-1" />
+                <details className="mt-2">
+                  <summary className="text-muted small">Advanced settings</summary>
+                  <div className="mt-2" style={{ maxWidth: '40rem' }}>
+                    <label className="small mb-1">
+                      Filter complete dataset prediction exports by predicted label
+                    </label>
+                    <Select
+                      isMulti
+                      options={labelOptions}
+                      value={labelOptions.filter((o) => exportLabels.includes(o.value))}
+                      onChange={(selected) => setExportLabels(selected.map((o) => o.value))}
+                      placeholder="All labels (no filter)"
+                    />
+                    {exportLabels.length > 0 && (
+                      <div className="text-muted small mt-1">
+                        Only elements predicted as {exportLabels.join(', ')} will be exported
+                        (quickmodel and BERT complete dataset exports).
+                      </div>
+                    )}
+                  </div>
+                </details>
               </section>
             )}
           </div>

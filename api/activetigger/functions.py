@@ -2,6 +2,7 @@ import io
 import json
 import os
 import string
+import tempfile
 import unicodedata
 from getpass import getpass
 from pathlib import Path
@@ -17,6 +18,7 @@ import spacy
 import torch
 from cryptography.fernet import Fernet
 from fastapi import HTTPException
+from fastapi.responses import FileResponse
 from pandas import Series
 from sklearn.metrics import (
     accuracy_score,
@@ -27,6 +29,7 @@ from sklearn.metrics import (
 )
 from sklearn.preprocessing import OneHotEncoder
 from slugify import slugify as python_slugify
+from starlette.background import BackgroundTask
 from torch import Tensor
 from torch.nn import Sigmoid
 
@@ -698,6 +701,34 @@ def concat_text_columns(df: pd.DataFrame, cols_text: list[str]) -> pd.Series:
     joining non-null values with a double newline separator.
     """
     return df[cols_text].apply(lambda x: "\n\n".join([str(i) for i in x if pd.notnull(i)]), axis=1)
+
+
+def filter_prediction_labels(df: pd.DataFrame, labels: list[str]) -> pd.DataFrame:
+    """
+    Keep rows whose predicted label is in `labels`
+    """
+    if "prediction" not in df.columns:
+        raise ValueError("No prediction column in this file")
+    wanted = set(labels)
+    mask = [pd.notna(p) and bool(wanted & set(str(p).split("|"))) for p in df["prediction"]]
+    return df[mask]
+
+
+def serve_temp_export(
+    df: pd.DataFrame, format: str, file_name: str, directory: Path
+) -> FileResponse:
+    """
+    Write df to a temporary file in `directory`
+    """
+    fd, tmp = tempfile.mkstemp(suffix=f".{format}", dir=directory)
+    os.close(fd)
+    if format == "parquet":
+        df.to_parquet(tmp, index=True)
+    elif format == "csv":
+        df.to_csv(tmp, index=False)
+    else:
+        df.to_excel(tmp, index=False)
+    return FileResponse(path=tmp, filename=file_name, background=BackgroundTask(os.remove, tmp))
 
 
 def get_model_metrics(path_model: Path) -> dict | None:

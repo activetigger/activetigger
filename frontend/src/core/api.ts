@@ -1979,6 +1979,7 @@ export function useGetPredictionsFile(projectSlug: string | null) {
       dataset: string = 'all',
       scheme: string = '',
       kind: string = 'bert',
+      labels: string[] = [],
     ) => {
       if (projectSlug) {
         const res = await api.GET('/export/prediction', {
@@ -1989,6 +1990,7 @@ export function useGetPredictionsFile(projectSlug: string | null) {
               format: format,
               dataset: dataset,
               kind: kind,
+              labels: labels.length > 0 ? labels : undefined,
             },
           },
           parseAs: 'blob',
@@ -1996,7 +1998,11 @@ export function useGetPredictionsFile(projectSlug: string | null) {
 
         if (!res.error) {
           notify({ type: 'success', message: 'Exporting predicted data.' });
-          saveAs(res.data, `predictions_${projectSlug}_${model}_${scheme}_${dataset}.${format}`);
+          const suffix = labels.length > 0 ? '_filtered' : '';
+          saveAs(
+            res.data,
+            `predictions_${projectSlug}_${model}_${scheme}_${dataset}${suffix}.${format}`,
+          );
         }
         return true;
       }

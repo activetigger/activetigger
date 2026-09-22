@@ -112,12 +112,14 @@ def export_prediction(
     name: str = Query(),
     dataset: str = Query("all"),
     kind: str = Query("bert"),
+    labels: list[str] | None = Query(None),
 ) -> FileResponse:
     """
     Export prediction file (parquet/csv/xlsx). `kind` selects which manager
     owns the file: BERT classifications under `languagemodels`, NER span
     predictions under `nermodels`, quickmodel predictions on the whole
-    dataset under `quickmodels`.
+    dataset under `quickmodels`. `labels` keeps only rows predicted with
+    one of these labels (classification only).
     """
     test_rights(ProjectAction.EXPORT_DATA, current_user.username, project.name)
     try:
@@ -125,6 +127,10 @@ def export_prediction(
             if project.nermodels is None:
                 raise HTTPException(
                     status_code=400, detail="NER models are not available for this project"
+                )
+            if labels:
+                raise HTTPException(
+                    status_code=400, detail="Label filtering is not available for NER predictions"
                 )
             return project.nermodels.export_prediction(
                 name=name,
@@ -138,12 +144,14 @@ def export_prediction(
                 dataset=dataset,
                 format=format,
                 col_id=project.params.col_id,
+                labels=labels,
             )
         return project.languagemodels.export_prediction(
             name=name,
             file_name=f"predict_{dataset}.parquet",
             format=format,
             col_id=project.params.col_id,
+            labels=labels,
         )
     except (HTTPException, APIError, OverflowError):
         raise

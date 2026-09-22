@@ -7225,6 +7225,7 @@ export interface operations {
                 name: string;
                 dataset?: string;
                 kind?: string;
+                labels?: string[] | null;
                 project_slug: string;
             };
             header?: never;
