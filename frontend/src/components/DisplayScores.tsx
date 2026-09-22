@@ -1,15 +1,10 @@
 import { FC, useState } from 'react';
-import { Modal } from 'react-bootstrap';
-import DataGrid, { Column } from 'react-data-grid';
 import { FaCloudDownloadAlt } from 'react-icons/fa';
-import { Link } from 'react-router-dom';
-import { useAppContext } from '../core/useAppContext';
 import { MLStatisticsModel } from '../types';
-import { DisplaySpanFalsePredictions, SpanFalsePredictionDoc } from './DisplaySpanFalsePredictions';
 import { DisplayTableStatistics } from './DisplayTableStatistics';
 import { DisplayTableStatisticsReact } from './DisplayTableStatisticsReact';
 import { DisplayTableStatisticsReactMultilabel } from './DisplayTableStatisticsReactMultiLabel';
-import { ImageThumbnailImagexp } from './ImageThumbnailImagexp';
+import { WrongPredictionsModal } from './WrongPredictionsModal';
 
 export interface DisplayScoresProps {
   title: string | null;
@@ -18,13 +13,6 @@ export interface DisplayScoresProps {
   projectSlug?: string | null;
   dataset?: string;
   exclude_labels?: string[];
-}
-
-interface Row {
-  id: string;
-  label: string;
-  prediction: string;
-  text: string;
 }
 
 /**
@@ -40,13 +28,6 @@ export const DisplayScores: FC<DisplayScoresProps> = ({
   exclude_labels,
 }) => {
   const [viewTable] = useState<boolean>(false);
-  const { appContext } = useAppContext();
-  const isImageKind = appContext.currentProject?.params.kind === 'image';
-  const datasetClean = dataset.includes('test')
-    ? 'test'
-    : dataset.includes('valid')
-      ? 'valid'
-      : 'train';
   const downloadModel = () => {
     if (!scores) return; // Ensure model is not null or undefined
 
@@ -63,73 +44,6 @@ export const DisplayScores: FC<DisplayScoresProps> = ({
     link.click();
   };
   const [showWrongPredictions, setShowWrongPredictions] = useState(false);
-  const columns: readonly Column<Row>[] = [
-    {
-      key: 'id',
-      name: 'Id',
-      resizable: true,
-      width: 180,
-      renderCell: (props) => (
-        <div>
-          {projectSlug ? (
-            <Link to={`/projects/${projectSlug}/tag/${props.row.id}?dataset=${datasetClean}`}>
-              {props.row.id}
-            </Link>
-          ) : (
-            props.row.id
-          )}
-        </div>
-      ),
-    },
-    {
-      name: 'Label',
-      key: 'GS-label',
-      resizable: true,
-      width: 120,
-    },
-    {
-      name: 'Prediction',
-      key: 'prediction',
-      resizable: true,
-      width: 120,
-    },
-    {
-      name: isImageKind ? 'Image' : 'Text',
-      key: 'text',
-      resizable: true,
-      renderCell: (props) =>
-        isImageKind && projectSlug ? (
-          <div
-            style={{
-              width: '100%',
-              height: '100%',
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'center',
-            }}
-          >
-            <ImageThumbnailImagexp
-              projectSlug={projectSlug}
-              elementId={props.row.id}
-              maxWidth={160}
-              maxHeight={110}
-            />
-          </div>
-        ) : (
-          <div
-            style={{
-              maxHeight: '100%',
-              width: '100%',
-              whiteSpace: 'wrap',
-              overflowY: 'auto',
-              userSelect: 'none',
-            }}
-          >
-            {props.row.text}
-          </div>
-        ),
-    },
-  ];
   if (!scores) return;
   return (
     <div>
@@ -184,35 +98,14 @@ export const DisplayScores: FC<DisplayScoresProps> = ({
         Download as JSON
       </button>
 
-      <Modal
+      <WrongPredictionsModal
         show={showWrongPredictions}
-        id="quickmodel-modal"
         onHide={() => setShowWrongPredictions(false)}
-        centered
-        size="xl"
-      >
-        <Modal.Header closeButton>
-          <Modal.Title>Wrong predictions of the model {modelName}</Modal.Title>
-        </Modal.Header>
-        <Modal.Body>
-          {scores.training_kind === 'ner' ? (
-            <DisplaySpanFalsePredictions
-              falsePredictions={
-                (scores['false_predictions'] as unknown as SpanFalsePredictionDoc[]) || []
-              }
-              projectSlug={projectSlug}
-              dataset={dataset}
-            />
-          ) : (
-            <DataGrid<Row>
-              className="fill-grid rdg-light"
-              columns={columns}
-              rows={scores['false_predictions'] as Row[]}
-              rowHeight={isImageKind ? 120 : 80}
-            />
-          )}
-        </Modal.Body>
-      </Modal>
+        scores={scores}
+        modelName={modelName}
+        projectSlug={projectSlug}
+        dataset={dataset}
+      />
     </div>
   );
 };

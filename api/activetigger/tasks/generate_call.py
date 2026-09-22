@@ -171,6 +171,12 @@ class GenerateCall(BaseTask):
                     self._flush_to_jsonl(results[last_flushed:], batch)
                 raise Exception("Process was interrupted")
 
+            # surface failures instead of silently returning a partial/empty batch
+            if errors and not results:
+                raise Exception(f"All {len(errors)} generation calls failed: {errors[0]}")
+            if errors:
+                print(f"Generation batch {batch}: {len(errors)}/{total} calls failed: {errors[0]}")
+
             return results
         finally:
             progress_path.unlink(missing_ok=True)

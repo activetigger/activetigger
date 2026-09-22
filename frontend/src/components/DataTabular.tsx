@@ -9,12 +9,12 @@ import { MdSkipNext, MdSkipPrevious } from 'react-icons/md';
 import { Modal } from 'react-bootstrap';
 import { HiOutlineQuestionMarkCircle } from 'react-icons/hi';
 import { Link } from 'react-router-dom';
-import Select from 'react-select';
 import { Tooltip } from 'react-tooltip';
-import { useAddTableAnnotations, useTableElements } from '../core/api';
+import { useTableElements } from '../core/api';
 import { AppContextValue } from '../core/context';
-import { AnnotationModel } from '../types';
+import { useTableAnnotationEdits } from '../core/useTableAnnotationEdits';
 import { ImageThumbnailImagexp } from './ImageThumbnailImagexp';
+import { LabelDropdownEditor, LabelMultiSelectEditor } from './LabelCellEditors';
 import { TableFilterState, TableTagFilterSelect } from './TableTagFilterSelect';
 
 interface Row {
@@ -53,7 +53,11 @@ export const DataTabular: FC<DataTabularModel> = ({
 }) => {
   const isImageKind = projectKind === 'image';
   // data modification management
-  const [modifiedRows, setModifiedRows] = useState<Record<string, AnnotationModel>>({});
+  const { modifiedRows, registerChange, validateChanges } = useTableAnnotationEdits(
+    projectSlug || null,
+    currentScheme || null,
+    currentDataset || null,
+  );
 
   // change the dataset of the context
   const changeDataSet = (dataset: string) => {
@@ -216,85 +220,32 @@ export const DataTabular: FC<DataTabularModel> = ({
     { key: 'timestamp', name: 'Changed', resizable: true, width: 100 },
   ];
 
-  // multi-select editor for multilabel schemes: chips with remove + dropdown to add
+  // label editors
   function renderMultilabel({ row, onRowChange }: RenderEditCellProps<Row>) {
-    const current = row.labels ? row.labels.split('|').filter(Boolean) : [];
-    const options = (availableLabels as string[]).map((l) => ({ value: l, label: l }));
     return (
-      <Select
-        isMulti
-        autoFocus
-        defaultMenuIsOpen
-        closeMenuOnSelect={false}
-        blurInputOnSelect={false}
-        menuPortalTarget={document.body}
-        menuPosition="fixed"
-        options={options}
-        value={current.map((l) => ({ value: l, label: l }))}
-        onChange={(selected) => {
-          const next = (selected || []).map((o) => o.value).join('|');
-          onRowChange({ ...row, labels: next }, false);
-          setModifiedRows((prev) => ({
-            ...prev,
-            [row.id_internal]: {
-              element_id: row.id_internal,
-              label: next,
-              scheme: currentScheme as string,
-              project_slug: projectSlug as string,
-              dataset: currentDataset,
-            },
-          }));
+      <LabelMultiSelectEditor
+        value={row.labels}
+        availableLabels={availableLabels}
+        onChange={(label, commit) => {
+          onRowChange({ ...row, labels: label }, commit);
+          registerChange(row.id_internal, label);
         }}
-        onBlur={() => onRowChange(row, true)}
-        styles={{
-          container: (base) => ({ ...base, width: '100%' }),
-          control: (base) => ({ ...base, minHeight: 30, fontSize: 12 }),
-          menu: (base) => ({ ...base, fontSize: 12 }),
-          menuPortal: (base) => ({ ...base, zIndex: 9999 }),
-        }}
+        onClose={() => onRowChange(row, true)}
       />
     );
   }
 
-  // specific function to have a select component
   function renderDropdown({ row, onRowChange }: RenderEditCellProps<Row>) {
     return (
-      <select
+      <LabelDropdownEditor
         value={row.labels}
-        onChange={(event) => {
-          onRowChange({ ...row, labels: event.target.value }, true);
-          setModifiedRows((prevState) => ({
-            ...prevState,
-            [row.id_internal]: {
-              element_id: row.id_internal,
-              label: event.target.value,
-              scheme: currentScheme as string,
-              project_slug: projectSlug as string,
-              dataset: currentDataset,
-            },
-          }));
+        availableLabels={availableLabels}
+        onChange={(label, commit) => {
+          onRowChange({ ...row, labels: label }, commit);
+          registerChange(row.id_internal, label);
         }}
-        autoFocus
-      >
-        <option></option>
-        {(availableLabels as string[]).map((l) => (
-          <option key={l} value={l}>
-            {l}
-          </option>
-        ))}
-      </select>
+      />
     );
-  }
-
-  // send changes
-  const { addTableAnnotations } = useAddTableAnnotations(
-    projectSlug || null,
-    currentScheme || null,
-    currentDataset || null,
-  );
-  function validateChanges() {
-    addTableAnnotations(Object.values(modifiedRows)); // send the modifications
-    setModifiedRows({}); // reset modified rows
   }
 
   function range(start: number, end: number) {
@@ -394,8 +345,8 @@ export const DataTabular: FC<DataTabularModel> = ({
         {Object.keys(modifiedRows).length > 0 && (
           <button
             className="btn-primary-action"
-            onClick={() => {
-              validateChanges();
+            onClick={async () => {
+              await validateChanges();
               setChangeTrigger(!changeTrigger);
             }}
           >
