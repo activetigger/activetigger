@@ -56,8 +56,16 @@ Monitoring events could remove the need for the API task callback routes. But do
 
 TODO:
 
-- task monitoring through signals
+1. port TrainBert into Celery api/activetigger/tasks/train_bert.py
+2. see how the complex monitoring of that task can be done from celery
+3. make sure the task can be interrupted
+4. enhance documentation about task refacto
+5. do a live refacto with others in the team
+
+Later :
+
 - task interuption by user
+- refacto task monitoring through signals
 - type issue in orchestrator callback
 - transform ComputeFeaturesFromSpecs as a celery group of sub tasks
 - add common data folder configurable to allow distant task manager with mounting point ?
