@@ -7,14 +7,30 @@ import os
 import shutil
 from collections import Counter
 from logging import Logger
+from os.path import join
 from pathlib import Path
-from typing import Any, Optional, Tuple, cast
+from typing import Any, Literal, cast
 
 import datasets
 import numpy as np
 import pandas as pd
 import torch
-from pandas import DataFrame
+from activetigger.config import config
+from activetigger.datamodels import EventsDict, LMParametersModel, MLStatisticsModel
+from activetigger.functions import (
+    activate_probs,
+    get_device,
+    get_metrics_multiclass,
+    get_metrics_multilabel,
+    logits_to_probs,
+    matrix_to_label,
+    release_device_memory,
+    split_annotation,
+)
+from activetigger.monitoring import TaskTimer
+from activetigger.tasks.predict_bert import annotations_to_matrix
+from activetigger.tasks.utils import length_after_tokenizing, retrieve_model_max_length
+from openai import BaseModel
 from torch import nn
 from torch.utils.data import Dataset as TorchDataset
 from transformers import (
@@ -28,30 +44,13 @@ from transformers import (
     set_seed,
 )
 
-from activetigger.config import config
-from activetigger.datamodels import EventsModel, LMParametersModel, MLStatisticsModel
-from activetigger.functions import (
-    activate_probs,
-    get_device,
-    get_metrics_multiclass,
-    get_metrics_multilabel,
-    logits_to_probs,
-    matrix_to_label,
-    release_device_memory,
-    split_annotation,
-)
-from activetigger.monitoring import TaskTimer
-from activetigger.tasks.base_task import BaseTask
-from activetigger.tasks.predict_bert import annotations_to_matrix
-from activetigger.tasks.utils import length_after_tokenizing, retrieve_model_max_length
-
 pd.set_option("future.no_silent_downcasting", True)
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
 class CustomLoggingCallback(TrainerCallback):
-    event: Optional[multiprocessing.synchronize.Event]
+    event: multiprocessing.synchronize.Event | None
     current_path: Path
     logger: Logger
 
@@ -154,7 +153,28 @@ class CustomTrainer(Trainer):
         return (loss, outputs) if return_outputs else loss
 
 
-class TrainBert(BaseTask):
+class TrainBertTaskInput(BaseModel):
+    path: Path
+    project_slug: str
+    model_name: str
+    #df: DataFrame | datasets.Dataset
+    training_kind: Literal["multiclass", "multilabel"]
+    scheme_labels: set[str]
+    use_dichotomization: bool
+    col_text: str
+    col_label: str
+    base_model: str
+    params: LMParametersModel
+    test_size: float
+    label_for_dichotomization: str | None = None
+    unique_id: str | None
+    loss: str | None = "cross_entropy"
+    max_length: int = 512
+    auto_max_length: bool = False
+    class_balance: bool = False
+    class_min_freq: int = 1
+
+class TrainBert:
     """
     Class to train a bert model
 
@@ -175,73 +195,53 @@ class TrainBert(BaseTask):
     TODO : test more weighted loss entropy
     """
 
+    
+
     kind = "train_bert"
+    df_input_filename = "train_bert_df.parquet"
 
     def __init__(
         self,
-        path: Path,
-        project_slug: str,
-        model_name: str,
-        df: DataFrame | datasets.Dataset,
-        training_kind: str,
-        scheme_labels: list[str],
-        use_dichotomization: bool,
-        col_text: str,
-        col_label: str,
-        base_model: str,
-        params: LMParametersModel,
-        test_size: float,
-        label_for_dichotomization: str | None = None,
-        event: Optional[multiprocessing.synchronize.Event] = None,
-        unique_id: Optional[str] = None,
-        loss: Optional[str] = "cross_entropy",
-        max_length: int = 512,
-        auto_max_length: bool = False,
-        class_balance: bool = False,
-        class_min_freq: int = 1,
-        **kwargs,
+       inputs: TrainBertTaskInput
     ):
-        super().__init__()
-        self.path = path
-        self.project_slug = project_slug
-        self.name = model_name
-        df.index.name = "id"  # ty: ignore[unresolved-attribute]
-        self.df = df
-        if training_kind not in ["multiclass", "multilabel"]:
+        self.path = inputs.path
+        self.project_slug = inputs.project_slug
+        self.name = inputs.model_name
+        
+        
+        if inputs.training_kind not in ["multiclass", "multilabel"]:
             raise ValueError(
-                (
                     f"TrainBERT only works for multiclass and "
-                    f"multilabel but you set training_kind = {training_kind}"
-                )
+                    f"multilabel but you set training_kind = {inputs.training_kind}"
             )
-        self.training_kind = training_kind
-        if len(scheme_labels) != len(set(scheme_labels)):
+        self.training_kind = inputs.training_kind
+        if len(inputs.scheme_labels) != len(set(inputs.scheme_labels)):
             raise ValueError(
-                (f"Labels in your scheme are not unique.\nLabels provided : {scheme_labels}")
+                f"Labels in your scheme are not unique.\nLabels provided : {inputs.scheme_labels}"
             )
-        if use_dichotomization:
+        if inputs.use_dichotomization:
             raise ValueError("Dichotomization not supported in multilabel.")
-        self.use_dichotomization = use_dichotomization
-        self.label_for_dichotomization = label_for_dichotomization
-        self.scheme_labels = scheme_labels
-        self.col_text = col_text
-        self.col_label = col_label
-        self.base_model = base_model
-        self.params = params
-        self.test_size = test_size
-        self.event = event
-        self.unique_id = unique_id
-        if loss == "weighted_cross_entropy" and training_kind == "multilabel":
+        self.use_dichotomization = inputs.use_dichotomization
+        self.label_for_dichotomization = inputs.label_for_dichotomization
+        self.scheme_labels = inputs.scheme_labels
+        self.col_text = inputs.col_text
+        self.col_label = inputs.col_label
+        self.base_model = inputs.base_model
+        self.params = inputs.params
+        self.test_size = inputs.test_size
+        # self.event = event
+        self.unique_id = inputs.unique_id
+        if inputs.loss == "weighted_cross_entropy" and inputs.training_kind == "multilabel":
             raise ValueError(
                 "weighted_cross_entropy loss is not supported for multilabel classification."
             )
-        self.loss = loss
-        self.max_length = max_length
-        self.auto_max_length = auto_max_length
-        self.class_balance = class_balance
-        self.class_min_freq = class_min_freq
+        self.loss = inputs.loss
+        self.max_length = inputs.max_length
+        self.auto_max_length = inputs.auto_max_length
+        self.class_balance = inputs.class_balance
+        self.class_min_freq = inputs.class_min_freq
 
-    def __init_paths(self) -> Tuple[Path, Path]:
+    def __init_paths(self) -> tuple[Path, Path]:
         """Initiate the current path (directory for the model) and for the logger"""
         #  create repertory for the specific model
         current_path = self.path.joinpath(self.name)
@@ -270,9 +270,10 @@ class TrainBert(BaseTask):
         logger.info(f"Start {self.base_model}")
         return logger
 
-    def __check_data(self, df: pd.DataFrame, col_label: str, col_text: str) -> pd.DataFrame:
+    def __check_data(self, col_label: str, col_text: str) -> pd.DataFrame:
         """Remove rows missing labels or text"""
-        df = df.copy()
+        df = pd.read_parquet(join(self.path, TrainBert.df_input_filename))
+        df.index.name = "id"  # ty: ignore[unresolved-attribute]
         # test labels missing values and remove them
         if df[col_label].isnull().sum() > 0:
             df = df[df[col_label].notnull()]
@@ -368,7 +369,7 @@ class TrainBert(BaseTask):
         original_max_length: int,
         base_model_max_length: int,
         adapt: bool,
-    ) -> Tuple[Any, int, int]:
+    ) -> tuple[Any, int, int]:
         """Cap the tokenizer max length and create a tokenizing function"""
 
         # if auto_max_length set max_length to the maximum length of tokenized sentences
@@ -480,7 +481,7 @@ class TrainBert(BaseTask):
             report_to=[],
         )
 
-        callback = CustomLoggingCallback(self.event, current_path=current_path, logger=self.logger)
+        callback = CustomLoggingCallback(None, current_path=current_path, logger=self.logger)
         eval_dataset = ds["test"] if has_test else None
         if loss == "cross_entropy":
             trainer = Trainer(
@@ -578,7 +579,7 @@ class TrainBert(BaseTask):
         with open(str(current_path.joinpath("metrics_training.json")), "w") as f:
             json.dump(metrics_data, f)
 
-    def __call__(self) -> EventsModel:
+    def run(self) -> EventsDict:
         """
         Main process to the task
         """
@@ -598,7 +599,6 @@ class TrainBert(BaseTask):
         device = get_device()
 
         self.df = self.__check_data(
-            self.df,  # ty: ignore[invalid-argument-type]
             self.col_label,
             self.col_text,
         )
@@ -762,6 +762,7 @@ class TrainBert(BaseTask):
             task_timer.stop("evaluate")
 
             task_timer.start("save_files")
+            # TODO:remove input dataframe from disk
             params_to_save = self.params.model_dump()
             params_to_save.update(
                 {
@@ -817,12 +818,12 @@ class TrainBert(BaseTask):
                     self.df,
                     self.ds,
                     device,
-                    self.event,
                 )
+                os.unlink(join(self.path, TrainBert.df_input_filename))
                 release_device_memory()
                 gc.collect()
 
             except Exception as e:
                 print("Error in cleaning memory", e)
 
-        return EventsModel(events=task_timer.get_events())
+        return EventsDict({'events':task_timer.get_events()})

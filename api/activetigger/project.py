@@ -2626,12 +2626,6 @@ class Project:
                             self.features.reset_features_file()
                             self.bertopic.clear_bertopic()
                             self.projections.clear_projections()
-
-                    case "train_bert":
-                        model = cast(LMComputing, e)
-                        events = cast(EventsModel, results)
-                        self.languagemodels.add(model)
-                        self.monitoring.close_process(model.unique_id, events)
                     case "predict_bert":
                         prediction = cast(LMComputing, e)
                         if (
@@ -2782,11 +2776,6 @@ class Project:
                 print(f"Error in {e.kind} : {ex}")
                 self.errors.add(f"Error in {e.kind} : {str(ex)}")
                 match e.kind:
-                    case "train_bert":
-                        bert_task = cast(LMComputing, e)
-                        self.db_manager.language_models_service.delete_model(
-                            self.name, bert_task.model_name
-                        )
                     case "train_image":
                         image_task = cast(LMComputing, e)
                         self.db_manager.language_models_service.delete_model(

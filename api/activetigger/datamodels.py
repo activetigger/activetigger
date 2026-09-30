@@ -1,7 +1,7 @@
 import datetime
 from enum import Enum, StrEnum
 from pathlib import Path
-from typing import Annotated, Any, Callable, Literal, Optional
+from typing import Annotated, Any, Callable, Literal, Optional, TypedDict
 
 from pandas import DataFrame
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field  # for dataframe
@@ -1366,6 +1366,8 @@ class TrainMLResults(BaseModel):
 
 
 class EventsModel(BaseModel):
+    events: dict[str, dict[str, str | None]]
+class EventsDict(TypedDict):
     events: dict[str, dict[str, str | None]]
 
 

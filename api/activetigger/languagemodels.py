@@ -3,12 +3,16 @@ import os
 import shutil
 import time
 from datetime import datetime, timezone
+from os.path import join
 from pathlib import Path
 from typing import Any, Callable, Optional, Tuple, cast
 
 import pandas as pd
+from celery import uuid
 from fastapi.responses import FileResponse
 from pandas import DataFrame
+from task_manager.tasks.train_bert import TrainBert
+from task_manager.tasks.train_bert_task import TrainBertTaskInput, train_bert
 
 import activetigger.functions as functions
 from activetigger.config import config
@@ -30,7 +34,6 @@ from activetigger.errors import AlreadyExistsError, InvalidInputError, NotFoundE
 from activetigger.functions import get_model_metrics
 from activetigger.queue_manager import Queue
 from activetigger.tasks.predict_bert import PredictBertMultiClass
-from activetigger.tasks.train_bert import TrainBert
 
 
 class LanguageModels:
@@ -204,9 +207,9 @@ class LanguageModels:
         TODO : implement
         """
         if kind == "train":
-            return 4
+            return 2
         if kind == "predict":
-            return 3
+            return 1
         return 0
 
     def start_training_process(
@@ -258,36 +261,41 @@ class LanguageModels:
         if params.gpu:
             mem = functions.get_gpu_memory_info()
             if self.estimate_memory_use(model_name, kind="train") > mem.available_memory:
+                print(f"needs estimation {self.estimate_memory_use(model_name, kind="train")} when we have {mem.available_memory} memory")
                 raise Exception("Not enough GPU memory available. Wait or reduce batch.")
 
+        # write df on disk
+        df.to_parquet(join(self.path, TrainBert.df_input_filename))
+        # prepare input payload
+        
+        # create unique id
+        unique_id = uuid()
         # launch as a independant process
         if training_kind not in ["multilabel", "multiclass"]:
             raise Exception("training_kind must be multilabel or multiclass")
-        unique_id = self.queue.add_task(
-            "training",
-            project,
-            TrainBert(
-                path=self.path,
-                project_slug=project,
-                model_name=model_name,
-                df=df.copy(deep=True),
-                training_kind=training_kind,
-                scheme_labels=scheme_labels,
-                col_label=col_label,
-                col_text=col_text,
-                base_model=base_model,
-                params=params,
-                test_size=test_size,
-                loss=loss,
-                max_length=max_length,
-                auto_max_length=auto_max_length,
-                class_balance=class_balance,
-                class_min_freq=class_min_freq,
-                use_dichotomization=use_dichotomization,
-                label_for_dichotomization=label_for_dichotomization,
-            ),
-            queue="gpu",
+        trainBertInputs = TrainBertTaskInput(
+            unique_id=unique_id,
+            path=self.path,
+            project_slug=project,
+            model_name=model_name,
+            training_kind=training_kind,
+            scheme_labels=scheme_labels,
+            col_label=col_label,
+            col_text=col_text,
+            base_model=base_model,
+            params=params,
+            test_size=test_size,
+            loss=loss,
+            max_length=max_length,
+            auto_max_length=auto_max_length,
+            class_balance=class_balance,
+            class_min_freq=class_min_freq,
+            use_dichotomization=use_dichotomization,
+            label_for_dichotomization=label_for_dichotomization,
         )
+        # queue celery task
+        train_bert.s(trainBertInputs.model_dump(mode='json')).apply_async(task_id=unique_id)
+
         del df
 
         # add flags in params
@@ -307,6 +315,7 @@ class LanguageModels:
                 dataset=None,
                 params=params.model_dump(),
                 get_progress=self.get_progress(model_name, status="training"),
+                managed_by_celery=True
             )
         )
         return unique_id
