@@ -31,6 +31,7 @@ from activetigger.tasks.compute_dfm import ComputeDfm
 from activetigger.tasks.compute_fasttext import ComputeFasttext
 from activetigger.tasks.compute_multimodal import ComputeMultimodal
 from activetigger.tasks.compute_sbert import ComputeSbert
+from activetigger.tasks.task_manager_client import enqueue_celery_task
 
 # Experimental image projects: list of selectable image embedding models.
 # Each entry maps a UI label to (open_clip model name, pretrained tag).
@@ -809,13 +810,12 @@ class Features:
             max_length_tokens = int(parameters.get("max_length_tokens", 512))
             batch_size = int(parameters.get("batch_size", 32))
             # queue celery task
-            # generate an id to add it to computing
-            unique_id = uuid()
+            
             task_managed_by_celery =True
-            compute_bert_embeddings.s(ComputeBertEmbeddingsTaskInput(
+            (unique_id, abortable) = enqueue_celery_task(compute_bert_embeddings, ComputeBertEmbeddingsTaskInput(
                 feature_name=name,
                 username = username,
-                project_slug=self.project_slug,
+                project_slug=self.project_slug,# generate an id to add it to computing
                 texts_path= texts_path,
                 path_process=self.path_all.parent,
                 model_name=model_name,
@@ -823,8 +823,7 @@ class Features:
                 pooling=pooling,
                 batch_size=batch_size,
                 max_tokens=max_length_tokens,
-            )# it's mandatory to dump the model to a JSON compatible dict
-            .model_dump(mode='json')).apply_async(task_id=unique_id)
+            ))
 
             parameters = {
                 "model": model_name,
@@ -945,7 +944,8 @@ class Features:
                     user=username,
                     name=name,
                     time=datetime.now(timezone.utc),
-                    managed_by_celery=task_managed_by_celery
+                    managed_by_celery=task_managed_by_celery,
+                    abortable_celery_task= abortable
                 )
             )
             return None

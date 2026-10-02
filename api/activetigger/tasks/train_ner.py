@@ -29,6 +29,7 @@ import numpy as np
 import pandas as pd
 import torch
 from pandas import DataFrame
+from task_manager.tasks.train_bert import CustomLoggingCallback
 from transformers import (
     AutoModelForTokenClassification,
     AutoTokenizer,  # ty: ignore[possibly-missing-import]
@@ -44,7 +45,6 @@ from activetigger.functions import get_device, release_device_memory
 from activetigger.monitoring import TaskTimer
 from activetigger.ner_metrics import compute_ner_metrics
 from activetigger.tasks.base_task import BaseTask
-from activetigger.tasks.train_bert import CustomLoggingCallback
 from activetigger.tasks.utils import retrieve_model_max_length
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"

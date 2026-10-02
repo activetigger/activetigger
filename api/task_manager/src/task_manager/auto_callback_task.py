@@ -1,6 +1,9 @@
 from enum import StrEnum
+from typing import TypedDict, TypeVar
 
 from celery import Task
+from celery.contrib.abortable import AbortableTask
+from pydantic import BaseModel
 
 from task_manager.utils import (
     TaskFailureReportForCallback,
@@ -15,8 +18,9 @@ class QueueName(StrEnum):
     CPU="CPU"
     GPU="GPU"
 
+
 class AutoCallbackTask(Task):
-    """Base contract for tasks which needs to callback orchestrator.
+    """Base contract for tasks which need to callback the orchestrator.
 
     Subclasses must implement:
       - `run(**kwargs)` — the actual work (registered as the Celery task)
@@ -38,3 +42,6 @@ class AutoCallbackTask(Task):
             'task_name': self.name} # ty:ignore[invalid-argument-type]
         task_failure_callback(task_id, report)
         return super().on_failure(exc, task_id, args, kwargs, einfo)
+
+class AbortableAutoCallbackTask(AutoCallbackTask, AbortableTask):
+    pass

@@ -34,6 +34,7 @@ from activetigger.errors import AlreadyExistsError, InvalidInputError, NotFoundE
 from activetigger.functions import get_model_metrics
 from activetigger.queue_manager import Queue
 from activetigger.tasks.predict_bert import PredictBertMultiClass
+from activetigger.tasks.task_manager_client import enqueue_celery_task
 
 
 class LanguageModels:
@@ -268,13 +269,10 @@ class LanguageModels:
         df.to_parquet(join(self.path, TrainBert.df_input_filename))
         # prepare input payload
         
-        # create unique id
-        unique_id = uuid()
         # launch as a independant process
         if training_kind not in ["multilabel", "multiclass"]:
             raise Exception("training_kind must be multilabel or multiclass")
         trainBertInputs = TrainBertTaskInput(
-            unique_id=unique_id,
             path=self.path,
             project_slug=project,
             model_name=model_name,
@@ -294,8 +292,8 @@ class LanguageModels:
             label_for_dichotomization=label_for_dichotomization,
         )
         # queue celery task
-        train_bert.s(trainBertInputs.model_dump(mode='json')).apply_async(task_id=unique_id)
-
+        (unique_id, abortable) = enqueue_celery_task(train_bert,trainBertInputs)
+        
         del df
 
         # add flags in params
@@ -315,7 +313,8 @@ class LanguageModels:
                 dataset=None,
                 params=params.model_dump(),
                 get_progress=self.get_progress(model_name, status="training"),
-                managed_by_celery=True
+                managed_by_celery=True,
+                abortable_celery_task=abortable
             )
         )
         return unique_id

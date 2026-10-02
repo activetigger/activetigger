@@ -6,7 +6,6 @@ Each project share a few elements:
 - users management
 - messages management
 """
-
 import asyncio
 import os
 import shutil
@@ -23,7 +22,13 @@ from jose import jwt
 
 from activetigger import __version__
 from activetigger.config import config
-from activetigger.datamodels import DatasetModel, LMComputing, ProjectBaseModel, ServerStateModel
+from activetigger.datamodels import (
+    DatasetModel,
+    LMComputing,
+    ProcessComputing,
+    ProjectBaseModel,
+    ServerStateModel,
+)
 from activetigger.db import DBException
 from activetigger.db.manager import DatabaseManager
 from activetigger.errors import (
@@ -43,6 +48,7 @@ from activetigger.monitoring import Monitoring
 from activetigger.project import Project
 from activetigger.queue_manager import Queue
 from activetigger.tasks.duplicate_project import DuplicateProject
+from activetigger.tasks.task_manager_client import stop_celery_task
 from activetigger.toolbox import Toolbox
 from activetigger.uploads import get_upload_staging
 from activetigger.users import Users
@@ -523,12 +529,31 @@ class Orchestrator:
             return None
         del self.projects[project_slug]
 
-    def stop_process(self, process_id: str, username: str) -> None:
+    def stop_process_by_process_id(self, process_id: str,  username: str) -> None:
+        """
+        Stop a specific process id
+        """
+        print(f"killing {process_id}")
+        # TODO: we would need to know if it's abortable
+        stop_celery_task(process_id, None)
+        self.queue.kill(process_id)
+        self.log_action(username, f"KILL PROCESS: {process_id}", "all")
+    
+    def stop_process(self, process: ProcessComputing, project_slug:str,  username: str) -> None:
         """
         Stop a specific process
         """
-        self.queue.kill(process_id)
-        self.log_action(username, f"KILL PROCESS: {process_id}", "all")
+        if process.managed_by_celery:
+            stop_celery_task(process.unique_id, process.abortable_celery_task)
+        else:
+            self.queue.kill(process.unique_id)
+        if process.kind in ("train_bert", "train_image"):
+            process = cast(LMComputing, process)
+            self.db_manager.language_models_service.delete_model(
+                project_slug, process.model_name
+            )
+        self.log_action(username, f"KILL PROCESS: {process.unique_id}", "all")
+
 
     def stop_user_processes(
         self, username: str, project_slug: str | None = None, kind: str | list[str] | None = None
@@ -567,24 +592,15 @@ class Orchestrator:
             processes = {p: self.projects[p].get_process(kind, username) for p in self.projects}
             for project in processes:
                 for process in processes[project]:
-                    self.queue.kill(process.unique_id)
-                    if process.kind in ("train_bert", "train_image"):
-                        process = cast(LMComputing, process)
-                        self.db_manager.language_models_service.delete_model(
-                            project, process.model_name
-                        )
+                    self.stop_process(process, project,  username)
+                    
         # kill all the processes of the user for a specific project
         else:
             if project_slug not in self.projects:
                 raise NotFoundError("This project is not loaded in memory")
             processes_project = self.projects[project_slug].get_process(kind, username)
             for process in processes_project:
-                self.queue.kill(process.unique_id)
-                if process.kind in ("train_bert", "train_image"):
-                    process = cast(LMComputing, process)
-                    self.db_manager.language_models_service.delete_model(
-                        project_slug, process.model_name
-                    )
+                self.stop_process(process, project_slug, username)
 
     def existing_projects(self) -> list:
         """

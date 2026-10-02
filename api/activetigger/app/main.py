@@ -302,7 +302,7 @@ def stop_process(
         orchestrator = get_orchestrator()
         if unique_id is not None:
             test_rights(ServerAction.MANAGE_SERVER, current_user.username)
-            orchestrator.stop_process(unique_id, current_user.username)
+            orchestrator.stop_process_by_process_id(unique_id, current_user.username)
         if project_slug is not None:
             # rights already checked
             orchestrator.stop_user_processes(current_user.username, project_slug, kind)

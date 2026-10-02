@@ -15,6 +15,10 @@ import pandas as pd
 import torch
 from pandas import DataFrame
 from PIL import Image, ImageOps
+from task_manager.tasks.train_bert import (
+    CustomTrainer,
+    compute_class_weights,
+)
 from torch.utils.data import Dataset as TorchDataset
 from transformers import (
     AutoImageProcessor,
@@ -43,10 +47,6 @@ from activetigger.functions_image import filter_readable_images
 from activetigger.monitoring import TaskTimer
 from activetigger.tasks.base_task import BaseTask
 from activetigger.tasks.predict_bert import annotations_to_matrix
-from activetigger.tasks.train_bert import (
-    CustomTrainer,
-    compute_class_weights,
-)
 
 # Cap PIL's maximum decoded pixel count to ~64 megapixels. The default of
 # ~89 MP only raises DecompressionBombError at 2× the limit, which is high

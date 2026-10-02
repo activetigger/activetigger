@@ -236,6 +236,7 @@ class Toolbox:
         element = self.queue.get(task_id)
         if element is None or element.project_slug != self._task_slug(username):
             raise HTTPException(status_code=404, detail="Task not found")
+        # TODO use revoke_celery_task in place of self.queue.kill once PrepareDataset Task has been migrated
         self.queue.kill(task_id)
 
     def status(self, username: str, session_id: str, task_id: str) -> PrepareStatusModel:

@@ -723,7 +723,7 @@ class ProcessComputing(BaseModel):
     time: datetime.datetime
     kind: str
     managed_by_celery: bool | None = None
-
+    abortable_celery_task: bool|None = None
 
 class UpdateComputing(ProcessComputing):
     update: ProjectUpdateModel

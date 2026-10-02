@@ -86,6 +86,7 @@ from activetigger.schemes import Schemes
 from activetigger.tasks.add_evalset import AddEvalSet, AddEvalSetImage
 from activetigger.tasks.extend_features import ExtendFeatures
 from activetigger.tasks.generate_call import GenerateCall
+from activetigger.tasks.task_manager_client import enqueue_celery_task, stop_celery_task
 from activetigger.tasks.update_datasets import UpdateDatasets
 from activetigger.users import Users
 
@@ -179,7 +180,7 @@ class Project:
     starting_time: float
     name: str
     queue: Queue
-    computing: list
+    computing: list[ProcessComputing]
     path_models: Path
     data: Data
     db_manager: DatabaseManager
@@ -391,8 +392,7 @@ class Project:
         params.dir = path.joinpath(self.project_slug)
 
         # start a create project task
-        unique_id = celery.uuid()
-        create_project_task.s(CreateProjectTaskInput(
+        (unique_id, abortable) = enqueue_celery_task(create_project_task, CreateProjectTaskInput(
                 image_project=False,
                 project_slug=self.project_slug,
                 params=params,
@@ -402,9 +402,7 @@ class Project:
                 valid_file=config.valid_file,
                 test_file=config.test_file,
                 features_file=config.features_file,
-                random_seed=config.random_seed,)
-                # it's mandatory to dump the model to a JSON compatible dict
-                .model_dump(mode='json')).apply_async()
+                random_seed=config.random_seed,))
         
          # Update the register
         self.computing.append(
@@ -414,7 +412,8 @@ class Project:
                 unique_id=unique_id,
                 time=datetime.now(timezone.utc),
                 kind="create_project",
-                status="training"
+                status="training",
+                abortable_celery_task=abortable
             )
         )
 
@@ -430,7 +429,7 @@ class Project:
         params.dir = path.joinpath(self.project_slug)
 
         # start a create project task
-        create_project_task.s(CreateProjectTaskInput(
+        (unique_id, abortable) = enqueue_celery_task(create_project_task, CreateProjectTaskInput(
                 image_project=True,
                 project_slug=self.project_slug,
                 params=params,
@@ -440,9 +439,21 @@ class Project:
                 valid_file=config.valid_file,
                 test_file=config.test_file,
                 features_file=config.features_file,
-                random_seed=config.random_seed,)
-                # it's mandatory to dump the model to a JSON compatible dict
-                .model_dump(mode='json')).apply_async()
+                random_seed=config.random_seed,))
+        
+        # Update the register
+        self.computing.append(
+            ProjectCreatingModel(
+                user=username,
+                project_slug=self.project_slug,
+                unique_id=unique_id,
+                time=datetime.now(timezone.utc),
+                kind="create_project",
+                status="training",
+                abortable_celery_task=abortable
+                
+            )
+        )
 
     def finish_project_creation(
         self,
@@ -756,7 +767,10 @@ class Project:
     def _kill_running_feature_extensions(self) -> bool:
         running = [c for c in self.computing if getattr(c, "kind", None) == "extend_features"]
         for c in running:
-            self.queue.kill(c.unique_id)
+            if c.managed_by_celery:
+                stop_celery_task(c.unique_id, c.abortable_celery_task)
+            else:
+                self.queue.kill(c.unique_id)
         return bool(running)
 
     def _enqueue_extend_features(self, specs: list[dict], eval_dataset: str, username: str) -> None:
@@ -1934,7 +1948,7 @@ class Project:
 
     def get_process(
         self, kind: str | list, user: str
-    ) -> list[FeatureComputing | LMComputing | QuickModelComputing]:
+    ) -> list[ProcessComputing]:
         """
         Get current processes
         """

@@ -1,11 +1,10 @@
 import gc
 import json
 import logging
-import multiprocessing
-import multiprocessing.synchronize
 import os
 import shutil
 from collections import Counter
+from collections.abc import Callable
 from logging import Logger
 from os.path import join
 from pathlib import Path
@@ -50,13 +49,13 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
 class CustomLoggingCallback(TrainerCallback):
-    event: multiprocessing.synchronize.Event | None
+    is_aborted: Callable[[],bool]
     current_path: Path
     logger: Logger
 
-    def __init__(self, event, logger, current_path):
+    def __init__(self, is_aborted, logger, current_path):
         super().__init__()
-        self.event = event
+        self.is_aborted = is_aborted
         self.current_path = current_path
         self.logger = logger
         # Set from trainer.model_accepts_loss_kwargs after the Trainer is built
@@ -91,11 +90,10 @@ class CustomLoggingCallback(TrainerCallback):
         with open(self.current_path.joinpath("log_history.txt"), "w") as f:
             json.dump(adjusted_history, f)
         # end if event set
-        if self.event is not None:
-            if self.event.is_set():
-                self.logger.info("Event set, stopping training.")
-                control.should_training_stop = True
-                raise Exception("Process interrupted by user")
+        if self.is_aborted():
+            self.logger.info("Event set, stopping training.")
+            control.should_training_stop = True
+            raise Exception("Process interrupted by user")
 
 
 # Function for the weighted loss computation
@@ -167,7 +165,6 @@ class TrainBertTaskInput(BaseModel):
     params: LMParametersModel
     test_size: float
     label_for_dichotomization: str | None = None
-    unique_id: str | None
     loss: str | None = "cross_entropy"
     max_length: int = 512
     auto_max_length: bool = False
@@ -202,7 +199,9 @@ class TrainBert:
 
     def __init__(
         self,
-       inputs: TrainBertTaskInput
+        unique_id:str,
+        inputs: TrainBertTaskInput,
+        is_aborted: Callable[[],bool]
     ):
         self.path = inputs.path
         self.project_slug = inputs.project_slug
@@ -230,7 +229,7 @@ class TrainBert:
         self.params = inputs.params
         self.test_size = inputs.test_size
         # self.event = event
-        self.unique_id = inputs.unique_id
+        self.unique_id = unique_id
         if inputs.loss == "weighted_cross_entropy" and inputs.training_kind == "multilabel":
             raise ValueError(
                 "weighted_cross_entropy loss is not supported for multilabel classification."
@@ -240,6 +239,7 @@ class TrainBert:
         self.auto_max_length = inputs.auto_max_length
         self.class_balance = inputs.class_balance
         self.class_min_freq = inputs.class_min_freq
+        self.is_aborted = is_aborted
 
     def __init_paths(self) -> tuple[Path, Path]:
         """Initiate the current path (directory for the model) and for the logger"""
@@ -481,7 +481,7 @@ class TrainBert:
             report_to=[],
         )
 
-        callback = CustomLoggingCallback(None, current_path=current_path, logger=self.logger)
+        callback = CustomLoggingCallback(self.is_aborted, current_path=current_path, logger=self.logger)
         eval_dataset = ds["test"] if has_test else None
         if loss == "cross_entropy":
             trainer = Trainer(
