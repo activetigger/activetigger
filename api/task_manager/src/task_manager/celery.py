@@ -4,9 +4,7 @@ from celery import Celery
 
 from task_manager.config import redis_url
 
-celery_app = Celery('activetigger',
-             broker=redis_url,
-             backend=redis_url)
+celery_app = Celery("activetigger", broker=redis_url, backend=redis_url)
 
 # Task discovery: automatically discover tasks in the "tasks" folder
 tasks_path = os.path.join(os.path.dirname(__file__), "tasks")
@@ -23,5 +21,5 @@ celery_app.conf.update(
     result_expires=3600,
 )
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     celery_app.start()

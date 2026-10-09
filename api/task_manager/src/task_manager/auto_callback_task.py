@@ -1,9 +1,7 @@
 from enum import StrEnum
-from typing import TypedDict, TypeVar
 
 from celery import Task
 from celery.contrib.abortable import AbortableTask
-from pydantic import BaseModel
 
 from task_manager.utils import (
     TaskFailureReportForCallback,
@@ -15,8 +13,8 @@ from task_manager.utils import (
 
 # TODO: should we declare queue in celery_app directly?
 class QueueName(StrEnum):
-    CPU="CPU"
-    GPU="GPU"
+    CPU = "CPU"
+    GPU = "GPU"
 
 
 class AutoCallbackTask(Task):
@@ -26,22 +24,27 @@ class AutoCallbackTask(Task):
       - `run(**kwargs)` — the actual work (registered as the Celery task)
       - `on_success()` — send a callback request to orchestrator API
     """
-  
+
     # Callback to orchestrator on task success
     def on_success(self, retval, task_id, args, kwargs):
-        results:TaskResultForCallback = {'results':retval, 'task_name': self.name}  # ty:ignore[invalid-argument-type]
+        results: TaskResultForCallback = {
+            "results": retval,
+            "task_name": self.name,  # ty:ignore[invalid-argument-type]
+        }
         task_success_callback(task_id, results)
         return super().on_success(retval, task_id, args, kwargs)
-    
+
     # Callback to orchestrator on task failure
     def on_failure(self, exc, task_id, args, kwargs, einfo):
-        report:TaskFailureReportForCallback = {
-            'exception': str(exc),
-            'task_args': args,
-            'task_kwargs': kwargs,
-            'task_name': self.name} # ty:ignore[invalid-argument-type]
+        report: TaskFailureReportForCallback = {
+            "exception": str(exc),
+            "task_args": args,
+            "task_kwargs": kwargs,
+            "task_name": self.name,  # ty:ignore[invalid-argument-type]
+        }
         task_failure_callback(task_id, report)
         return super().on_failure(exc, task_id, args, kwargs, einfo)
+
 
 class AbortableAutoCallbackTask(AutoCallbackTask, AbortableTask):
     pass
