@@ -8,11 +8,8 @@ from pathlib import Path
 from typing import Any, Callable, Optional, Tuple, cast
 
 import pandas as pd
-from celery import uuid
 from fastapi.responses import FileResponse
 from pandas import DataFrame
-from task_manager.tasks.train_bert import TrainBert
-from task_manager.tasks.train_bert_task import TrainBertTaskInput, train_bert
 
 import activetigger.functions as functions
 from activetigger.config import config
@@ -35,6 +32,8 @@ from activetigger.functions import get_model_metrics
 from activetigger.queue_manager import Queue
 from activetigger.tasks.predict_bert import PredictBertMultiClass
 from activetigger.tasks.task_manager_client import enqueue_celery_task
+from task_manager.tasks.train_bert import TrainBert
+from task_manager.tasks.train_bert_task import TrainBertTaskInput, train_bert
 
 
 class LanguageModels:
@@ -262,13 +261,15 @@ class LanguageModels:
         if params.gpu:
             mem = functions.get_gpu_memory_info()
             if self.estimate_memory_use(model_name, kind="train") > mem.available_memory:
-                print(f"needs estimation {self.estimate_memory_use(model_name, kind="train")} when we have {mem.available_memory} memory")
+                print(
+                    f"needs estimation {self.estimate_memory_use(model_name, kind='train')} when we have {mem.available_memory} memory"
+                )
                 raise Exception("Not enough GPU memory available. Wait or reduce batch.")
 
         # write df on disk
         df.to_parquet(join(self.path, TrainBert.df_input_filename))
         # prepare input payload
-        
+
         # launch as a independant process
         if training_kind not in ["multilabel", "multiclass"]:
             raise Exception("training_kind must be multilabel or multiclass")
@@ -292,8 +293,8 @@ class LanguageModels:
             label_for_dichotomization=label_for_dichotomization,
         )
         # queue celery task
-        (unique_id, abortable) = enqueue_celery_task(train_bert,trainBertInputs)
-        
+        (unique_id, abortable) = enqueue_celery_task(train_bert, trainBertInputs)
+
         del df
 
         # add flags in params
@@ -314,7 +315,7 @@ class LanguageModels:
                 params=params.model_dump(),
                 get_progress=self.get_progress(model_name, status="training"),
                 managed_by_celery=True,
-                abortable_celery_task=abortable
+                abortable_celery_task=abortable,
             )
         )
         return unique_id

@@ -29,10 +29,11 @@ from task_manager.celery import celery_app
 # TODO: is that necessary? we don't use csv lib in this code
 csv.field_size_limit(sys.maxsize)
 
+
 # Return type must be a dict, a BaseModel would not be serialized by Celery
 class CreateProjectTaskResult(TypedDict):
     username: str
-    project: dict[str, Any] # Dumped Project model
+    project: dict[str, Any]  # Dumped Project model
     import_trainset_path: str | None
     import_testset_path: str | None
     import_validset_path: str | None
@@ -315,15 +316,11 @@ class CreateProjectTask(AutoCallbackTask):
                 props.params.dir.joinpath(props.train_file), index=True
             )
 
-
         # add elements for the parameters
-        props.params.n_total= n_total
+        props.params.n_total = n_total
         project_to_create = ProjectModel(
-            project_slug=props.project_slug,
-            all_columns=all_columns,
-            **props.params.model_dump()
+            project_slug=props.project_slug, all_columns=all_columns, **props.params.model_dump()
         )
-        
 
         # schemes/labels to import (in the main process)
         import_trainset_path = None
@@ -343,7 +340,6 @@ class CreateProjectTask(AutoCallbackTask):
                 import_validset_path = props.params.dir.joinpath("import_valid.parquet")
                 import_validset.to_parquet(import_validset_path, index=True)
 
-
         # delete the initial file
         if props.params.filename is not None:
             try:
@@ -351,12 +347,12 @@ class CreateProjectTask(AutoCallbackTask):
             except OSError as e:
                 print(f"Warning: could not delete uploaded file: {e}")
 
-        result= CreateProjectTaskResult(
-            username= props.username,
-            project= project_to_create.model_dump(mode='json'),
-            import_trainset_path= str(import_trainset_path) if import_trainset_path else None,
-            import_testset_path= str(import_testset_path) if import_testset_path else None,
-            import_validset_path= str(import_validset_path) if import_validset_path else None,
+        result = CreateProjectTaskResult(
+            username=props.username,
+            project=project_to_create.model_dump(mode="json"),
+            import_trainset_path=str(import_trainset_path) if import_trainset_path else None,
+            import_testset_path=str(import_testset_path) if import_testset_path else None,
+            import_validset_path=str(import_validset_path) if import_validset_path else None,
         )
         return result
 
@@ -571,16 +567,11 @@ class CreateProjectTask(AutoCallbackTask):
         props.params.cols_text = ["text"]
         props.params.col_id = "id"
 
-
-
         # add elements for the parameters
-        props.params.n_total= n_total
+        props.params.n_total = n_total
         project_to_create = ProjectModel(
-            project_slug=props.project_slug,
-            all_columns=all_columns,
-            **props.params.model_dump()
+            project_slug=props.project_slug, all_columns=all_columns, **props.params.model_dump()
         )
-        
 
         # delete uploaded zip
         try:
@@ -588,16 +579,15 @@ class CreateProjectTask(AutoCallbackTask):
         except OSError as e:
             print(f"Warning: could not delete uploaded zip: {e}")
 
-    
-
-        result= CreateProjectTaskResult(
-            username= props.username,
-            project= project_to_create.model_dump(mode='json'),
-            import_trainset_path= None,
-            import_testset_path= None,
-            import_validset_path= None,
+        result = CreateProjectTaskResult(
+            username=props.username,
+            project=project_to_create.model_dump(mode="json"),
+            import_trainset_path=None,
+            import_testset_path=None,
+            import_validset_path=None,
         )
         return result
+
 
 # Task registration
 @celery_app.task(

@@ -2,19 +2,13 @@ import json
 import os
 from collections.abc import Callable
 from datetime import datetime, timezone
-from enum import unique
 from pathlib import Path
 from typing import Any, Optional
 
 import pandas as pd
 import pyarrow.parquet as pq
 import regex
-from celery import uuid
 from pandas import DataFrame, Series
-from task_manager.tasks.compute_bert_embeddings_task import (
-    ComputeBertEmbeddingsTaskInput,
-    compute_bert_embeddings,
-)
 
 from activetigger.config import config
 from activetigger.data import Data
@@ -32,6 +26,10 @@ from activetigger.tasks.compute_fasttext import ComputeFasttext
 from activetigger.tasks.compute_multimodal import ComputeMultimodal
 from activetigger.tasks.compute_sbert import ComputeSbert
 from activetigger.tasks.task_manager_client import enqueue_celery_task
+from task_manager.tasks.compute_bert_embeddings_task import (
+    ComputeBertEmbeddingsTaskInput,
+    compute_bert_embeddings,
+)
 
 # Experimental image projects: list of selectable image embedding models.
 # Each entry maps a UI label to (open_clip model name, pretrained tag).
@@ -693,6 +691,7 @@ class Features:
         # internal flag to distinguish task managed by celery from those manage by the internal queue
         # this flag is used temporarly to keep the existing monitoring system while having some tasks in celery
         task_managed_by_celery = False
+        abortable = None
 
         # Experimental image projects: gate text-only feature kinds.
         if self.kind == "image" and kind not in {
@@ -761,7 +760,6 @@ class Features:
         # features with queue
         unique_id = None
 
-
         if kind == "sentence-embeddings":
             model = self.__sbert_choose_model(parameters)
 
@@ -792,8 +790,8 @@ class Features:
 
         if kind == "bert-embeddings":
             # serialize df on disk for transmission to Celery task
-            
-            texts_path = self.data.path_project.joinpath('texts.pkl')
+
+            texts_path = self.data.path_project.joinpath("texts.pkl")
             df.to_pickle(texts_path)
             if self.languagemodels is None:
                 raise ValueError("No LanguageModels manager available for bert-embeddings")
@@ -810,20 +808,23 @@ class Features:
             max_length_tokens = int(parameters.get("max_length_tokens", 512))
             batch_size = int(parameters.get("batch_size", 32))
             # queue celery task
-            
-            task_managed_by_celery =True
-            (unique_id, abortable) = enqueue_celery_task(compute_bert_embeddings, ComputeBertEmbeddingsTaskInput(
-                feature_name=name,
-                username = username,
-                project_slug=self.project_slug,# generate an id to add it to computing
-                texts_path= texts_path,
-                path_process=self.path_all.parent,
-                model_name=model_name,
-                model_dir=self.languagemodels.path,
-                pooling=pooling,
-                batch_size=batch_size,
-                max_tokens=max_length_tokens,
-            ))
+
+            task_managed_by_celery = True
+            (unique_id, abortable) = enqueue_celery_task(
+                compute_bert_embeddings,
+                ComputeBertEmbeddingsTaskInput(
+                    feature_name=name,
+                    username=username,
+                    project_slug=self.project_slug,  # generate an id to add it to computing
+                    texts_path=texts_path,
+                    path_process=self.path_all.parent,
+                    model_name=model_name,
+                    model_dir=self.languagemodels.path,
+                    pooling=pooling,
+                    batch_size=batch_size,
+                    max_tokens=max_length_tokens,
+                ),
+            )
 
             parameters = {
                 "model": model_name,
@@ -834,7 +835,7 @@ class Features:
                 "max_length_tokens": max_length_tokens,
                 "batch_size": batch_size,
             }
-            
+
         if kind == "image-embeddings":
             # Resolve UI label -> (open_clip model, pretrained tag)
             ui_label = parameters.get("model") or DEFAULT_IMAGE_EMBEDDING_MODEL_IMAGEXP
@@ -945,7 +946,7 @@ class Features:
                     name=name,
                     time=datetime.now(timezone.utc),
                     managed_by_celery=task_managed_by_celery,
-                    abortable_celery_task= abortable
+                    abortable_celery_task=abortable,
                 )
             )
             return None

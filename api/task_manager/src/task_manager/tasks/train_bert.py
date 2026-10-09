@@ -49,7 +49,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
 class CustomLoggingCallback(TrainerCallback):
-    is_aborted: Callable[[],bool]
+    is_aborted: Callable[[], bool]
     current_path: Path
     logger: Logger
 
@@ -155,9 +155,9 @@ class TrainBertTaskInput(BaseModel):
     path: Path
     project_slug: str
     model_name: str
-    #df: DataFrame | datasets.Dataset
-    training_kind: Literal["multiclass", "multilabel"]
-    scheme_labels: set[str]
+    # df: DataFrame | datasets.Dataset
+    training_kind: str
+    scheme_labels: list[str]
     use_dichotomization: bool
     col_text: str
     col_label: str
@@ -170,6 +170,7 @@ class TrainBertTaskInput(BaseModel):
     auto_max_length: bool = False
     class_balance: bool = False
     class_min_freq: int = 1
+
 
 class TrainBert:
     """
@@ -192,26 +193,18 @@ class TrainBert:
     TODO : test more weighted loss entropy
     """
 
-    
-
     kind = "train_bert"
     df_input_filename = "train_bert_df.parquet"
 
-    def __init__(
-        self,
-        unique_id:str,
-        inputs: TrainBertTaskInput,
-        is_aborted: Callable[[],bool]
-    ):
+    def __init__(self, unique_id: str, inputs: TrainBertTaskInput, is_aborted: Callable[[], bool]):
         self.path = inputs.path
         self.project_slug = inputs.project_slug
         self.name = inputs.model_name
-        
-        
+
         if inputs.training_kind not in ["multiclass", "multilabel"]:
             raise ValueError(
-                    f"TrainBERT only works for multiclass and "
-                    f"multilabel but you set training_kind = {inputs.training_kind}"
+                f"TrainBERT only works for multiclass and "
+                f"multilabel but you set training_kind = {inputs.training_kind}"
             )
         self.training_kind = inputs.training_kind
         if len(inputs.scheme_labels) != len(set(inputs.scheme_labels)):
@@ -435,7 +428,7 @@ class TrainBert:
         training_args = TrainingArguments(
             # Directories
             output_dir=str(current_path.joinpath("train")),
-            #logging_dir=str(current_path.joinpath("logs")),
+            # logging_dir=str(current_path.joinpath("logs")),
             # Hyperparameters
             learning_rate=float(params.lrate),
             weight_decay=float(params.wdecay),
@@ -481,7 +474,9 @@ class TrainBert:
             report_to=[],
         )
 
-        callback = CustomLoggingCallback(self.is_aborted, current_path=current_path, logger=self.logger)
+        callback = CustomLoggingCallback(
+            self.is_aborted, current_path=current_path, logger=self.logger
+        )
         eval_dataset = ds["test"] if has_test else None
         if loss == "cross_entropy":
             trainer = Trainer(
@@ -826,4 +821,4 @@ class TrainBert:
             except Exception as e:
                 print("Error in cleaning memory", e)
 
-        return EventsDict({'events':task_timer.get_events()})
+        return EventsDict({"events": task_timer.get_events()})
