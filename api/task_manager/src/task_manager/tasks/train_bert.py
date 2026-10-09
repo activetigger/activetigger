@@ -6,9 +6,8 @@ import shutil
 from collections import Counter
 from collections.abc import Callable
 from logging import Logger
-from os.path import join
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, cast
 
 import datasets
 import numpy as np
@@ -34,7 +33,7 @@ from torch import nn
 from torch.utils.data import Dataset as TorchDataset
 from transformers import (
     AutoModelForSequenceClassification,
-    AutoTokenizer,  # ty: ignore[possibly-missing-import]
+    AutoTokenizer,
     Trainer,
     TrainerCallback,
     TrainerControl,
@@ -153,6 +152,7 @@ class CustomTrainer(Trainer):
 
 class TrainBertTaskInput(BaseModel):
     path: Path
+    path_df: Path
     project_slug: str
     model_name: str
     # df: DataFrame | datasets.Dataset
@@ -194,7 +194,6 @@ class TrainBert:
     """
 
     kind = "train_bert"
-    df_input_filename = "train_bert_df.parquet"
 
     def __init__(self, unique_id: str, inputs: TrainBertTaskInput, is_aborted: Callable[[], bool]):
         self.path = inputs.path
@@ -233,6 +232,7 @@ class TrainBert:
         self.class_balance = inputs.class_balance
         self.class_min_freq = inputs.class_min_freq
         self.is_aborted = is_aborted
+        self.path_df = inputs.path_df
 
     def __init_paths(self) -> tuple[Path, Path]:
         """Initiate the current path (directory for the model) and for the logger"""
@@ -265,8 +265,8 @@ class TrainBert:
 
     def __check_data(self, col_label: str, col_text: str) -> pd.DataFrame:
         """Remove rows missing labels or text"""
-        df = pd.read_parquet(join(self.path, TrainBert.df_input_filename))
-        df.index.name = "id"  # ty: ignore[unresolved-attribute]
+        df = pd.read_parquet(self.path_df)
+        df.index.name = "id"
         # test labels missing values and remove them
         if df[col_label].isnull().sum() > 0:
             df = df[df[col_label].notnull()]
@@ -814,7 +814,7 @@ class TrainBert:
                     self.ds,
                     device,
                 )
-                os.unlink(join(self.path, TrainBert.df_input_filename))
+                os.unlink(self.path_df)
                 release_device_memory()
                 gc.collect()
 

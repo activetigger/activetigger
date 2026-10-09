@@ -2,8 +2,8 @@ import json
 import os
 import shutil
 import time
+import uuid
 from datetime import datetime, timezone
-from os.path import join
 from pathlib import Path
 from typing import Any, Callable, Optional, Tuple, cast
 
@@ -266,8 +266,9 @@ class LanguageModels:
                 )
                 raise Exception("Not enough GPU memory available. Wait or reduce batch.")
 
-        # write df on disk
-        df.to_parquet(join(self.path, TrainBert.df_input_filename))
+        # write df on disk on a temporary file
+        path_df = os.path.join(self.path, "train_bert_" + uuid.uuid4().hex + ".parquet")
+        df.to_parquet(path_df)
         # prepare input payload
 
         # launch as a independant process
@@ -275,6 +276,7 @@ class LanguageModels:
             raise Exception("training_kind must be multilabel or multiclass")
         trainBertInputs = TrainBertTaskInput(
             path=self.path,
+            path_df=Path(path_df),
             project_slug=project,
             model_name=model_name,
             training_kind=training_kind,
