@@ -1,6 +1,7 @@
 from os import unlink
 
 import pandas as pd
+from typing_extensions import override
 
 from activetigger.datamodels import ProjectModel
 
@@ -20,12 +21,14 @@ class CreateProjectCallback(TaskCallback):
 
     # the slug is nested in the dumped project model
     @classmethod
+    @override
     def get_project_slug(cls, task_result):
         return task_result["project"]["project_slug"]
 
     # the on_complete method will be executed when a task succeeds
     # it will be executed from the orchestrator allowing using its dependencies (db and all)
     @classmethod
+    @override
     def on_complete_task_specific(
         cls, task_id: str, task_result: CreateProjectTaskResult, project_manager, process
     ):
