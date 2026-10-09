@@ -68,18 +68,18 @@ if [ ! -f /api/config.yaml ]; then
 fi
 
 # Launch workers
-uv run watchmedo auto-restart \
+uv run --no-sync watchmedo auto-restart \
     --directory="./task_manager/src/task_manager/" \
     --pattern="*.py" \
     --recursive \
-    -- uv run celery-worker-cpu &
+    -- uv run --no-sync celery-worker-cpu &
 
 if [ "$GPU" = "true" ]; then
-  uv run watchmedo auto-restart \
+  uv run --no-sync watchmedo auto-restart \
     --directory="./task_manager/src/task_manager/" \
     --pattern="*.py" \
     --recursive \
-    -- uv run celery-worker-gpu &
+    -- uv run --no-sync celery-worker-gpu &
 fi
 
 # Launch the server
