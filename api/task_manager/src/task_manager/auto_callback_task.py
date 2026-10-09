@@ -18,7 +18,8 @@ class QueueName(StrEnum):
 
 
 class AutoCallbackTask(Task):
-    """Base contract for tasks which need to callback the orchestrator.
+    """
+    Base contract for tasks which need to callback the orchestrator.
 
     Subclasses must implement:
       - `run(**kwargs)` — the actual work (registered as the Celery task)
@@ -27,21 +28,21 @@ class AutoCallbackTask(Task):
 
     # Callback to orchestrator on task success
     def on_success(self, retval, task_id, args, kwargs):
-        results: TaskResultForCallback = {
-            "results": retval,
-            "task_name": self.name,  # ty:ignore[invalid-argument-type]
-        }
+        results = TaskResultForCallback(
+            results=retval,
+            task_name=self.name,  # ty:ignore[invalid-argument-type]
+        )
         task_success_callback(task_id, results)
         return super().on_success(retval, task_id, args, kwargs)
 
     # Callback to orchestrator on task failure
     def on_failure(self, exc, task_id, args, kwargs, einfo):
-        report: TaskFailureReportForCallback = {
-            "exception": str(exc),
-            "task_args": args,
-            "task_kwargs": kwargs,
-            "task_name": self.name,  # ty:ignore[invalid-argument-type]
-        }
+        report = TaskFailureReportForCallback(
+            exception=str(exc),
+            task_args=args,
+            task_kwargs=kwargs,
+            task_name=self.name,  # ty:ignore[invalid-argument-type]
+        )
         task_failure_callback(task_id, report)
         return super().on_failure(exc, task_id, args, kwargs, einfo)
 

@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.13"
 dependencies = [
     "celery[redis]>=5.6.3",
+    "pydantic>=2.0",
     "requests>=2.34.2",
     "watchdog>=6.0.0",
 ]
