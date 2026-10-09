@@ -4,25 +4,127 @@ import math
 import os
 import pickle
 import shutil
+from collections.abc import Callable
 from datetime import timezone
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from activetigger.config import config
+from activetigger.datamodels import (
+    EventsDict,
+    KnnParams,
+    LogisticL1Params,
+    LogisticL2Params,
+    MLStatisticsModel,
+    Multi_naivebayesParams,
+    QuickModelComputed,
+    RandomforestParams,
+)
+from activetigger.functions import get_metrics_multiclass
+from activetigger.monitoring import TaskTimer
+from pydantic import BaseModel
 from scipy.stats import entropy
 from sklearn.base import BaseEstimator
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import (
     KFold,
     cross_val_predict,
 )
-
-from activetigger.datamodels import EventsModel, MLStatisticsModel, QuickModelComputed
-from activetigger.functions import get_metrics_multiclass
-from activetigger.monitoring import TaskTimer
-from activetigger.tasks.base_task import BaseTask
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.neighbors import KNeighborsClassifier
 
 
-class TrainMLMultiClass(BaseTask):
+class TrainMLMultiClassInput(BaseModel):
+    project_slug: str
+    path: Path
+    path_df: Path
+    col_Y: str
+    cols_X: list[str]
+    col_text: str | None = None
+    name: str
+    user: str
+    model_type: str
+    model_params: dict
+    scheme: str
+    features: list
+    labels: list[str]
+    standardize: bool = False
+    cv10: bool = False
+    balance_classes: bool = False
+    exclude_labels: list[str] = []
+    test_size: float = 0.2
+    retrain: bool = False
+    random_seed: int = 42
+
+
+# models for which balance_classes is not supported
+MODELS_WITHOUT_BALANCE = ("knn", "multi_naivebayes")
+
+
+def build_model(
+    model_type: str, model_params: dict, balance_classes: bool
+) -> tuple[BaseEstimator, dict]:
+    """
+    Instantiate the sklearn estimator from its type and params.
+    Returns the estimator and the validated params.
+    """
+    class_weight = "balanced" if balance_classes else None
+    seed = config.random_seed
+    if model_type == "knn":
+        p_knn = KnnParams(**model_params)
+        return (
+            KNeighborsClassifier(n_neighbors=int(p_knn.n_neighbors), n_jobs=-1),
+            p_knn.model_dump(),
+        )
+    if model_type == "logistic-l1":
+        p_l1 = LogisticL1Params(**model_params)
+        return (
+            LogisticRegression(
+                solver="saga",
+                l1_ratio=1.0,
+                C=p_l1.costLogL1,
+                class_weight=class_weight,
+                random_state=seed,
+            ),
+            p_l1.model_dump(),
+        )
+    if model_type == "logistic-l2":
+        p_l2 = LogisticL2Params(**model_params)
+        return (
+            LogisticRegression(
+                solver="lbfgs",
+                C=p_l2.costLogL2,
+                class_weight=class_weight,
+                random_state=seed,
+            ),
+            p_l2.model_dump(),
+        )
+    if model_type == "randomforest":
+        # mtry in R is max_features in sklearn
+        p_rf = RandomforestParams(**model_params)
+        return (
+            RandomForestClassifier(
+                n_estimators=int(p_rf.n_estimators),
+                max_features=int(p_rf.max_features) if p_rf.max_features is not None else None,
+                class_weight=class_weight,
+                n_jobs=-1,
+                random_state=seed,
+            ),
+            p_rf.model_dump(),
+        )
+    if model_type == "multi_naivebayes":
+        # TODO: calculate class prior for docfreq & termfreq
+        p_nb = Multi_naivebayesParams(**model_params)
+        return (
+            MultinomialNB(alpha=p_nb.alpha, fit_prior=p_nb.fit_prior, class_prior=p_nb.class_prior),
+            p_nb.model_dump(),
+        )
+    raise ValueError(f"Unknown model type: {model_type}")
+
+
+class TrainMLMultiClass:
     """
     Fit a sklearn model
     """
@@ -30,52 +132,51 @@ class TrainMLMultiClass(BaseTask):
     kind = "train_ml"
 
     def __init__(
-        self,
-        model: BaseEstimator,
-        X: pd.DataFrame,
-        Y: pd.Series,
-        path: Path,
-        name: str,
-        user: str,
-        model_params: dict,
-        scheme: str,
-        features: list,
-        labels: list[str],
-        model_type: str,
-        standardize: bool = False,
-        cv10: bool = False,
-        balance_classes: bool = False,
-        exclude_labels: list[str] = [],
-        test_size: float = 0.2,
-        retrain: bool = False,
-        texts: pd.Series | None = None,
-        random_seed: int = 42,
-        **kwargs,
+        self, unique_id: str, inputs: TrainMLMultiClassInput, is_aborted: Callable[[], bool]
     ):
-        super().__init__()
-        self.random_seed = random_seed
-        self.model = model
-        self.name = name
-        self.X = X
-        self.Y = Y
-        self.user = user
-        self.cv10 = cv10
-        self.balance_classes = balance_classes
-        self.exclude_labels = exclude_labels  # labels are excluded earlier on in the pipeline, but we must save this information somewhere
-        self.test_size = test_size
-        self.path = path
-        self.model_path = path.joinpath(name)
-        # artifacts are staged here and promoted to model_path only once
-        # the whole training has succeeded
-        self.work_path = path.joinpath(f"{name}.tmp")
-        self.retrain = retrain
-        self.model_params = model_params
-        self.scheme = scheme
-        self.features = features
-        self.labels = labels
-        self.model_type = model_type
-        self.standardize = standardize
-        self.texts = texts
+        self.unique_id = unique_id
+        self.random_seed = inputs.random_seed
+        self.is_aborted = is_aborted
+        self.name = inputs.name
+        self.user = inputs.user
+        self.cv10 = inputs.cv10
+        self.balance_classes = (
+            inputs.balance_classes and inputs.model_type not in MODELS_WITHOUT_BALANCE
+        )
+        self.model, self.model_params = build_model(
+            inputs.model_type, inputs.model_params, self.balance_classes
+        )
+        self.exclude_labels = inputs.exclude_labels  # labels are excluded earlier on in the pipeline, but we must save this information somewhere
+        self.test_size = inputs.test_size
+        self.path = inputs.path
+        self.path_df = inputs.path_df
+        self.model_path = inputs.path.joinpath(inputs.name)
+        self.work_path = inputs.path.joinpath(f"{inputs.name}.tmp")
+        self.retrain = inputs.retrain
+        self.scheme = inputs.scheme
+        self.features = inputs.features
+        self.labels = inputs.labels
+        self.model_type = inputs.model_type
+        self.standardize = inputs.standardize
+        self.X, self.X_f, self.Y, self.Y_f, self.texts = self.__check_data(
+            inputs.cols_X, inputs.col_Y, inputs.col_text, self.exclude_labels
+        )
+
+    def __check_data(
+        self, cols_X: list[str], col_Y: str, col_text: str | None, exclude_labels: list[str]
+    ) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, pd.Series | None]:
+        """
+        Load the data from file : X, Y and texts if available
+        """
+        df = pd.read_parquet(self.path_df)
+        X = df[cols_X]
+        Y = df[col_Y]
+        texts = None
+        if col_text is not None:
+            texts = df[col_text]
+        rows_to_exclude = np.logical_or(np.isin(Y, exclude_labels), Y.isna())
+        rows_to_keep = np.invert(rows_to_exclude)
+        return X, X.loc[rows_to_keep, :], Y, Y[rows_to_keep], texts
 
     def __init_paths(self, retrain: bool) -> None:
         """
@@ -96,14 +197,6 @@ class TrainMLMultiClass(BaseTask):
         if self.model_path.exists():
             shutil.rmtree(self.model_path)
         os.rename(self.work_path, self.model_path)
-
-    def __check_data(
-        self, X: pd.DataFrame, Y: pd.Series, exclude_labels: list[str]
-    ) -> tuple[pd.DataFrame, pd.Series]:
-        """Remove labels to exclude and nan values"""
-        rows_to_exclude = np.logical_or(np.isin(Y, exclude_labels), Y.isna())
-        rows_to_keep = np.invert(rows_to_exclude)
-        return X.loc[rows_to_keep, :], Y[rows_to_keep]
 
     def __split_set(
         self, X, Y, test_size: float = 0.2
@@ -143,11 +236,12 @@ class TrainMLMultiClass(BaseTask):
         """
         num_folds = 10
         kf = KFold(n_splits=num_folds, shuffle=True, random_state=self.random_seed)
-        X, Y = self.__check_data(self.X, self.Y, self.exclude_labels)
-        Y_pred_10cv = pd.Series(cross_val_predict(self.model, X, Y, cv=kf), index=Y.index)
+        Y_pred_10cv = pd.Series(
+            cross_val_predict(self.model, self.X_f, self.Y_f, cv=kf), index=self.Y_f.index
+        )
 
         statistics_cv10 = get_metrics_multiclass(
-            Y,
+            self.Y_f,
             Y_pred_10cv,
         )
         # overwrite false_predictions
@@ -216,10 +310,10 @@ class TrainMLMultiClass(BaseTask):
 
     def _check_cancelled(self) -> None:
         """Raise if the user requested cancellation."""
-        if self.event is not None and self.event.is_set():
+        if self.is_aborted():
             raise Exception("Process interrupted by user")
 
-    def __call__(self) -> EventsModel:
+    def run(self) -> EventsDict:
         """
         Fit quickmodel and calculate statistics.
         On failure the staged files are removed and the previous model
@@ -230,8 +324,10 @@ class TrainMLMultiClass(BaseTask):
         except Exception:
             shutil.rmtree(self.work_path, ignore_errors=True)
             raise
+        finally:
+            self.path_df.unlink(missing_ok=True)
 
-    def __run(self) -> EventsModel:
+    def __run(self) -> EventsDict:
         task_timer = TaskTimer(
             compulsory_steps=["setup", "train", "evaluate", "save_files"], optional_steps=["cv10"]
         )
@@ -239,11 +335,7 @@ class TrainMLMultiClass(BaseTask):
         task_timer.start("setup")
         self.__init_paths(self.retrain)
 
-        X_for_training, Y_for_training = self.__check_data(self.X, self.Y, self.exclude_labels)
-
-        X_train, X_test, Y_train, Y_test = self.__split_set(
-            X_for_training, Y_for_training, self.test_size
-        )
+        X_train, X_test, Y_train, Y_test = self.__split_set(self.X_f, self.Y_f, self.test_size)
         task_timer.stop("setup")
 
         self._check_cancelled()
@@ -330,4 +422,4 @@ class TrainMLMultiClass(BaseTask):
         self.__promote_staging()
         task_timer.stop("save_files")
 
-        return EventsModel(events=task_timer.get_events())
+        return EventsDict({"events": task_timer.get_events()})

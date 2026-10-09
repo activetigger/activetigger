@@ -8,12 +8,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, cast
 
-import celery
 import pandas as pd
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse
 from pandas import DataFrame
-from task_manager.tasks.create_project_task import CreateProjectTaskInput, create_project_task
 
 from activetigger.bertopic_manager import Bertopic
 from activetigger.config import config
@@ -89,6 +87,7 @@ from activetigger.tasks.generate_call import GenerateCall
 from activetigger.tasks.task_manager_client import enqueue_celery_task, stop_celery_task
 from activetigger.tasks.update_datasets import UpdateDatasets
 from activetigger.users import Users
+from task_manager.tasks.create_project_task import CreateProjectTaskInput, create_project_task
 
 
 class Errors:
@@ -392,7 +391,9 @@ class Project:
         params.dir = path.joinpath(self.project_slug)
 
         # start a create project task
-        (unique_id, abortable) = enqueue_celery_task(create_project_task, CreateProjectTaskInput(
+        (unique_id, abortable) = enqueue_celery_task(
+            create_project_task,
+            CreateProjectTaskInput(
                 image_project=False,
                 project_slug=self.project_slug,
                 params=params,
@@ -402,9 +403,11 @@ class Project:
                 valid_file=config.valid_file,
                 test_file=config.test_file,
                 features_file=config.features_file,
-                random_seed=config.random_seed,))
-        
-         # Update the register
+                random_seed=config.random_seed,
+            ),
+        )
+
+        # Update the register
         self.computing.append(
             ProjectCreatingModel(
                 user=username,
@@ -413,10 +416,9 @@ class Project:
                 time=datetime.now(timezone.utc),
                 kind="create_project",
                 status="training",
-                abortable_celery_task=abortable
+                abortable_celery_task=abortable,
             )
         )
-
 
     def start_project_creation_imagexp(
         self, params: ProjectBaseModel, username: str, path: Path
@@ -429,7 +431,9 @@ class Project:
         params.dir = path.joinpath(self.project_slug)
 
         # start a create project task
-        (unique_id, abortable) = enqueue_celery_task(create_project_task, CreateProjectTaskInput(
+        (unique_id, abortable) = enqueue_celery_task(
+            create_project_task,
+            CreateProjectTaskInput(
                 image_project=True,
                 project_slug=self.project_slug,
                 params=params,
@@ -439,8 +443,10 @@ class Project:
                 valid_file=config.valid_file,
                 test_file=config.test_file,
                 features_file=config.features_file,
-                random_seed=config.random_seed,))
-        
+                random_seed=config.random_seed,
+            ),
+        )
+
         # Update the register
         self.computing.append(
             ProjectCreatingModel(
@@ -450,8 +456,7 @@ class Project:
                 time=datetime.now(timezone.utc),
                 kind="create_project",
                 status="training",
-                abortable_celery_task=abortable
-                
+                abortable_celery_task=abortable,
             )
         )
 
@@ -1946,9 +1951,7 @@ class Project:
         # expose id_internal as the frame index so it lands as the CSV index
         return self._rename_generated_id_column(table).set_index("id_internal")
 
-    def get_process(
-        self, kind: str | list, user: str
-    ) -> list[ProcessComputing]:
+    def get_process(self, kind: str | list, user: str) -> list[ProcessComputing]:
         """
         Get current processes
         """
@@ -2565,7 +2568,7 @@ class Project:
         add_predictions = {}
 
         # loop on the current process
-        for e  in [e for e in self.computing.copy() if e.managed_by_celery != True]:
+        for e in [e for e in self.computing.copy() if e.managed_by_celery != True]:
             # get the process
             process = self.queue.get(e.unique_id)
             if process is None:
@@ -2613,7 +2616,6 @@ class Project:
                         self.params.dir.joinpath(f"gen_{e.unique_id}.jsonl")
                     )
 
-
                 # a failed extension leaves a features file with the
                 # pre-eval-set shape; reset to the safe empty state
                 if e.kind == "extend_features":
@@ -2626,7 +2628,6 @@ class Project:
             try:
                 results = process.future.result()
                 match e.kind:
-
                     case "update_datasets":
                         e = cast(UpdateComputing, e)
                         self.db_manager.projects_service.update_project(
@@ -2689,13 +2690,6 @@ class Project:
                         self.nermodels.add(prediction)
                         if results is not None and results.events is not None:
                             self.monitoring.close_process(prediction.unique_id, results.events)
-                    case "train_quickmodel":
-                        sm = cast(QuickModelComputing, e)
-
-                        # Retrieve the additional events if they exist
-                        events = cast(EventsModel, results)
-                        self.quickmodels.add(sm)
-                        self.monitoring.close_process(sm.unique_id, events)
                     case "predict_quickmodel":
                         sm = cast(QuickModelComputing, e)
                     case "predict_with_features":

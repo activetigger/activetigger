@@ -1,6 +1,7 @@
 import os
 import pickle
 import shutil
+import uuid
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
@@ -10,10 +11,6 @@ import numpy as np
 import pandas as pd
 from fastapi.responses import FileResponse
 from pandas import DataFrame
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.naive_bayes import MultinomialNB
-from sklearn.neighbors import KNeighborsClassifier
 from sklearn.preprocessing import StandardScaler
 
 from activetigger.config import config
@@ -46,7 +43,9 @@ from activetigger.functions import (
 from activetigger.queue_manager import Queue
 from activetigger.tasks.predict_ml import PredictMLMultiClass
 from activetigger.tasks.predict_with_features import PredictWithFeatures
-from activetigger.tasks.train_ml import TrainMLMultiClass
+from activetigger.tasks.task_manager_client import enqueue_celery_task
+from task_manager.tasks.train_ml import MODELS_WITHOUT_BALANCE
+from task_manager.tasks.train_ml_task import TrainMLMultiClassInput, train_ml
 
 if TYPE_CHECKING:
     from activetigger.features import Features
@@ -128,103 +127,56 @@ class QuickModels:
         """
         Add a new quickmodel for a user and a scheme
         """
-        X, Y, labels = self.transform_data(df, col_labels, col_features, standardize)
+        # features (standardized if needed) without rows with missing predictors
+        X = df[col_features]
+        f_na = X.isna().any(axis=1)
+        if f_na.any():
+            print(f"There is {f_na.sum()} predictor rows with missing values")
+            X = X[~f_na]
+        if standardize:
+            X = DataFrame(StandardScaler().fit_transform(X), columns=X.columns, index=X.index)
+        Y = df.loc[X.index, col_labels]
+        labels = [str(i) for i in Y.unique() if pd.notna(i)]
 
         # default parameters
         if model_params is None:
-            model_params = self.available_models[model_type].dict()
+            model_params = self.available_models[model_type].model_dump()
+        if model_type in MODELS_WITHOUT_BALANCE:
+            balance_classes = False
 
-        # Select model
-        if model_type == "knn":
-            params_knn = KnnParams(**model_params)
-            model = KNeighborsClassifier(n_neighbors=int(params_knn.n_neighbors), n_jobs=-1)
-            balance_classes = False  # Force the parameter to be set as False
-            model_params = params_knn.model_dump()
+        # write the data on disk on a temporary file
+        col_text = "text" if texts is not None else None
+        df_task = pd.concat([Y, X], axis=1)
+        if texts is not None:
+            df_task[col_text] = texts.reindex(df_task.index)
+        path_df = self.path.joinpath("train_ml_" + uuid.uuid4().hex + ".parquet")
+        df_task.to_parquet(path_df)
+        del df_task
 
-        if model_type == "logistic-l1":
-            params_libL1 = LogisticL1Params(**model_params)
-            model = LogisticRegression(
-                penalty="l1",
-                solver="saga",
-                C=params_libL1.costLogL1,
-                class_weight="balanced" if balance_classes else None,
-                n_jobs=-1,
-                random_state=config.random_seed,
-            )
-            model_params = params_libL1.model_dump()
-
-        if model_type == "logistic-l2":
-            params_libL2 = LogisticL2Params(**model_params)
-            model = LogisticRegression(
-                penalty="l2",
-                solver="lbfgs",
-                C=params_libL2.costLogL2,
-                class_weight="balanced" if balance_classes else None,
-                n_jobs=-1,
-                random_state=config.random_seed,
-            )
-            model_params = params_libL2.model_dump()
-
-        if model_type == "randomforest":
-            # params  Num. trees mtry  Sample fraction
-            # Number of variables randomly sampled as candidates at each split:
-            # it is “mtry” in R and it is “max_features” Python
-            #  The sample.fraction parameter specifies the fraction of observations to be used in each tree
-            params_rf = RandomforestParams(**model_params)
-            model = RandomForestClassifier(
-                n_estimators=int(params_rf.n_estimators),
-                max_features=(
-                    int(params_rf.max_features) if params_rf.max_features is not None else None
-                ),
-                class_weight="balanced"
-                if balance_classes
-                else None,  # AM: Need to choose between balanced and balanced_subsample
-                n_jobs=-1,
-                random_state=config.random_seed,
-            )
-            model_params = params_rf.model_dump()
-
-        if model_type == "multi_naivebayes":
-            # small workaround for parameters
-            params_nb = Multi_naivebayesParams(**model_params)
-            if params_nb.class_prior is not None:
-                class_prior = params_nb.class_prior
-            else:
-                class_prior = None
-            # Only with dtf or tfidf for features
-            # TODO: calculate class prior for docfreq & termfreq
-            model = MultinomialNB(
-                alpha=params_nb.alpha,
-                fit_prior=params_nb.fit_prior,
-                class_prior=class_prior,
-            )
-            balance_classes = False  # Force the parameter to be set as False
-            model_params = params_nb.model_dump()
-
-        # launch the compuation (model + statistics) as a future process
-        args = {
-            "model": model,  # ty: ignore[possibly-unresolved-reference]
-            "X": X,
-            "Y": Y,
-            "labels": labels,
-            "cv10": cv10,
-            "balance_classes": balance_classes,
-            "path": self.path,
-            "name": name,
-            "retrain": retrain,
-            "scheme": scheme,
-            "model_type": model_type,
-            "user": user,
-            "standardize": standardize,
-            "features": features,
-            "model_params": model_params,
-            "texts": texts,
-            "random_seed": config.random_seed,
-            "exclude_labels": exclude_labels,
-            "test_size": test_size,
-        }
-        unique_id = self.queue.add_task("train_quickmodel", project_slug, TrainMLMultiClass(**args))
-        del args
+        # queue celery task
+        inputs = TrainMLMultiClassInput(
+            project_slug=project_slug,
+            path=self.path,
+            path_df=path_df,
+            col_Y=col_labels,
+            cols_X=list(X.columns),
+            col_text=col_text,
+            name=name,
+            user=user,
+            model_type=model_type,
+            model_params=model_params,
+            scheme=scheme,
+            features=features,
+            labels=labels,
+            standardize=standardize,
+            cv10=cv10,
+            balance_classes=balance_classes,
+            exclude_labels=exclude_labels,
+            test_size=test_size,
+            retrain=retrain,
+            random_seed=config.random_seed,
+        )
+        (unique_id, abortable) = enqueue_celery_task(train_ml, inputs)
 
         req = QuickModelComputing(
             status="training",
@@ -245,6 +197,8 @@ class QuickModels:
             test_size=test_size,
             retrain=retrain,
             dataset="train",
+            managed_by_celery=True,
+            abortable_celery_task=abortable,
         )
         self.computing.append(req)
         return unique_id
@@ -348,35 +302,6 @@ class QuickModels:
         """
         existing = self.language_models_service.available_models(self.project_slug, "quickmodel")
         return name in [m.name for m in existing]
-
-    def transform_data(
-        self, data, col_label, col_predictors, standardize
-    ) -> tuple[DataFrame, pd.Series, list]:
-        """
-        Load data
-        """
-        f_na = data[col_predictors].isna().sum(axis=1) > 0
-        if f_na.sum() > 0:
-            print(f"There is {f_na.sum()} predictor rows with missing values")
-
-        # normalize X data
-        if standardize:
-            scaler = StandardScaler()
-            df = data[col_predictors]
-            df_stand = scaler.fit_transform(df)
-            df_pred = pd.DataFrame(df_stand, columns=df.columns, index=df.index)
-        else:
-            df_pred = data[col_predictors]
-
-        # create global dataframe with no missing predictor
-        df = pd.concat([data[~f_na][col_label], df_pred], axis=1)
-
-        # data for training
-        Y = df[col_label]
-        X = df[col_predictors]
-        labels = [str(i) for i in Y.unique() if pd.notna(i)]
-
-        return X, Y, labels
 
     def export_prediction(self, name: str, format: str = "csv") -> tuple[BytesIO, dict[str, str]]:
         """
