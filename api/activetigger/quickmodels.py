@@ -12,6 +12,9 @@ import pandas as pd
 from fastapi.responses import FileResponse
 from pandas import DataFrame
 from sklearn.preprocessing import StandardScaler
+from task_manager.tasks.predict_ml_task import PredictMLTaskInput, predict_ml
+from task_manager.tasks.train_ml import MODELS_WITHOUT_BALANCE
+from task_manager.tasks.train_ml_task import TrainMLMultiClassInput, train_ml
 
 from activetigger.config import config
 from activetigger.data import Data
@@ -41,11 +44,8 @@ from activetigger.functions import (
     serve_temp_export,
 )
 from activetigger.queue_manager import Queue
-from activetigger.tasks.predict_ml import PredictMLMultiClass
 from activetigger.tasks.predict_with_features import PredictWithFeatures
 from activetigger.tasks.task_manager_client import enqueue_celery_task
-from task_manager.tasks.train_ml import MODELS_WITHOUT_BALANCE
-from task_manager.tasks.train_ml_task import TrainMLMultiClassInput, train_ml
 
 if TYPE_CHECKING:
     from activetigger.features import Features
@@ -439,23 +439,27 @@ class QuickModels:
             raise NotFoundError("The model does not exist")
         sm = self.get(name)
         file_name = f"predict_{dataset}.parquet"
-        unique_id = self.queue.add_task(
-            "prediction",
-            self.project_slug,
-            PredictMLMultiClass(
-                model=sm.model,
-                df=df,
-                col_dataset=col_dataset,
-                col_features=cols_features,
-                col_label=col_label,
-                path=self.path.joinpath(name),
-                file_name=file_name,
-                statistics=statistics,
-                col_text=col_text,
-                exclude_labels=sm.exclude_labels,
-            ),
-            queue="cpu",
+
+        # write df on disk on a temporary file read by the worker
+        path_df = self.path.joinpath(name, "predict_ml_" + uuid.uuid4().hex + ".parquet")
+        df.to_parquet(path_df)
+
+        # queue celery task (the worker loads model.pkl from the model directory)
+        inputs = PredictMLTaskInput(
+            path=self.path.joinpath(name),
+            path_df=path_df,
+            project_slug=self.project_slug,
+            model_name=name,
+            col_dataset=col_dataset,
+            col_features=cols_features,
+            col_label=col_label,
+            file_name=file_name,
+            statistics=statistics,
+            col_text=col_text,
+            exclude_labels=sm.exclude_labels,
         )
+        (unique_id, abortable) = enqueue_celery_task(predict_ml, inputs)
+        del df
         self.computing.append(
             QuickModelComputing(
                 user=username,
@@ -470,6 +474,8 @@ class QuickModels:
                 model_type=sm.model_type,
                 model_params=sm.model_params,
                 labels=sm.labels,
+                managed_by_celery=True,
+                abortable_celery_task=abortable,
             )
         )
         print("Predicting process started")

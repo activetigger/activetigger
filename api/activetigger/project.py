@@ -2665,8 +2665,6 @@ class Project:
                         self.nermodels.add(prediction)
                         if results is not None and results.events is not None:
                             self.monitoring.close_process(prediction.unique_id, results.events)
-                    case "predict_quickmodel":
-                        sm = cast(QuickModelComputing, e)
                     case "predict_with_features":
                         pf = cast(QuickModelComputing, e)
                         self.quickmodels.mark_prediction_done(pf.name, pf.dataset)
