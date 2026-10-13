@@ -1,6 +1,5 @@
 from celery import uuid
 from celery.contrib.abortable import AbortableAsyncResult
-
 from task_manager.celery import celery_app
 
 # collections of utils methods to interact with celery task_manager
@@ -17,7 +16,11 @@ def stop_celery_task(task_id: str, abortable: bool | None):
     if abortable:
         task = AbortableAsyncResult(task_id, app=celery_app)
         print(f"Aborting {task_id} {type(task).__name__}")
+        # abort() only flags the backend for a running task; a task still waiting
+        # in the queue would start anyway once a worker picks it up (and the flag
+        # expires with the result). revoke (no terminate) drops it on receipt.
         task.abort()
+        celery_app.control.revoke(task_id)
     else:
         print(f"Revoke task {task_id}")
         celery_app.control.revoke(task_id, terminate=True, signal="SIGKILL")

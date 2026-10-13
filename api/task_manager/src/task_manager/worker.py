@@ -12,11 +12,14 @@ def start_cpu_worker_pool():
     """
     Start worker.s for the CPU queue
     """
+    # without a GPU worker pool, GPU-routed tasks (training) would sit in the
+    # GPU queue forever: consume both queues and run them on CPU
+    queues = QueueName.CPU if config.gpu_available else f"{QueueName.CPU},{QueueName.GPU}"
     args = [
         "worker",
         f"--loglevel={config.worker_loglevel}",
         f"--concurrency={config.cpu_worker_concurrency}",
-        f"--queues={QueueName.CPU}",
+        f"--queues={queues}",
         "--hostname=worker_cpu@%h",
         # "--purge",
     ]
