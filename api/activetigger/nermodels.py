@@ -2,6 +2,7 @@ import json
 import os
 import shutil
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional, Tuple, cast
@@ -9,6 +10,7 @@ from typing import Any, Callable, Optional, Tuple, cast
 import pandas as pd
 from fastapi.responses import FileResponse
 from pandas import DataFrame
+from task_manager.tasks.train_ner_task import TrainNerTaskInput, train_ner
 
 import activetigger.functions as functions
 from activetigger.config import config
@@ -30,7 +32,7 @@ from activetigger.errors import AlreadyExistsError, InvalidInputError, NotFoundE
 from activetigger.functions import get_model_metrics
 from activetigger.queue_manager import Queue
 from activetigger.tasks.predict_ner import PredictNer
-from activetigger.tasks.train_ner import TrainNer
+from activetigger.tasks.task_manager_client import enqueue_celery_task
 
 
 class NerModels:
@@ -172,24 +174,25 @@ class NerModels:
                 raise Exception("Not enough GPU memory available. Wait or reduce batch.")
 
         current_date = datetime.now(timezone.utc)
-        unique_id = self.queue.add_task(
-            "training",
-            project,
-            TrainNer(
-                path=self.path,
-                project_slug=project,
-                model_name=name,
-                df=df.copy(deep=True),
-                scheme_labels=scheme_labels,
-                col_label=col_label,
-                col_text=col_text,
-                base_model=base_model,
-                params=params,
-                test_size=test_size,
-                max_length=max_length,
-            ),
-            queue="gpu",
+        # write df on disk on a temporary file read by the worker
+        path_df = self.path.joinpath("train_ner_" + uuid.uuid4().hex + ".parquet")
+        df.to_parquet(path_df)
+
+        # queue celery task
+        inputs = TrainNerTaskInput(
+            path=self.path,
+            path_df=path_df,
+            project_slug=project,
+            model_name=name,
+            scheme_labels=scheme_labels,
+            col_label=col_label,
+            col_text=col_text,
+            base_model=base_model,
+            params=params,
+            test_size=test_size,
+            max_length=max_length,
         )
+        (unique_id, abortable) = enqueue_celery_task(train_ner, inputs)
         del df
         params_db = LMParametersDbModel(**params.model_dump(), exclude_labels=[])
         self.computing.append(
@@ -205,6 +208,8 @@ class NerModels:
                 dataset=None,
                 params=params_db.model_dump(),
                 get_progress=self.get_progress(name, status="training"),
+                managed_by_celery=True,
+                abortable_celery_task=abortable,
             )
         )
         return unique_id

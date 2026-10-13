@@ -550,7 +550,7 @@ class Orchestrator:
                 self.projects[project_slug].clean_process(process)
         else:
             self.queue.kill(process.unique_id)
-        if process.kind in ("train_bert", "train_image"):
+        if process.kind in ("train_bert", "train_image", "train_ner"):
             process = cast(LMComputing, process)
             self.db_manager.language_models_service.delete_model(
                 project_slug, process.model_name

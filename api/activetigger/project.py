@@ -2663,13 +2663,6 @@ class Project:
                         ):
                             add_predictions["predict_" + prediction.model_name] = results.path
                         self.imagemodels.add(prediction)
-                    case "train_ner":
-                        if self.nermodels is None:
-                            continue
-                        model = cast(LMComputing, e)
-                        events = cast(EventsModel, results)
-                        self.nermodels.add(model)
-                        self.monitoring.close_process(model.unique_id, events)
                     case "predict_ner":
                         if self.nermodels is None:
                             continue
@@ -2776,12 +2769,6 @@ class Project:
             except Exception as ex:
                 print(f"Error in {e.kind} : {ex}")
                 self.errors.add(f"Error in {e.kind} : {str(ex)}")
-                match e.kind:
-                    case "train_ner":
-                        ner_task = cast(LMComputing, e)
-                        self.db_manager.language_models_service.delete_model(
-                            self.name, ner_task.model_name
-                        )
             # clean the process from the list and the queue
             finally:
                 self.clean_process(e)  # ty: ignore[invalid-argument-type]

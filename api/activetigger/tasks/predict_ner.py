@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 import torch
 from pandas import DataFrame
+from task_manager.tasks.train_ner import decode_spans, parse_spans
 from tqdm import tqdm
 from transformers import (
     AutoModelForTokenClassification,
@@ -32,7 +33,6 @@ from activetigger.functions import (
 from activetigger.monitoring import TaskTimer
 from activetigger.ner_metrics import compute_ner_metrics
 from activetigger.tasks.base_task import BaseTask
-from activetigger.tasks.train_ner import decode_spans, parse_spans
 
 
 class PredictNer(BaseTask):

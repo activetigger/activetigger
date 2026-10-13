@@ -16,20 +16,24 @@ Revisit if datasets with frequent adjacent same-tag entities show up.
 import gc
 import json
 import logging
-import multiprocessing
-import multiprocessing.synchronize
 import os
 import shutil
+from collections.abc import Callable
 from logging import Logger
 from pathlib import Path
-from typing import Any, Optional, Tuple, cast
+from typing import Any, cast
 
 import datasets
 import numpy as np
 import pandas as pd
 import torch
-from pandas import DataFrame
-from task_manager.tasks.train_bert import CustomLoggingCallback
+from activetigger.config import config
+from activetigger.datamodels import EventsDict, LMParametersModel
+from activetigger.functions import get_device, release_device_memory
+from activetigger.monitoring import TaskTimer
+from activetigger.ner_metrics import compute_ner_metrics
+from activetigger.tasks.utils import retrieve_model_max_length
+from pydantic import BaseModel
 from transformers import (
     AutoModelForTokenClassification,
     AutoTokenizer,  # ty: ignore[possibly-missing-import]
@@ -39,13 +43,7 @@ from transformers import (
     set_seed,
 )
 
-from activetigger.config import config
-from activetigger.datamodels import EventsModel, LMParametersModel
-from activetigger.functions import get_device, release_device_memory
-from activetigger.monitoring import TaskTimer
-from activetigger.ner_metrics import compute_ner_metrics
-from activetigger.tasks.base_task import BaseTask
-from activetigger.tasks.utils import retrieve_model_max_length
+from task_manager.tasks.train_bert import CustomLoggingCallback
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -307,51 +305,47 @@ def decode_spans(
     return spans
 
 
-class TrainNer(BaseTask):
+class TrainNerTaskInput(BaseModel):
+    path: Path
+    path_df: Path
+    project_slug: str
+    model_name: str
+    scheme_labels: list[str]
+    col_text: str
+    col_label: str
+    base_model: str
+    params: LMParametersModel
+    test_size: float
+    max_length: int = 512
+
+
+class TrainNer:
     """
     Fine-tune a token-classification model on span-scheme annotations.
     """
 
     kind = "train_ner"
 
-    def __init__(
-        self,
-        path: Path,
-        project_slug: str,
-        model_name: str,
-        df: DataFrame,
-        scheme_labels: list[str],
-        col_text: str,
-        col_label: str,
-        base_model: str,
-        params: LMParametersModel,
-        test_size: float,
-        event: Optional[multiprocessing.synchronize.Event] = None,
-        unique_id: Optional[str] = None,
-        max_length: int = 512,
-        **kwargs,
-    ):
-        super().__init__()
-        self.path = path
-        self.project_slug = project_slug
-        self.name = model_name
-        df.index.name = "id"
-        self.df = df
-        if len(scheme_labels) == 0:
+    def __init__(self, unique_id: str, inputs: TrainNerTaskInput, is_aborted: Callable[[], bool]):
+        self.path = inputs.path
+        self.path_df = inputs.path_df
+        self.project_slug = inputs.project_slug
+        self.name = inputs.model_name
+        if len(inputs.scheme_labels) == 0:
             raise ValueError("Scheme has no labels — define labels before training NER.")
-        if len(scheme_labels) != len(set(scheme_labels)):
-            raise ValueError(f"Labels not unique: {scheme_labels}")
-        self.scheme_labels = scheme_labels
-        self.col_text = col_text
-        self.col_label = col_label
-        self.base_model = base_model
-        self.params = params
-        self.test_size = test_size
-        self.event = event
+        if len(inputs.scheme_labels) != len(set(inputs.scheme_labels)):
+            raise ValueError(f"Labels not unique: {inputs.scheme_labels}")
+        self.scheme_labels = inputs.scheme_labels
+        self.col_text = inputs.col_text
+        self.col_label = inputs.col_label
+        self.base_model = inputs.base_model
+        self.params = inputs.params
+        self.test_size = inputs.test_size
         self.unique_id = unique_id
-        self.max_length = max_length
+        self.max_length = inputs.max_length
+        self.is_aborted = is_aborted
 
-    def __init_paths(self) -> Tuple[Path, Path]:
+    def __init_paths(self) -> tuple[Path, Path]:
         current_path = self.path.joinpath(self.name)
         if not current_path.exists():
             os.makedirs(current_path)
@@ -360,6 +354,15 @@ class TrainNer(BaseTask):
 
     def __init_logger(self, log_path: Path) -> Logger:
         logger = logging.getLogger("train_ner_model")
+        # without an explicit level the logger inherits WARNING and every
+        # logger.info() is dropped — status.log stays empty
+        logger.setLevel(logging.INFO)
+        logger.propagate = False
+        # the logger is a per-process singleton and celery reuses workers:
+        # drop handlers from previous trainings or logs leak across models
+        for handler in logger.handlers[:]:
+            logger.removeHandler(handler)
+            handler.close()
         file_handler = logging.FileHandler(log_path)
         formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
         file_handler.setFormatter(formatter)
@@ -367,8 +370,9 @@ class TrainNer(BaseTask):
         logger.info(f"Start NER training on {self.base_model}")
         return logger
 
-    def __prepare_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
-        df = df.copy()
+    def __prepare_dataframe(self) -> pd.DataFrame:
+        df = pd.read_parquet(self.path_df)
+        df.index.name = "id"
         df = df[df[self.col_text].notnull()]
         df = df[df[self.col_label].notnull()]
         df["__spans__"] = df[self.col_label].apply(parse_spans)
@@ -466,7 +470,6 @@ class TrainNer(BaseTask):
 
         training_args = TrainingArguments(
             output_dir=str(current_path.joinpath("train")),
-            logging_dir=str(current_path.joinpath("logs")),
             learning_rate=float(params.lrate),
             weight_decay=float(params.wdecay),
             num_train_epochs=float(params.epochs),
@@ -498,7 +501,9 @@ class TrainNer(BaseTask):
         )
 
         collator = DataCollatorForTokenClassification(tokenizer=tokenizer)
-        callback = CustomLoggingCallback(self.event, current_path=current_path, logger=self.logger)
+        callback = CustomLoggingCallback(
+            self.is_aborted, current_path=current_path, logger=self.logger
+        )
         return Trainer(
             model=model,
             args=training_args,
@@ -519,7 +524,7 @@ class TrainNer(BaseTask):
         ds: datasets.Dataset,
         tokenizer,
         id2label: dict[int, str],
-    ) -> Tuple[pd.DataFrame, dict[str, Any]]:
+    ) -> tuple[pd.DataFrame, dict[str, Any]]:
         eval_ds = ds.remove_columns(
             [c for c in ds.column_names if c not in ("input_ids", "attention_mask", "labels")]
         )
@@ -611,7 +616,7 @@ class TrainNer(BaseTask):
         with open(str(current_path.joinpath("metrics_training.json")), "w") as f:
             json.dump(metrics_data, f)
 
-    def __call__(self) -> EventsModel:
+    def run(self) -> EventsDict:
         task_timer = TaskTimer(compulsory_steps=["setup", "train", "evaluate", "save_files"])
         task_timer.start("setup")
         set_seed(int(config.random_seed))
@@ -620,7 +625,7 @@ class TrainNer(BaseTask):
         self.logger = self.__init_logger(log_path)
         device = get_device()
 
-        self.df = self.__prepare_dataframe(self.df)
+        self.df = self.__prepare_dataframe()
         if len(self.df) < 2:
             raise Exception("Not enough annotated documents to train (need at least 2).")
 
@@ -720,10 +725,14 @@ class TrainNer(BaseTask):
             raise e
         finally:
             try:
-                del trainer, model, tokenizer, self.df, device, self.event
+                del trainer, model, tokenizer, self.df, device
                 release_device_memory()
                 gc.collect()
             except Exception as e:
                 print("Error cleaning memory", e)
+            try:
+                os.unlink(self.path_df)
+            except Exception as e:
+                print("Error removing temporary training data", e)
 
-        return EventsModel(events=task_timer.get_events())
+        return EventsDict({"events": task_timer.get_events()})
