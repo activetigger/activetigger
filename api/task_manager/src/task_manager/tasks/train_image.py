@@ -1,38 +1,19 @@
 import gc
 import json
 import logging
-import multiprocessing
-import multiprocessing.synchronize
 import os
 import shutil
+from collections.abc import Callable
 from logging import Logger
 from pathlib import Path
-from typing import Any, Optional, Tuple, cast
+from typing import Any, cast
 
 import datasets
 import numpy as np
 import pandas as pd
 import torch
-from pandas import DataFrame
-from PIL import Image, ImageOps
-from task_manager.tasks.train_bert import (
-    CustomTrainer,
-    compute_class_weights,
-)
-from torch.utils.data import Dataset as TorchDataset
-from transformers import (
-    AutoImageProcessor,
-    AutoModelForImageClassification,  # ty: ignore[possibly-missing-import]
-    Trainer,
-    TrainerCallback,
-    TrainerControl,
-    TrainerState,
-    TrainingArguments,
-    set_seed,
-)
-
 from activetigger.config import config
-from activetigger.datamodels import EventsModel, LMParametersModel, MLStatisticsModel
+from activetigger.datamodels import EventsDict, LMParametersModel, MLStatisticsModel
 from activetigger.functions import (
     activate_probs,
     get_device,
@@ -45,8 +26,25 @@ from activetigger.functions import (
 )
 from activetigger.functions_image import filter_readable_images
 from activetigger.monitoring import TaskTimer
-from activetigger.tasks.base_task import BaseTask
 from activetigger.tasks.predict_bert import annotations_to_matrix
+from PIL import Image, ImageOps
+from pydantic import BaseModel
+from torch.utils.data import Dataset as TorchDataset
+from transformers import (
+    AutoImageProcessor,
+    AutoModelForImageClassification,
+    Trainer,
+    TrainerCallback,
+    TrainerControl,
+    TrainerState,
+    TrainingArguments,
+    set_seed,
+)
+
+from task_manager.tasks.train_bert import (
+    CustomTrainer,
+    compute_class_weights,
+)
 
 # Cap PIL's maximum decoded pixel count to ~64 megapixels. The default of
 # ~89 MP only raises DecompressionBombError at 2× the limit, which is high
@@ -60,25 +58,20 @@ class ImageLoggingCallback(TrainerCallback):
     """
     Image-classification training callback.
 
-    Mirrors the BERT CustomLoggingCallback but **does not** divide the logged
-    training loss by gradient_accumulation_steps. Image-classification heads
-    (e.g. ViT) compute their loss via `self.loss_function`, which in modern HF
-    Transformers (5.x) uses `reduction="sum"` divided by `num_items_in_batch`
-    (the total items across all sub-batches in the optimizer step) when the
-    model accepts loss kwargs — so the reported train_loss is already at
-    per-item scale, matching eval_loss, and a gradacc correction would
-    under-scale it. Text encoder heads instead ignore num_items_in_batch,
-    which is why the BERT callback applies a correction (gated on
-    model_accepts_loss_kwargs) and this one must not.
+    Mirrors the BERT CustomLoggingCallback but does not divide the logged
+    training loss by gradient_accumulation_steps: image-classification heads
+    (ViT, ...) normalise their loss with num_items_in_batch on transformers
+    5.x, so train_loss is already at per-item scale and a gradacc correction
+    would under-scale it.
     """
 
-    event: Optional[multiprocessing.synchronize.Event]
+    is_aborted: Callable[[], bool]
     current_path: Path
     logger: Logger
 
-    def __init__(self, event, logger, current_path):
+    def __init__(self, is_aborted, logger, current_path):
         super().__init__()
-        self.event = event
+        self.is_aborted = is_aborted
         self.current_path = current_path
         self.logger = logger
 
@@ -98,8 +91,8 @@ class ImageLoggingCallback(TrainerCallback):
             f.write(str(progress_percentage))
         with open(self.current_path.joinpath("log_history.txt"), "w") as f:
             json.dump(state.log_history, f)
-        if self.event is not None and self.event.is_set():
-            self.logger.info("Event set, stopping training.")
+        if self.is_aborted():
+            self.logger.info("Abort requested, stopping training.")
             control.should_training_stop = True
             raise Exception("Process interrupted by user")
 
@@ -108,9 +101,8 @@ def _open_image_rgb(path: str) -> Image.Image | None:
     """
     Open an image and normalize it: EXIF rotation + RGB conversion.
 
-    Used by the dataset transform during training and prediction; callers
-    are expected to have already pre-flighted the path so a raise here is
-    a true error (the path passed verify() once but failed on second open).
+    Callers are expected to have already pre-flighted the path, so a raise
+    here is a true error (the path passed verify() once but failed on reopen).
     """
     img = Image.open(path)
     img = ImageOps.exif_transpose(img)
@@ -119,7 +111,25 @@ def _open_image_rgb(path: str) -> Image.Image | None:
     return img
 
 
-class TrainImage(BaseTask):
+class TrainImageTaskInput(BaseModel):
+    path: Path
+    path_df: Path
+    project_slug: str
+    model_name: str
+    training_kind: str
+    scheme_labels: list[str]
+    col_text: str  # holds the image path
+    col_label: str
+    base_model: str
+    params: LMParametersModel
+    test_size: float
+    loss: str | None = "cross_entropy"
+    class_balance: bool = False
+    class_min_freq: int = 1
+    fp16: bool = True
+
+
+class TrainImage:
     """
     Fine-tune an image-classification model on a labelled image set.
 
@@ -133,69 +143,54 @@ class TrainImage(BaseTask):
 
     kind = "train_image"
 
-    def __init__(
-        self,
-        path: Path,
-        project_slug: str,
-        model_name: str,
-        df: DataFrame,
-        training_kind: str,
-        scheme_labels: list[str],
-        col_text: str,
-        col_label: str,
-        base_model: str,
-        params: LMParametersModel,
-        test_size: float,
-        event: Optional[multiprocessing.synchronize.Event] = None,
-        unique_id: Optional[str] = None,
-        loss: Optional[str] = "cross_entropy",
-        class_balance: bool = False,
-        class_min_freq: int = 1,
-        fp16: bool = True,
-        **kwargs,
-    ):
-        super().__init__()
-        self.path = path
-        self.project_slug = project_slug
-        self.name = model_name
-        df.index.name = "id"
-        self.df = df
-        if training_kind not in ["multiclass", "multilabel"]:
+    def __init__(self, unique_id: str, inputs: TrainImageTaskInput, is_aborted: Callable[[], bool]):
+        self.path = inputs.path
+        self.path_df = inputs.path_df
+        self.project_slug = inputs.project_slug
+        self.name = inputs.model_name
+        if inputs.training_kind not in ["multiclass", "multilabel"]:
             raise ValueError(
-                f"TrainImage only supports multiclass and multilabel; got {training_kind}"
+                f"TrainImage only supports multiclass and multilabel; got {inputs.training_kind}"
             )
-        self.training_kind = training_kind
-        if len(scheme_labels) != len(set(scheme_labels)):
-            raise ValueError(f"Labels in your scheme are not unique: {scheme_labels}")
-        self.scheme_labels = scheme_labels
-        self.col_text = col_text  # holds the image path
-        self.col_label = col_label
-        self.base_model = base_model
-        self.params = params
-        self.test_size = test_size
-        self.event = event
+        self.training_kind = inputs.training_kind
+        if len(inputs.scheme_labels) != len(set(inputs.scheme_labels)):
+            raise ValueError(f"Labels in your scheme are not unique: {inputs.scheme_labels}")
+        self.scheme_labels = inputs.scheme_labels
+        self.col_text = inputs.col_text
+        self.col_label = inputs.col_label
+        self.base_model = inputs.base_model
+        self.params = inputs.params
+        self.test_size = inputs.test_size
         self.unique_id = unique_id
-        if loss == "weighted_cross_entropy" and training_kind == "multilabel":
+        if inputs.loss == "weighted_cross_entropy" and inputs.training_kind == "multilabel":
             raise ValueError("weighted_cross_entropy is not supported for multilabel.")
-        self.loss = loss
-        self.class_balance = class_balance
-        self.class_min_freq = class_min_freq
-        self.fp16 = fp16
+        self.loss = inputs.loss
+        self.class_balance = inputs.class_balance
+        self.class_min_freq = inputs.class_min_freq
+        self.fp16 = inputs.fp16
+        self.is_aborted = is_aborted
 
     # --- setup helpers ---------------------------------------------------
 
-    def __init_paths(self) -> Tuple[Path, Path]:
-        # Absolute path: Loky workers use "spawn" and don't always inherit the
-        # parent's CWD, so a relative self.path (e.g. "projects/foo/image") could
-        # resolve to a different filesystem location in the worker and the
-        # progress-file writes from the training callback would fail.
+    def __init_paths(self) -> tuple[Path, Path]:
+        # Absolute path: the worker CWD may differ from the API's, and the
+        # training callback writes progress files relative to current_path.
         current_path = (self.path / self.name).absolute()
         current_path.mkdir(parents=True, exist_ok=True)
         log_path = current_path / "status.log"
         return current_path, log_path
 
     def __init_logger(self, log_path) -> Logger:
-        logger = logging.getLogger("train_vit_model")
+        logger = logging.getLogger("train_image_model")
+        # without an explicit level the logger inherits WARNING and every
+        # logger.info() is dropped — status.log stays empty
+        logger.setLevel(logging.INFO)
+        logger.propagate = False
+        # the logger is a per-process singleton and celery reuses workers:
+        # drop handlers from previous trainings or logs leak across models
+        for handler in logger.handlers[:]:
+            logger.removeHandler(handler)
+            handler.close()
         file_handler = logging.FileHandler(log_path)
         formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
         file_handler.setFormatter(formatter)
@@ -203,24 +198,25 @@ class TrainImage(BaseTask):
         logger.info(f"Start {self.base_model}")
         return logger
 
-    def __listen_stop_event(self) -> None:
+    def __check_aborted(self) -> None:
         """
         Raise if the user requested cancellation. Called in the long phases
         (pre-flight scan, evaluation, saving) that the training callback
-        does not cover — without these checks a kill is only honored
-        during training steps and the GPU slot stays occupied.
+        does not cover — otherwise an abort is only honored during training
+        steps and the GPU slot stays occupied.
         """
-        if self.event is not None and self.event.is_set():
+        if self.is_aborted():
             raise Exception("Process interrupted by user")
 
-    def __check_data(self, df: pd.DataFrame, col_label: str, col_text: str) -> pd.DataFrame:
+    def __check_data(self, col_label: str, col_text: str) -> pd.DataFrame:
         """
-        Drop rows with missing labels, missing paths, unrecognised labels,
-        or images that PIL cannot open. Pre-flighting paths here is the
-        only way to keep training collators well-shaped when the dataset
+        Load the dataframe and drop rows with missing labels, missing paths,
+        unrecognised labels, or images that PIL cannot open. Pre-flighting
+        paths here keeps the training collator well-shaped when the dataset
         contains the occasional corrupt / non-image file.
         """
-        df = df.copy()
+        df = pd.read_parquet(self.path_df)
+        df.index.name = "id"
         if df[col_label].isnull().sum() > 0:
             df = df[df[col_label].notnull()]
             self.logger.info(f"Missing labels - reducing training data to {len(df)}")
@@ -248,7 +244,7 @@ class TrainImage(BaseTask):
         # never raises mid-batch and breaks the collator.
         readable_flags = filter_readable_images(
             df[col_text].tolist(),
-            stop_check=self.__listen_stop_event,
+            stop_check=self.__check_aborted,
         )
         readable = pd.Series(readable_flags, index=df.index)
         n_dropped = int((~readable).sum())
@@ -351,7 +347,6 @@ class TrainImage(BaseTask):
 
         training_args = TrainingArguments(
             output_dir=str(current_path.joinpath("train")),
-            logging_dir=str(current_path.joinpath("logs")),
             learning_rate=float(params.lrate),
             weight_decay=float(params.wdecay),
             num_train_epochs=float(params.epochs),
@@ -388,7 +383,9 @@ class TrainImage(BaseTask):
             report_to=[],
         )
 
-        callback = ImageLoggingCallback(self.event, current_path=current_path, logger=self.logger)
+        callback = ImageLoggingCallback(
+            self.is_aborted, current_path=current_path, logger=self.logger
+        )
         eval_dataset = ds["test"] if has_test else None
         if loss == "cross_entropy":
             trainer = Trainer(
@@ -462,7 +459,7 @@ class TrainImage(BaseTask):
 
     # --- main entry -------------------------------------------------------
 
-    def __call__(self) -> EventsModel:
+    def run(self) -> EventsDict:
         task_timer = TaskTimer(compulsory_steps=["setup", "train", "evaluate", "save_files"])
         task_timer.start("setup")
 
@@ -483,10 +480,11 @@ class TrainImage(BaseTask):
         image_processor = None
         model = None
         trainer = None
+        self.df = None
+        self.ds = None
 
         try:
-            assert self.df is not None
-            self.df = self.__check_data(self.df, self.col_label, self.col_text)
+            self.df = self.__check_data(self.col_label, self.col_text)
             labels, label2id, id2label = self.__retrieve_labels(self.scheme_labels)
 
             ds_base = self.__transform_to_dataset(
@@ -519,7 +517,7 @@ class TrainImage(BaseTask):
                 self.ds = datasets.DatasetDict({"train": ds_base.with_transform(transform_fn)})
             self.logger.info("Train/test dataset created")
 
-            self.__listen_stop_event()
+            self.__check_aborted()
             model = AutoModelForImageClassification.from_pretrained(
                 self.base_model,
                 num_labels=len(labels),
@@ -545,7 +543,7 @@ class TrainImage(BaseTask):
 
             # ----- post-training evaluation -----
             task_timer.start("evaluate")
-            self.__listen_stop_event()
+            self.__check_aborted()
             train_ds = cast(datasets.Dataset, self.ds["train"])
             predictions_train = trainer.predict(cast(TorchDataset, train_ds))
             train_label_ids = cast(np.ndarray, predictions_train.label_ids)
@@ -596,7 +594,7 @@ class TrainImage(BaseTask):
                 )
 
             if "test" in self.ds:
-                self.__listen_stop_event()
+                self.__check_aborted()
                 test_ds = cast(datasets.Dataset, self.ds["test"])
                 predictions_test = trainer.predict(cast(TorchDataset, test_ds))
                 test_label_ids = cast(np.ndarray, predictions_test.label_ids)
@@ -641,7 +639,7 @@ class TrainImage(BaseTask):
 
             task_timer.start("save_files")
             # last cancellation point before saving + archiving the model dir
-            self.__listen_stop_event()
+            self.__check_aborted()
             params_to_save = self.params.model_dump()
             params_to_save.update(
                 {
@@ -678,6 +676,14 @@ class TrainImage(BaseTask):
             # cancellation so it doesn't masquerade as a trained model.
             if current_path.exists():
                 shutil.rmtree(current_path)
+            # PyTorch can fail with a cryptic "NVML_SUCCESS == r INTERNAL ASSERT
+            # FAILED at CUDACachingAllocator.cpp" while formatting an OOM error
+            # (see pytorch#157535): both cases are GPU out-of-memory.
+            if isinstance(e, torch.cuda.OutOfMemoryError) or "NVML_SUCCESS" in str(e):
+                raise Exception(
+                    "GPU ran out of memory during training. "
+                    "Reduce the batch size or increase gradient accumulation."
+                ) from e
             raise e
         finally:
             print("Cleaning memory")
@@ -689,11 +695,14 @@ class TrainImage(BaseTask):
             image_processor = None
             self.df = None
             self.ds = None
-            self.event = None
             gc.collect()
             try:
                 release_device_memory()
             except Exception as e:
                 print("Error in cleaning GPU memory", e)
+            try:
+                os.unlink(self.path_df)
+            except Exception as e:
+                print("Error removing temporary training data", e)
 
-        return EventsModel(events=task_timer.get_events())
+        return EventsDict({"events": task_timer.get_events()})

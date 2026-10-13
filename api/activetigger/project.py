@@ -12,6 +12,7 @@ import pandas as pd
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse
 from pandas import DataFrame
+from task_manager.tasks.create_project_task import CreateProjectTaskInput, create_project_task
 
 from activetigger.bertopic_manager import Bertopic
 from activetigger.config import config
@@ -87,7 +88,6 @@ from activetigger.tasks.generate_call import GenerateCall
 from activetigger.tasks.task_manager_client import enqueue_celery_task, stop_celery_task
 from activetigger.tasks.update_datasets import UpdateDatasets
 from activetigger.users import Users
-from task_manager.tasks.create_project_task import CreateProjectTaskInput, create_project_task
 
 
 class Errors:
@@ -2652,13 +2652,6 @@ class Project:
                         self.languagemodels.add(prediction)
                         if results is not None and results.events is not None:
                             self.monitoring.close_process(prediction.unique_id, results.events)
-                    case "train_image":
-                        if self.imagemodels is None:
-                            continue
-                        model = cast(LMComputing, e)
-                        events = cast(EventsModel, results)
-                        self.imagemodels.add(model)
-                        self.monitoring.close_process(model.unique_id, events)
                     case "predict_image":
                         if self.imagemodels is None:
                             continue
@@ -2784,11 +2777,6 @@ class Project:
                 print(f"Error in {e.kind} : {ex}")
                 self.errors.add(f"Error in {e.kind} : {str(ex)}")
                 match e.kind:
-                    case "train_image":
-                        image_task = cast(LMComputing, e)
-                        self.db_manager.language_models_service.delete_model(
-                            self.name, image_task.model_name
-                        )
                     case "train_ner":
                         ner_task = cast(LMComputing, e)
                         self.db_manager.language_models_service.delete_model(

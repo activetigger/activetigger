@@ -2,6 +2,7 @@ import json
 import os
 import shutil
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional, Tuple, cast
@@ -9,6 +10,7 @@ from typing import Any, Callable, Optional, Tuple, cast
 import pandas as pd
 from fastapi.responses import FileResponse
 from pandas import DataFrame
+from task_manager.tasks.train_image_task import TrainImageTaskInput, train_image
 
 import activetigger.functions as functions
 from activetigger.config import config
@@ -29,7 +31,7 @@ from activetigger.errors import AlreadyExistsError, InvalidInputError, NotFoundE
 from activetigger.functions import get_model_metrics
 from activetigger.queue_manager import Queue
 from activetigger.tasks.predict_image import PredictImage
-from activetigger.tasks.train_image import TrainImage
+from activetigger.tasks.task_manager_client import enqueue_celery_task
 
 
 class ImageModels:
@@ -213,28 +215,29 @@ class ImageModels:
         if training_kind not in ["multilabel", "multiclass"]:
             raise Exception("training_kind must be multilabel or multiclass")
 
-        unique_id = self.queue.add_task(
-            "training",
-            project,
-            TrainImage(
-                path=self.path,
-                project_slug=project,
-                model_name=model_name,
-                df=df.copy(deep=True),
-                training_kind=training_kind,
-                scheme_labels=scheme_labels,
-                col_label=col_label,
-                col_text=col_text,
-                base_model=base_model,
-                params=params,
-                test_size=test_size,
-                loss=loss,
-                class_balance=class_balance,
-                class_min_freq=class_min_freq,
-                fp16=fp16,
-            ),
-            queue="gpu",
+        # write df on disk on a temporary file read by the worker
+        path_df = self.path.joinpath("train_image_" + uuid.uuid4().hex + ".parquet")
+        df.to_parquet(path_df)
+
+        # queue celery task
+        inputs = TrainImageTaskInput(
+            path=self.path,
+            path_df=path_df,
+            project_slug=project,
+            model_name=model_name,
+            training_kind=training_kind,
+            scheme_labels=scheme_labels,
+            col_label=col_label,
+            col_text=col_text,
+            base_model=base_model,
+            params=params,
+            test_size=test_size,
+            loss=loss,
+            class_balance=class_balance,
+            class_min_freq=class_min_freq,
+            fp16=fp16,
         )
+        (unique_id, abortable) = enqueue_celery_task(train_image, inputs)
         del df
 
         params_db = LMParametersDbModel(**params.model_dump(), exclude_labels=exclude_labels or [])
@@ -252,6 +255,8 @@ class ImageModels:
                 dataset=None,
                 params=params_db.model_dump(),
                 get_progress=self.get_progress(model_name, status="training"),
+                managed_by_celery=True,
+                abortable_celery_task=abortable,
             )
         )
         return unique_id

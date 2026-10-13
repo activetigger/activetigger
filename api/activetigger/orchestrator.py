@@ -545,6 +545,9 @@ class Orchestrator:
         """
         if process.managed_by_celery:
             stop_celery_task(process.unique_id, process.abortable_celery_task)
+            # a revoked task never calls back: drop it from the project now
+            if project_slug in self.projects:
+                self.projects[project_slug].clean_process(process)
         else:
             self.queue.kill(process.unique_id)
         if process.kind in ("train_bert", "train_image"):
