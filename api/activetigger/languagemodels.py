@@ -10,6 +10,8 @@ from typing import Any, Callable, Optional, Tuple, cast
 import pandas as pd
 from fastapi.responses import FileResponse
 from pandas import DataFrame
+from task_manager.tasks.predict_bert_task import PredictBertTaskInput, predict_bert
+from task_manager.tasks.train_bert_task import TrainBertTaskInput, train_bert
 
 import activetigger.functions as functions
 from activetigger.config import config
@@ -30,10 +32,7 @@ from activetigger.db.manager import DatabaseManager
 from activetigger.errors import AlreadyExistsError, InvalidInputError, NotFoundError
 from activetigger.functions import get_model_metrics
 from activetigger.queue_manager import Queue
-from activetigger.tasks.predict_bert import PredictBertMultiClass
 from activetigger.tasks.task_manager_client import enqueue_celery_task
-from task_manager.tasks.train_bert import TrainBert
-from task_manager.tasks.train_bert_task import TrainBertTaskInput, train_bert
 
 
 class LanguageModels:
@@ -371,32 +370,36 @@ class LanguageModels:
 
         file_name = f"predict_{dataset}.parquet"
 
-        # load the model
-        unique_id = self.queue.add_task(
-            "prediction",
-            project_slug,
-            PredictBertMultiClass(
-                path=self.path.joinpath(name),
-                dataset=dataset,
-                df=df,
-                training_kind=training_kind,
-                scheme_labels=scheme_labels,
-                col_text="text",
-                col_label=col_label,
-                col_id_external="id_external",
-                col_datasets="dataset",
-                basemodel=self.get_base_model(name),
-                file_name=file_name,
-                batch=batch_size,
-                statistics=statistics,
-                path_data=path_data,
-                external_dataset=external_dataset,
-                path_train=path_train,
-                path_valid=path_valid,
-                path_test=path_test,
-            ),
-            queue="gpu",
+        # write df on disk on a temporary file read by the worker
+        path_df = None
+        if df is not None:
+            path_df = self.path.joinpath(name, "predict_bert_" + uuid.uuid4().hex + ".parquet")
+            df.to_parquet(path_df)
+
+        # queue celery task
+        inputs = PredictBertTaskInput(
+            path=self.path.joinpath(name),
+            path_df=path_df,
+            project_slug=project_slug,
+            model_name=name,
+            dataset=dataset,
+            training_kind=training_kind,
+            scheme_labels=scheme_labels,
+            col_text="text",
+            col_label=col_label,
+            col_id_external="id_external",
+            col_datasets="dataset",
+            file_name=file_name,
+            batch=batch_size,
+            statistics=statistics,
+            path_data=path_data,
+            external_dataset=external_dataset,
+            path_train=path_train,
+            path_valid=path_valid,
+            path_test=path_test,
         )
+        (unique_id, abortable) = enqueue_celery_task(predict_bert, inputs)
+        del df
         self.computing.append(
             LMComputing(
                 user=user,
@@ -408,6 +411,8 @@ class LanguageModels:
                 dataset=dataset,
                 status=status,
                 get_progress=self.get_progress(name, status=status),
+                managed_by_celery=True,
+                abortable_celery_task=abortable,
             )
         )
         return unique_id

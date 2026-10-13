@@ -2641,17 +2641,6 @@ class Project:
                             self.features.reset_features_file()
                             self.bertopic.clear_bertopic()
                             self.projections.clear_projections()
-                    case "predict_bert":
-                        prediction = cast(LMComputing, e)
-                        if (
-                            results is not None
-                            and results.path
-                            and "predict_annotable.parquet" in results.path
-                        ):
-                            add_predictions["predict_" + prediction.model_name] = results.path
-                        self.languagemodels.add(prediction)
-                        if results is not None and results.events is not None:
-                            self.monitoring.close_process(prediction.unique_id, results.events)
                     case "predict_image":
                         if self.imagemodels is None:
                             continue

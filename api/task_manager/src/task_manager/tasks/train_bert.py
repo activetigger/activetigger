@@ -17,6 +17,7 @@ from activetigger.config import config
 from activetigger.datamodels import EventsDict, LMParametersModel, MLStatisticsModel
 from activetigger.functions import (
     activate_probs,
+    annotations_to_matrix,
     get_device,
     get_metrics_multiclass,
     get_metrics_multilabel,
@@ -26,7 +27,6 @@ from activetigger.functions import (
     split_annotation,
 )
 from activetigger.monitoring import TaskTimer
-from activetigger.tasks.predict_bert import annotations_to_matrix
 from activetigger.tasks.utils import length_after_tokenizing, retrieve_model_max_length
 from openai import BaseModel
 from torch import nn

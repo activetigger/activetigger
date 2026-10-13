@@ -1,28 +1,17 @@
 import gc
 import json
-import multiprocessing
-import multiprocessing.synchronize
 import os
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Optional
+from typing import Any, TypedDict
 
 import numpy as np
 import pandas as pd
 import torch
-from pandas import DataFrame
-from scipy.stats import entropy
-from tqdm import tqdm
-from transformers import (
-    AutoModelForSequenceClassification,
-    AutoTokenizer,  # ty: ignore[possibly-missing-import]
-)
-
 from activetigger.data import Data
 from activetigger.datamodels import (
-    EventsModel,
     MLStatisticsModel,
-    ReturnTaskPredictModel,
     TextDatasetModel,
 )
 from activetigger.functions import (
@@ -37,10 +26,47 @@ from activetigger.functions import (
     release_device_memory,
 )
 from activetigger.monitoring import TaskTimer
-from activetigger.tasks.base_task import BaseTask
+from pandas import DataFrame
+from pydantic import BaseModel
+from scipy.stats import entropy
+from tqdm import tqdm
+from transformers import (
+    AutoModelForSequenceClassification,
+    AutoTokenizer,
+)
 
 
-class PredictBertMultiClass(BaseTask):
+class PredictBertTaskInput(BaseModel):
+    path: Path
+    project_slug: str
+    model_name: str
+    dataset: str
+    col_text: str
+    training_kind: str
+    scheme_labels: list[str]
+    # annotable dataset written to disk by the API; None for all / external
+    path_df: Path | None = None
+    col_label: str | None = None
+    path_data: Path | None = None
+    external_dataset: TextDatasetModel | None = None
+    col_id_external: str | None = None
+    col_datasets: str | None = None
+    file_name: str = "predict.parquet"
+    batch: int = 32
+    statistics: list[str] | None = None
+    path_train: Path | None = None
+    path_valid: Path | None = None
+    path_test: Path | None = None
+
+
+# Return type must be a dict, a BaseModel would not be serialized by Celery
+class PredictBertResult(TypedDict):
+    path: str
+    metrics: dict[str, Any] | None
+    events: dict[str, dict[str, str | None]]
+
+
+class PredictBertMultiClass:
     """
     Class to predict with a bert model
     """
@@ -49,68 +75,45 @@ class PredictBertMultiClass(BaseTask):
     default_max_length = 512
 
     def __init__(
-        self,
-        dataset: str,
-        path: Path,
-        df: DataFrame | None,
-        col_text: str,
-        training_kind: str,
-        scheme_labels: list[str],
-        col_label: str | None = None,
-        path_data: Path | None = None,
-        external_dataset: TextDatasetModel | None = None,
-        col_id_external: str | None = None,
-        col_datasets: str | None = None,
-        file_name: str = "predict.parquet",
-        batch: int = 32,
-        statistics: list | None = None,
-        event: Optional[multiprocessing.synchronize.Event] = None,
-        unique_id: Optional[str] = None,
-        path_train: Path | None = None,
-        path_valid: Path | None = None,
-        path_test: Path | None = None,
-        **kwargs,
+        self, unique_id: str, inputs: PredictBertTaskInput, is_aborted: Callable[[], bool]
     ):
-        super().__init__()
-        self.path = path
-        self.df = df
-        self.dataset = dataset
-        self.col_text = col_text
-        self.col_label = col_label
-        self.col_id_external = col_id_external
-        self.col_datasets = col_datasets
-        self.event = event
+        self.path = inputs.path
+        self.path_df = inputs.path_df
+        self.df: DataFrame | None = None
+        self.dataset = inputs.dataset
+        self.col_text = inputs.col_text
+        self.col_label = inputs.col_label
+        self.col_id_external = inputs.col_id_external
+        self.col_datasets = inputs.col_datasets
+        self.is_aborted = is_aborted
         self.unique_id = unique_id
-        self.file_name = file_name
-        self.batch = batch
-        self.statistics = statistics
-        self.path_train = path_train
-        self.path_valid = path_valid
-        self.path_test = path_test
+        self.file_name = inputs.file_name
+        self.batch = inputs.batch
+        self.statistics = inputs.statistics
+        self.path_train = inputs.path_train
+        self.path_valid = inputs.path_valid
+        self.path_test = inputs.path_test
         self.progress_path = self.path / "progress_predict"
         # for external datasets, remember the original id column so the export
         # can use it instead of the project's internal col_id (issue #1033)
         self.external_id_col = (
-            external_dataset.id if dataset == "external" and external_dataset else None
+            inputs.external_dataset.id
+            if inputs.dataset == "external" and inputs.external_dataset
+            else None
         )
+        # data loading is deferred to run(): the dataframe comes either from
+        # the parquet written by the API (path_df) or from a dataset file
+        self.path_data = inputs.path_data
+        self.external_dataset = inputs.external_dataset
 
-        # when only a path is given, loading and validation are deferred to
-        # __call__ (worker side) so the large file is never pickled into the
-        # task object sent to the worker process
-        self.path_data = path_data
-        self.external_dataset = external_dataset
-
-        if self.df is None and path_data is None:
+        if self.path_df is None and self.path_data is None:
             raise ValueError("A dataframe or a data file path must be provided for prediction")
 
-        if statistics is not None and col_label is None:
+        if self.statistics is not None and self.col_label is None:
             raise ValueError("Column label must be provided to compute statistics")
 
-        if self.df is not None:
-            self.__validate_dataframe(self.df)
-
-        self.training_kind = training_kind
-        self.scheme_labels = scheme_labels
+        self.training_kind = inputs.training_kind
+        self.scheme_labels = inputs.scheme_labels
         self.threshold = None
 
         # read the config file
@@ -222,11 +225,10 @@ class PredictBertMultiClass(BaseTask):
 
     def __listen_stop_event(self):
         """
-        Raise exception if stop event is set
+        Raise exception if the user requested cancellation
         """
-        if self.event is not None:
-            if self.event.is_set():
-                raise Exception("Process interrupted by user")
+        if self.is_aborted():
+            raise Exception("Process interrupted by user")
 
     def __transform_to_dataframe(
         self, prob_predictions: np.ndarray, id2label: dict[int, str]
@@ -364,7 +366,7 @@ class PredictBertMultiClass(BaseTask):
 
         return metrics
 
-    def __call__(self) -> ReturnTaskPredictModel:
+    def run(self) -> PredictBertResult:
         """
         Main process to predict
         """
@@ -372,12 +374,14 @@ class PredictBertMultiClass(BaseTask):
         task_timer = TaskTimer(compulsory_steps=["setup", "predict", "save_files"])
         task_timer.start("setup")
 
-        if self.df is None:
-            if self.path_data is None:
-                raise ValueError("Dataframe is required for prediction")
+        if self.path_df is not None:
+            self.df = pd.read_parquet(self.path_df)
+        elif self.path_data is not None:
             print(f"Loading dataset from {self.path_data}", flush=True)
             self.df = self.__load_external_file(self.path_data, self.external_dataset)
-            self.__validate_dataframe(self.df)
+        else:
+            raise ValueError("Dataframe is required for prediction")
+        self.__validate_dataframe(self.df)
 
         # load the model
         tokenizer, model, max_length = self.__load_model()
@@ -459,16 +463,22 @@ class PredictBertMultiClass(BaseTask):
                 os.remove(self.progress_path)
             # clean memory
             self.df = None
-            self.event = None
             try:
                 del model, tokenizer
             except Exception:
                 pass
             gc.collect()
             release_device_memory()
+            if self.path_df is not None:
+                try:
+                    os.unlink(self.path_df)
+                except Exception as e:
+                    print("Error removing temporary prediction data", e)
 
-        return ReturnTaskPredictModel(
+        return PredictBertResult(
             path=str(self.path.joinpath(self.file_name)),
-            metrics=metrics,
-            events=EventsModel(events=task_timer.get_events()),
+            metrics={k: v.model_dump(mode="json") for k, v in metrics.items()}
+            if metrics is not None
+            else None,
+            events=task_timer.get_events(),
         )
