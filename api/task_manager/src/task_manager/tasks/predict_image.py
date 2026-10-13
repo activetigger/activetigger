@@ -2,28 +2,17 @@ import contextlib
 import gc
 import json
 import multiprocessing
-import multiprocessing.synchronize
 import os
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Optional
+from typing import Any, TypedDict
 
 import numpy as np
 import pandas as pd
 import torch
-from pandas import DataFrame
-from PIL import Image, ImageOps, UnidentifiedImageError
-from scipy.stats import entropy
-from torch.utils.data import DataLoader, Dataset
-from tqdm import tqdm
-from transformers import (
-    AutoImageProcessor,
-    AutoModelForImageClassification,  # ty: ignore[possibly-missing-import]
-)
-
 from activetigger.data import Data
-from activetigger.datamodels import MLStatisticsModel, ReturnTaskPredictModel
+from activetigger.datamodels import MLStatisticsModel
 from activetigger.functions import (
     activate_probs,
     annotations_to_matrix,
@@ -33,7 +22,16 @@ from activetigger.functions import (
     logits_to_probs,
     release_device_memory,
 )
-from activetigger.tasks.base_task import BaseTask
+from pandas import DataFrame
+from PIL import Image, ImageOps, UnidentifiedImageError
+from pydantic import BaseModel
+from scipy.stats import entropy
+from torch.utils.data import DataLoader, Dataset
+from tqdm import tqdm
+from transformers import (
+    AutoImageProcessor,
+    AutoModelForImageClassification,  # ty: ignore[possibly-missing-import]
+)
 
 # Cap PIL's maximum decoded pixel count to ~64 megapixels. Without this a
 # small attacker-supplied JPEG can decompress to several GB and OOM the
@@ -73,15 +71,11 @@ def _force_spawn_start_method() -> Iterator[None]:
     Temporarily switch multiprocessing's global default start method to
     "spawn" for the duration of the with-block.
 
-    Why: this task runs inside a loky worker, and loky sets the global
-    start method to "loky". DataLoader sub-workers spawned with
-    multiprocessing_context="spawn" still inherit the global default in
-    their bootstrap data (see CPython's multiprocessing.spawn.get_preparation_data),
-    and the freshly-spawned child errors out with
-    "ValueError: cannot find context for 'loky'" because loky isn't
-    imported there. Forcing the global to "spawn" while the loader is alive
-    sidesteps this. We restore the previous method on exit so any code
-    after us that depends on loky's context still works.
+    DataLoader sub-workers spawned with multiprocessing_context="spawn"
+    inherit the global default start method in their bootstrap data (see
+    CPython's multiprocessing.spawn.get_preparation_data) and fail if that
+    method is not resolvable in the child. Forcing "spawn" while the loader
+    is alive sidesteps this; the previous method is restored on exit.
     """
     prev = multiprocessing.get_start_method(allow_none=True)
     try:
@@ -116,7 +110,36 @@ class _ImagePredictDataset(Dataset[torch.Tensor]):
         return out["pixel_values"].squeeze(0)
 
 
-class PredictImage(BaseTask):
+class PredictImageTaskInput(BaseModel):
+    path: Path
+    project_slug: str
+    model_name: str
+    dataset: str
+    col_text: str  # holds the image path
+    training_kind: str
+    scheme_labels: list[str]
+    # annotable dataset written to disk by the API; None for the all dataset
+    path_df: Path | None = None
+    col_label: str | None = None
+    path_data: Path | None = None
+    col_id_external: str | None = None
+    col_datasets: str | None = None
+    file_name: str = "predict.parquet"
+    batch: int = 32
+    statistics: list[str] | None = None
+    path_train: Path | None = None
+    path_valid: Path | None = None
+    path_test: Path | None = None
+    basemodel: str | None = None
+
+
+# Return type must be a dict, a BaseModel would not be serialized by Celery
+class PredictImageResult(TypedDict):
+    path: str
+    metrics: dict[str, Any] | None
+
+
+class PredictImage:
     """
     Predict with a fine-tuned image-classification model.
 
@@ -128,77 +151,46 @@ class PredictImage(BaseTask):
     kind = "predict_image"
 
     def __init__(
-        self,
-        dataset: str,
-        path: Path,
-        df: DataFrame | None,
-        col_text: str,
-        training_kind: str,
-        scheme_labels: list[str],
-        col_label: str | None = None,
-        path_data: Path | None = None,
-        col_id_external: str | None = None,
-        col_datasets: str | None = None,
-        file_name: str = "predict.parquet",
-        batch: int = 32,
-        statistics: list | None = None,
-        event: Optional[multiprocessing.synchronize.Event] = None,
-        unique_id: Optional[str] = None,
-        path_train: Path | None = None,
-        path_valid: Path | None = None,
-        path_test: Path | None = None,
-        basemodel: str | None = None,
-        **kwargs,
+        self, unique_id: str, inputs: PredictImageTaskInput, is_aborted: Callable[[], bool]
     ):
-        super().__init__()
-        self.path = path
-        self.df = df
-        self.dataset = dataset
-        self.col_text = col_text  # holds the image path
-        self.col_label = col_label
-        self.col_id_external = col_id_external
-        self.col_datasets = col_datasets
-        self.event = event
+        self.path = inputs.path
+        self.path_df = inputs.path_df
+        self.path_data = inputs.path_data
+        self.df: DataFrame | None = None
+        self.dataset = inputs.dataset
+        self.col_text = inputs.col_text
+        self.col_label = inputs.col_label
+        self.col_id_external = inputs.col_id_external
+        self.col_datasets = inputs.col_datasets
+        self.is_aborted = is_aborted
         self.unique_id = unique_id
-        self.file_name = file_name
-        self.batch = batch
-        self.statistics = statistics
-        self.path_train = path_train
-        self.path_valid = path_valid
-        self.path_test = path_test
+        self.file_name = inputs.file_name
+        self.batch = inputs.batch
+        self.statistics = inputs.statistics
+        self.path_train = inputs.path_train
+        self.path_valid = inputs.path_valid
+        self.path_test = inputs.path_test
         self.progress_path = self.path / "progress_predict"
 
-        if dataset == "external":
+        if inputs.dataset == "external":
             raise ValueError("External-dataset prediction is not supported for image models yet.")
 
-        if self.df is None and path_data is not None:
-            self.df = self.__load_all_file(path_data)
-
-        if self.df is None:
+        if self.path_df is None and self.path_data is None:
             raise ValueError("Dataframe must be provided for prediction")
 
-        if col_text not in self.df.columns:
-            raise ValueError(f"Column text {col_text} not in dataframe")
-        if col_label is not None and col_label not in self.df.columns:
-            raise ValueError(f"Column label {col_label} not in dataframe")
-        if col_datasets is not None and col_datasets not in self.df.columns:
-            raise ValueError(f"Column datasets {col_datasets} not in dataframe")
-        if col_id_external is not None and col_id_external not in self.df.columns:
-            raise ValueError(f"Column id {col_id_external} not in dataframe")
-
-        if statistics is not None and col_label is None:
+        if self.statistics is not None and self.col_label is None:
             raise ValueError("Column label must be provided to compute statistics")
 
-        self.training_kind = training_kind
-        self.scheme_labels = scheme_labels
+        self.training_kind = inputs.training_kind
+        self.scheme_labels = inputs.scheme_labels
         self.threshold: float | None = None
 
         with open(self.path / "parameters.json", "r") as f:
             self.model_config = json.load(f)
             if "base_model" in self.model_config:
                 self.basemodel = self.model_config["base_model"]
-            elif basemodel is not None:
-                self.basemodel = basemodel
+            elif inputs.basemodel is not None:
+                self.basemodel = inputs.basemodel
             else:
                 raise ValueError("No base_model in parameters.json.")
             if "threshold" in self.model_config and self.training_kind == "multilabel":
@@ -207,6 +199,16 @@ class PredictImage(BaseTask):
                     self.threshold = float(t)
             if self.training_kind == "multilabel" and self.threshold is None:
                 self.threshold = 0.5
+
+    def __validate_dataframe(self, df: DataFrame) -> None:
+        if self.col_text not in df.columns:
+            raise ValueError(f"Column text {self.col_text} not in dataframe")
+        if self.col_label is not None and self.col_label not in df.columns:
+            raise ValueError(f"Column label {self.col_label} not in dataframe")
+        if self.col_datasets is not None and self.col_datasets not in df.columns:
+            raise ValueError(f"Column datasets {self.col_datasets} not in dataframe")
+        if self.col_id_external is not None and self.col_id_external not in df.columns:
+            raise ValueError(f"Column id {self.col_id_external} not in dataframe")
 
     def __load_all_file(self, path_data: Path) -> DataFrame:
         """
@@ -262,7 +264,7 @@ class PredictImage(BaseTask):
         return image_processor, model
 
     def __listen_stop_event(self):
-        if self.event is not None and self.event.is_set():
+        if self.is_aborted():
             raise Exception("Process interrupted by user")
 
     def __transform_to_dataframe(
@@ -342,10 +344,15 @@ class PredictImage(BaseTask):
             json.dump({k: v.model_dump(mode="json") for k, v in metrics.items()}, f_out)
         return metrics
 
-    def __call__(self) -> ReturnTaskPredictModel:
+    def run(self) -> PredictImageResult:
         print(f"start predicting image ({self.training_kind})", flush=True)
-        if self.df is None:
+        if self.path_df is not None:
+            self.df = pd.read_parquet(self.path_df)
+        elif self.path_data is not None:
+            self.df = self.__load_all_file(self.path_data)
+        else:
             raise ValueError("Dataframe is required for prediction")
+        self.__validate_dataframe(self.df)
 
         image_processor, model = self.__load_model()
         id2label = model.config.id2label
@@ -381,10 +388,12 @@ class PredictImage(BaseTask):
             # Decode/resize/normalize is CPU-bound and was the dominant cost
             # with num_workers=0 — the GPU sat idle between batches. Only
             # spin up workers when there are enough batches to amortize
-            # their start-up cost. The surrounding _force_spawn_start_method
-            # context manager is what makes num_workers>0 actually safe to
-            # use from inside a loky worker.
+            # their start-up cost. A celery prefork child is daemonic and
+            # cannot spawn sub-processes at all (the GPU pool is solo, so
+            # it can): fall back to in-process loading there.
             num_workers = min(4, n_batches) if n_batches >= 4 else 0
+            if multiprocessing.current_process().daemon:
+                num_workers = 0
             loader_kwargs: dict = {
                 "batch_size": self.batch,
                 "shuffle": False,
@@ -437,7 +446,6 @@ class PredictImage(BaseTask):
             if self.progress_path.exists():
                 os.remove(self.progress_path)
             self.df = None
-            self.event = None
             try:
                 del model, image_processor
             except Exception:
@@ -450,5 +458,15 @@ class PredictImage(BaseTask):
                 release_device_memory()
             except Exception as e:
                 print("Error in cleaning GPU memory", e)
+            if self.path_df is not None:
+                try:
+                    os.unlink(self.path_df)
+                except Exception as e:
+                    print("Error removing temporary prediction data", e)
 
-        return ReturnTaskPredictModel(path=str(self.path.joinpath(self.file_name)), metrics=metrics)
+        return PredictImageResult(
+            path=str(self.path.joinpath(self.file_name)),
+            metrics={k: v.model_dump(mode="json") for k, v in metrics.items()}
+            if metrics is not None
+            else None,
+        )

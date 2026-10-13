@@ -1,28 +1,17 @@
 import gc
 import json
-import multiprocessing
-import multiprocessing.synchronize
 import os
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, TypedDict
 
 import numpy as np
 import pandas as pd
 import torch
-from pandas import DataFrame
-from task_manager.tasks.train_ner import decode_spans, parse_spans
-from tqdm import tqdm
-from transformers import (
-    AutoModelForTokenClassification,
-    AutoTokenizer,  # ty: ignore[possibly-missing-import]
-)
-
 from activetigger.data import Data
 from activetigger.datamodels import (
-    EventsModel,
     MLStatisticsModel,
-    ReturnTaskPredictModel,
     TextDatasetModel,
 )
 from activetigger.functions import (
@@ -32,10 +21,47 @@ from activetigger.functions import (
 )
 from activetigger.monitoring import TaskTimer
 from activetigger.ner_metrics import compute_ner_metrics
-from activetigger.tasks.base_task import BaseTask
+from pandas import DataFrame
+from pydantic import BaseModel
+from tqdm import tqdm
+from transformers import (
+    AutoModelForTokenClassification,
+    AutoTokenizer,  # ty: ignore[possibly-missing-import]
+)
+
+from task_manager.tasks.train_ner import decode_spans, parse_spans
 
 
-class PredictNer(BaseTask):
+class PredictNerTaskInput(BaseModel):
+    path: Path
+    project_slug: str
+    model_name: str
+    dataset: str
+    col_text: str
+    scheme_labels: list[str]
+    # annotable dataset written to disk by the API; None for all / external
+    path_df: Path | None = None
+    col_label: str | None = None
+    path_data: Path | None = None
+    external_dataset: TextDatasetModel | None = None
+    col_id_external: str | None = None
+    col_datasets: str | None = None
+    file_name: str = "predict.parquet"
+    batch: int = 16
+    statistics: list[str] | None = None
+    path_train: Path | None = None
+    path_valid: Path | None = None
+    path_test: Path | None = None
+
+
+# Return type must be a dict, a BaseModel would not be serialized by Celery
+class PredictNerResult(TypedDict):
+    path: str
+    metrics: dict[str, Any] | None
+    events: dict[str, dict[str, str | None]]
+
+
+class PredictNer:
     """
     Predict spans on a dataset with a trained NER (token-classification) model.
 
@@ -48,59 +74,38 @@ class PredictNer(BaseTask):
     kind = "predict_ner"
     default_max_length = 512
 
-    def __init__(
-        self,
-        dataset: str,
-        path: Path,
-        df: DataFrame | None,
-        col_text: str,
-        scheme_labels: list[str],
-        col_label: str | None = None,
-        path_data: Path | None = None,
-        external_dataset: TextDatasetModel | None = None,
-        col_id_external: str | None = None,
-        col_datasets: str | None = None,
-        file_name: str = "predict.parquet",
-        batch: int = 16,
-        statistics: list | None = None,
-        event: Optional[multiprocessing.synchronize.Event] = None,
-        unique_id: Optional[str] = None,
-        path_train: Path | None = None,
-        path_valid: Path | None = None,
-        path_test: Path | None = None,
-        **kwargs,
-    ):
-        super().__init__()
-        self.path = path
-        self.df = df
-        self.dataset = dataset
-        self.col_text = col_text
-        self.col_label = col_label
-        self.col_id_external = col_id_external
-        self.col_datasets = col_datasets
-        self.event = event
+    def __init__(self, unique_id: str, inputs: PredictNerTaskInput, is_aborted: Callable[[], bool]):
+        self.path = inputs.path
+        self.path_df = inputs.path_df
+        self.df: DataFrame | None = None
+        self.dataset = inputs.dataset
+        self.col_text = inputs.col_text
+        self.col_label = inputs.col_label
+        self.col_id_external = inputs.col_id_external
+        self.col_datasets = inputs.col_datasets
+        self.is_aborted = is_aborted
         self.unique_id = unique_id
-        self.file_name = file_name
-        self.batch = batch
-        self.statistics = statistics
-        self.path_train = path_train
-        self.path_valid = path_valid
-        self.path_test = path_test
+        self.file_name = inputs.file_name
+        self.batch = inputs.batch
+        self.statistics = inputs.statistics
+        self.path_train = inputs.path_train
+        self.path_valid = inputs.path_valid
+        self.path_test = inputs.path_test
         self.progress_path = self.path / "progress_predict"
         self.external_id_col = (
-            external_dataset.id if dataset == "external" and external_dataset else None
+            inputs.external_dataset.id
+            if inputs.dataset == "external" and inputs.external_dataset
+            else None
         )
-        self.path_data = path_data
-        self.external_dataset = external_dataset
+        self.path_data = inputs.path_data
+        self.external_dataset = inputs.external_dataset
 
-        if self.df is None and path_data is None:
+        if self.path_df is None and self.path_data is None:
             raise ValueError("A dataframe or a data file path must be provided for prediction")
-        if statistics is not None and col_label is None:
+        if self.statistics is not None and self.col_label is None:
             raise ValueError("Column label must be provided to compute statistics")
-        if self.df is not None:
-            self.__validate_dataframe(self.df)
 
-        self.scheme_labels = scheme_labels
+        self.scheme_labels = inputs.scheme_labels
         with open(self.path / "parameters.json", "r") as f:
             self.model_config = json.load(f)
         self.max_length = int(self.model_config.get("max_length", self.default_max_length))
@@ -164,7 +169,7 @@ class PredictNer(BaseTask):
             f.write(str(progress))
 
     def __listen_stop_event(self):
-        if self.event is not None and self.event.is_set():
+        if self.is_aborted():
             raise Exception("Process interrupted by user")
 
     def __compute_statistics(
@@ -175,7 +180,7 @@ class PredictNer(BaseTask):
 
         Writes the full three-flavor breakdown to ``metrics_predict_*.json``
         for the frontend, and returns the "exact" flavor per dataset so the
-        orchestrator's ``ReturnTaskPredictModel`` exposes headline NER
+        task result exposes headline NER
         metrics in the same shape as classification metrics.
         """
         if self.df is None or self.statistics is None:
@@ -204,16 +209,18 @@ class PredictNer(BaseTask):
             json.dump(metrics_file, f)
         return metrics
 
-    def __call__(self) -> ReturnTaskPredictModel:
+    def run(self) -> PredictNerResult:
         print("start predicting (ner)", flush=True)
         task_timer = TaskTimer(compulsory_steps=["setup", "predict", "save_files"])
         task_timer.start("setup")
 
-        if self.df is None:
-            if self.path_data is None:
-                raise ValueError("Dataframe is required for prediction")
+        if self.path_df is not None:
+            self.df = pd.read_parquet(self.path_df)
+        elif self.path_data is not None:
             self.df = self.__load_external_file(self.path_data, self.external_dataset)
-            self.__validate_dataframe(self.df)
+        else:
+            raise ValueError("Dataframe is required for prediction")
+        self.__validate_dataframe(self.df)
 
         # Load the tokenizer that was saved alongside the trained model
         # instead of pulling from the upstream base model. This guarantees
@@ -305,19 +312,25 @@ class PredictNer(BaseTask):
             if self.progress_path.exists():
                 os.remove(self.progress_path)
             self.df = None
-            self.event = None
             try:
                 del model, tokenizer
             except Exception:
                 pass
             gc.collect()
             release_device_memory()
+            if self.path_df is not None:
+                try:
+                    os.unlink(self.path_df)
+                except Exception as e:
+                    print("Error removing temporary prediction data", e)
 
-        return ReturnTaskPredictModel(
+        return PredictNerResult(
             path=str(self.path.joinpath(self.file_name)),
             # Headline (exact-match) metrics per dataset. The full
             # exact/partial/type breakdown is written to
             # ``metrics_predict_*.json`` by ``__compute_statistics``.
-            metrics=metrics,
-            events=EventsModel(events=task_timer.get_events()),
+            metrics={k: v.model_dump(mode="json") for k, v in metrics.items()}
+            if metrics is not None
+            else None,
+            events=task_timer.get_events(),
         )

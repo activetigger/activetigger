@@ -10,6 +10,7 @@ from typing import Any, Callable, Optional, Tuple, cast
 import pandas as pd
 from fastapi.responses import FileResponse
 from pandas import DataFrame
+from task_manager.tasks.predict_ner_task import PredictNerTaskInput, predict_ner
 from task_manager.tasks.train_ner_task import TrainNerTaskInput, train_ner
 
 import activetigger.functions as functions
@@ -31,7 +32,6 @@ from activetigger.db.manager import DatabaseManager
 from activetigger.errors import AlreadyExistsError, InvalidInputError, NotFoundError
 from activetigger.functions import get_model_metrics
 from activetigger.queue_manager import Queue
-from activetigger.tasks.predict_ner import PredictNer
 from activetigger.tasks.task_manager_client import enqueue_celery_task
 
 
@@ -241,29 +241,36 @@ class NerModels:
             raise Exception("Dataframe is required for this dataset")
 
         file_name = f"predict_{dataset}.parquet"
-        unique_id = self.queue.add_task(
-            "prediction",
-            project_slug,
-            PredictNer(
-                path=self.path.joinpath(name),
-                dataset=dataset,
-                df=df,
-                scheme_labels=scheme_labels,
-                col_text="text",
-                col_label=col_label,
-                col_id_external="id_external",
-                col_datasets="dataset",
-                file_name=file_name,
-                batch=batch_size,
-                statistics=statistics,
-                path_data=path_data,
-                external_dataset=external_dataset,
-                path_train=path_train,
-                path_valid=path_valid,
-                path_test=path_test,
-            ),
-            queue="gpu",
+
+        # write df on disk on a temporary file read by the worker
+        path_df = None
+        if df is not None:
+            path_df = self.path.joinpath(name, "predict_ner_" + uuid.uuid4().hex + ".parquet")
+            df.to_parquet(path_df)
+
+        # queue celery task
+        inputs = PredictNerTaskInput(
+            path=self.path.joinpath(name),
+            path_df=path_df,
+            project_slug=project_slug,
+            model_name=name,
+            dataset=dataset,
+            scheme_labels=scheme_labels,
+            col_text="text",
+            col_label=col_label,
+            col_id_external="id_external",
+            col_datasets="dataset",
+            file_name=file_name,
+            batch=batch_size,
+            statistics=statistics,
+            path_data=path_data,
+            external_dataset=external_dataset,
+            path_train=path_train,
+            path_valid=path_valid,
+            path_test=path_test,
         )
+        (unique_id, abortable) = enqueue_celery_task(predict_ner, inputs)
+        del df
         self.computing.append(
             LMComputing(
                 user=user,
@@ -275,6 +282,8 @@ class NerModels:
                 dataset=dataset,
                 status=status,
                 get_progress=self.get_progress(name, status=status),
+                managed_by_celery=True,
+                abortable_celery_task=abortable,
             )
         )
         return unique_id

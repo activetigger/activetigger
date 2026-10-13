@@ -35,7 +35,6 @@ from activetigger.datamodels import (
     GenerationResult,
     ImageModelModel,
     LexicometricsComputing,
-    LMComputing,
     NerModelModel,
     NextInModel,
     NextProjectStateModel,
@@ -2641,30 +2640,6 @@ class Project:
                             self.features.reset_features_file()
                             self.bertopic.clear_bertopic()
                             self.projections.clear_projections()
-                    case "predict_image":
-                        if self.imagemodels is None:
-                            continue
-                        prediction = cast(LMComputing, e)
-                        if (
-                            results is not None
-                            and results.path
-                            and "predict_annotable.parquet" in results.path
-                        ):
-                            add_predictions["predict_" + prediction.model_name] = results.path
-                        self.imagemodels.add(prediction)
-                    case "predict_ner":
-                        if self.nermodels is None:
-                            continue
-                        prediction = cast(LMComputing, e)
-                        if (
-                            results is not None
-                            and results.path
-                            and "predict_annotable.parquet" in results.path
-                        ):
-                            add_predictions["predict_" + prediction.model_name] = results.path
-                        self.nermodels.add(prediction)
-                        if results is not None and results.events is not None:
-                            self.monitoring.close_process(prediction.unique_id, results.events)
                     case "predict_with_features":
                         pf = cast(QuickModelComputing, e)
                         self.quickmodels.mark_prediction_done(pf.name, pf.dataset)
