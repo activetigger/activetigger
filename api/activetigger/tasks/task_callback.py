@@ -4,10 +4,11 @@ from importlib import util
 from pathlib import Path
 from typing import Any
 
+from task_manager.utils import TaskFailureReportForCallback
+
 from activetigger.datamodels import ProcessComputing
 from activetigger.orchestrator import get_orchestrator
 from activetigger.project import Project
-from task_manager.utils import TaskFailureReportForCallback
 
 
 # TaskCallback is a generic class to specify task callback definitions
@@ -62,8 +63,18 @@ class TaskCallback(ABC):
         specific_message = cls.on_failure_task_specific(task_id, task_report, project_manager)
         if specific_message:
             project_manager.errors.add(specific_message)
+        # a pool child killed by the kernel: almost always RAM exhaustion
+        if "WorkerLostError" in task_report.exception or "SIGKILL" in task_report.exception:
+            project_manager.errors.add(
+                (
+                    f"Error for task {cls.task_name} : the worker process was killed, "
+                    "most likely because the machine ran out of memory (RAM). "
+                    "Try a smaller model, a smaller batch size or a shorter max length. "
+                    f"Details: {task_report.exception}"
+                )
+            )
         # generic message for GPU errors
-        if any(
+        elif any(
             s in task_report.exception
             for s in [
                 "CUDA",
