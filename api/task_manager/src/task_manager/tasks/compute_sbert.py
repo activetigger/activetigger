@@ -41,7 +41,11 @@ def encode_sbert(
 
     sbert = None
     try:
-        sbert = SentenceTransformer(model, device=str(device), trust_remote_code=True)
+        # transformers>=5 loads bf16 checkpoints as-is; on CPU that hits a very slow matmul path
+        model_kwargs = {"dtype": torch.float32} if device.type == "cpu" else {}
+        sbert = SentenceTransformer(
+            model, device=str(device), trust_remote_code=True, model_kwargs=model_kwargs
+        )
         max_seq_length = sbert.max_seq_length
         if max_seq_length is None:
             sbert.max_seq_length = max_tokens
