@@ -12,14 +12,11 @@ def start_cpu_worker_pool():
     """
     Start worker.s for the CPU queue
     """
-    # without a GPU worker pool, GPU-routed tasks (training) would sit in the
-    # GPU queue forever: consume both queues and run them on CPU
-    queues = QueueName.CPU if config.gpu_available else f"{QueueName.CPU},{QueueName.GPU}"
     args = [
         "worker",
         f"--loglevel={config.worker_loglevel}",
         f"--concurrency={config.cpu_worker_concurrency}",
-        f"--queues={queues}",
+        f"--queues={QueueName.CPU}",
         "--hostname=worker_cpu@%h",
         # "--purge",
     ]
@@ -28,7 +25,11 @@ def start_cpu_worker_pool():
 
 def start_gpu_worker_pool():
     """
-    Start worker.s for the GPU queue
+    Start the worker for the GPU queue.
+
+    Heavy tasks (training, embeddings, prediction) are routed to this queue
+    whether or not a GPU exists: the solo pool runs them one at a time, which
+    bounds memory use. Without a GPU they simply run on CPU.
     """
     args = [
         "worker",

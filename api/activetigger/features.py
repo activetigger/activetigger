@@ -1,5 +1,6 @@
 import json
 import os
+import uuid
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -9,6 +10,11 @@ import pandas as pd
 import pyarrow.parquet as pq
 import regex
 from pandas import DataFrame, Series
+from task_manager.tasks.compute_bert_embeddings_task import (
+    ComputeBertEmbeddingsTaskInput,
+    compute_bert_embeddings,
+)
+from task_manager.tasks.compute_sbert_task import ComputeSbertTaskInput, compute_sbert
 
 from activetigger.config import config
 from activetigger.data import Data
@@ -24,12 +30,7 @@ from activetigger.tasks.compute_clip_imagexp import ComputeClipImagexp
 from activetigger.tasks.compute_dfm import ComputeDfm
 from activetigger.tasks.compute_fasttext import ComputeFasttext
 from activetigger.tasks.compute_multimodal import ComputeMultimodal
-from activetigger.tasks.compute_sbert import ComputeSbert
 from activetigger.tasks.task_manager_client import enqueue_celery_task
-from task_manager.tasks.compute_bert_embeddings_task import (
-    ComputeBertEmbeddingsTaskInput,
-    compute_bert_embeddings,
-)
 
 # Experimental image projects: list of selectable image embedding models.
 # Each entry maps a UI label to (open_clip model name, pretrained tag).
@@ -767,17 +768,23 @@ class Features:
                 parameters["max_length_tokens"] = 1024
             if "batch_size" not in parameters:
                 parameters["batch_size"] = 32
-            unique_id = self.queue.add_task(
-                "feature",
-                self.project_slug,
-                ComputeSbert(
-                    texts=df,
+
+            # serialize df on disk for transmission to Celery task
+            texts_path = self.data.path_project.joinpath(f"texts_{uuid.uuid4().hex}.pkl")
+            df.to_pickle(texts_path)
+            task_managed_by_celery = True
+            (unique_id, abortable) = enqueue_celery_task(
+                compute_sbert,
+                ComputeSbertTaskInput(
+                    feature_name=name,
+                    username=username,
+                    project_slug=self.project_slug,
+                    texts_path=texts_path,
                     path_process=self.path_all.parent,
                     model=model,
-                    max_tokens=parameters["max_length_tokens"],
+                    max_tokens=int(parameters["max_length_tokens"]),
                     batch_size=int(parameters["batch_size"]),
                 ),
-                queue="gpu",
             )
 
             parameters = {

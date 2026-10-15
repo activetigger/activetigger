@@ -74,13 +74,14 @@ uv run --no-sync watchmedo auto-restart \
     --recursive \
     -- uv run --no-sync celery-worker-cpu &
 
-if [ "$GPU" = "true" ]; then
-  uv run --no-sync watchmedo auto-restart \
-    --directory="./task_manager/src/task_manager/" \
-    --pattern="*.py" \
-    --recursive \
-    -- uv run --no-sync celery-worker-gpu &
-fi
+# Heavy tasks (training, embeddings, prediction) go to the GPU queue, consumed
+# by this single solo worker so they run one at a time. It is started even
+# without a GPU: the tasks then run on CPU, still serialized.
+uv run --no-sync watchmedo auto-restart \
+  --directory="./task_manager/src/task_manager/" \
+  --pattern="*.py" \
+  --recursive \
+  -- uv run --no-sync celery-worker-gpu &
 
 # Launch the server
 echo "Launching API on port $API_PORT..."

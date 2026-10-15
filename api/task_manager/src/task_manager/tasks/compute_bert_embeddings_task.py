@@ -2,7 +2,6 @@ import csv
 import gc
 import json
 import math
-import os
 import sys
 from os import unlink
 from pathlib import Path
@@ -64,7 +63,7 @@ class ComputeBertEmbeddingsTaskInput(BaseModel):
 class ComputeBertEmbeddingsTask(AutoCallbackTask):
     name = "compute bert embeddings"
     # GPU task unless CPU_only mode
-    queue = QueueName.GPU if os.environ.get("GPU") == "true" else QueueName.CPU
+    queue = QueueName.GPU
     path_progress: Path | None
 
     def log_progress(self, progress:float, project_slug:str):

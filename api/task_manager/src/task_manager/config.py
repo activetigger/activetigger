@@ -6,8 +6,6 @@ storage_path = os.environ.get("STORAGE_PATH", "/tmp")
 cache_model_path = os.environ.get("TASKMANAGER_CACHE_MODEL_PATH", "/tmp")
 cpu_worker_concurrency = os.environ.get("N_WORKERS_CPU", "1")
 gpu_worker_concurrency = os.environ.get("N_WORKERS_GPU", "1")
-# mirrors entrypoint.sh: a GPU worker pool is only started when GPU=true
-gpu_available = os.environ.get("GPU", "false").lower() == "true"
 
 # orchestrator API reached by task callbacks
 api_url = os.environ.get("ORCHESTRATOR_API_URL", f"http://api:{os.environ.get('API_PORT', '4000')}")

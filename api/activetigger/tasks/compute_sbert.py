@@ -1,23 +1,19 @@
-import gc
-import math
 import multiprocessing
 import multiprocessing.synchronize
 from pathlib import Path
 from typing import Optional
 
-import numpy as np
-import torch
 from pandas import DataFrame, Series
-from sentence_transformers import SentenceTransformer
+from task_manager.tasks.compute_sbert import encode_sbert
 
-from activetigger.config import config
-from activetigger.functions import get_device, release_device_memory
 from activetigger.tasks.base_task import BaseTask
 
 
 class ComputeSbert(BaseTask):
     """
-    Compute Embeddings features
+    In-process sentence embeddings for composite tasks (bertopic, feature
+    recomputation). Standalone feature computation goes through the celery
+    task; both share encode_sbert.
     """
 
     kind = "compute_feature_embeddings"
@@ -36,9 +32,6 @@ class ComputeSbert(BaseTask):
         super().__init__()
         self.texts = texts
         self.model = model
-        self.model_args = {}
-        if self.model in config.models_embeddings:
-            self.model_args = config.models_embeddings[self.model]
         self.batch_size = batch_size
         self.min_gpu = min_gpu
         self.path_process = path_process
@@ -51,84 +44,21 @@ class ComputeSbert(BaseTask):
             self.path_progress = self.path_process.joinpath(self.unique_id)
             self.progress_file_temporary = True
 
-    # def retrieve_model_max_length(self) -> int:
-    #     try:
-    #         model_max_length = AutoConfig.from_pretrained(
-    #             self.model, trust_remote_code=True
-    #         ).max_position_embeddings
-    #     except Exception:
-    #         print("Cannot retrieve model max length, fallback to user value")
-    #         model_max_length = self.max_tokens
-
-    #     return model_max_length
-
     def __call__(self) -> DataFrame:
-        """
-        Compute embeddings
-        """
         # update temporary file with the current ID
         if self.progress_file_temporary:
             self.path_progress = self.path_process.joinpath(self.unique_id)
-
-        # test the data
-        if self.texts.isnull().sum() > 0:
-            raise ValueError("There are missing values in the input data, so we can't proceed")
-
-        device = get_device()
-        if device.type == "cuda":
-            if torch.cuda.get_device_properties(0).total_memory / (1024**3) <= self.min_gpu:
-                print("Not enough GPU memory, fallback to CPU")
-                device = torch.device("cpu")
-
-        sbert = None
         try:
-            sbert = SentenceTransformer(self.model, device=str(device), trust_remote_code=True)
-            max_seq_length = sbert.max_seq_length
-            if max_seq_length is None:
-                sbert.max_seq_length = self.max_tokens
-            else:
-                sbert.max_seq_length = int(min(self.max_tokens, max_seq_length))
-
-            print("start computation")
-            embeddings = []
-            total_batches = math.ceil(len(self.texts) / self.batch_size)
-            for i, start in enumerate(range(0, len(self.texts), self.batch_size), 1):
-                # check if the user want to stop the process
-                if self.event is not None:
-                    if self.event.is_set():
-                        print("Process interrupted by user")
-                        raise Exception("Process interrupted by user")
-                # create the batch
-                batch_texts = list(self.texts.iloc[start : start + self.batch_size])
-                embeddings.append(
-                    sbert.encode(
-                        batch_texts,
-                        device=str(device),
-                        normalize_embeddings=True,
-                        **self.model_args,
-                    )
-                )
-
-                # manage progress
-                progress_percent = (i / total_batches) * 100
-                with open(self.path_progress, "w") as f:
-                    f.write(str(round(progress_percent, 1)))
-                print(progress_percent)
-
-            # shape the data
-            emb = DataFrame(
-                np.vstack(embeddings),
-                index=self.texts.index,
-                columns=["sb%03d" % (x + 1) for x in range(len(embeddings[0][0]))],
+            return encode_sbert(
+                self.texts,
+                model=self.model,
+                path_progress=self.path_progress,
+                batch_size=self.batch_size,
+                min_gpu=self.min_gpu,
+                max_tokens=self.max_tokens,
+                is_aborted=lambda: self.event is not None and self.event.is_set(),
             )
-            return emb
-        except Exception as e:
-            raise e
         finally:
             if self.progress_file_temporary:
                 self.path_progress.unlink(missing_ok=True)
-            if sbert is not None:
-                del sbert
             del self.texts
-            gc.collect()
-            release_device_memory()
