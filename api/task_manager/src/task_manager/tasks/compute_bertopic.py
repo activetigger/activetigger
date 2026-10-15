@@ -1,31 +1,31 @@
-import datetime
 import gc
 import json
 import shutil
-from datetime import timezone
+from collections.abc import Callable
 from pathlib import Path
 from string import punctuation
 
+import activetigger
 import hdbscan
 import nltk
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import umap
+from activetigger.config import config
+from activetigger.datamodels import BertopicParamsModel, EventsDict
+from activetigger.functions import release_device_memory
+from activetigger.monitoring import TaskTimer
 from bertopic import BERTopic
 from great_tables import GT, loc, style
 from jinja2 import Template
 from nltk.corpus import stopwords as nltk_stopwords
+from pydantic import BaseModel
 from simplemma import lemmatize
 from sklearn.feature_extraction.text import CountVectorizer
 from slugify import slugify
 
-from activetigger.config import config
-from activetigger.datamodels import BertopicParamsModel, EventsModel
-from activetigger.functions import release_device_memory
-from activetigger.monitoring import TaskTimer
-from activetigger.tasks.base_task import BaseTask
-from activetigger.tasks.compute_sbert import ComputeSbert
+from task_manager.tasks.compute_sbert import encode_sbert
 
 nltk.download("stopwords", quiet=True)
 
@@ -192,7 +192,21 @@ class CustomLemmatizer:
         return out
 
 
-class ComputeBertopic(BaseTask):
+class ComputeBertopicTaskInput(BaseModel):
+    path_bertopic: Path
+    path_data: Path
+    project_slug: str
+    name: str
+    col_id: str | None
+    col_text: str
+    parameters: BertopicParamsModel
+    existing_embeddings: Path | None = None
+    cols_embeddings: list[str] | None = None
+    force_compute_embeddings: bool = False
+    random_seed: int = 42
+
+
+class ComputeBertopic:
     """
     Compute BERTopic model
 
@@ -203,47 +217,36 @@ class ComputeBertopic(BaseTask):
     Embeddings are identified by run name + embedding model name.
     """
 
-    kind = "compute_bertopic"
-
     def __init__(
         self,
-        path_bertopic: Path,
-        path_data: Path,
-        col_id: str | None,
-        col_text: str,
-        parameters: BertopicParamsModel,
-        name: str | None = None,
-        existing_embeddings: Path | None = None,
-        cols_embeddings: list[str] | None = None,
-        force_compute_embeddings: bool = False,
-        random_seed: int = 42,
-        **kwargs,
+        unique_id: str,
+        inputs: ComputeBertopicTaskInput,
+        is_aborted: Callable[[], bool],
     ):
-        super().__init__()
-        if existing_embeddings and not existing_embeddings.suffix == ".parquet":
+        self.unique_id = unique_id
+        self.is_aborted = is_aborted
+        if inputs.existing_embeddings and not inputs.existing_embeddings.suffix == ".parquet":
             raise ValueError("Embeddings file must be a parquet file.")
 
         # Set parameters
-        self.random_seed = random_seed
-        self.path_data = path_data
-        self.col_id = col_id
-        self.col_text = col_text
-        if name is None:
-            name = f"bertopic_{path_data.stem}_{datetime.datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
-        self.name = slugify(name)
+        self.random_seed = inputs.random_seed
+        self.path_data = inputs.path_data
+        self.col_id = inputs.col_id
+        self.col_text = inputs.col_text
+        self.name = slugify(inputs.name)
         self.input_datasets = (
-            parameters.input_datasets
+            inputs.parameters.input_datasets
         )  # train, all_sets (ie train+valid+test), complete
-        self.parameters = parameters
+        self.parameters = inputs.parameters
         self.existing_embeddings = (
-            existing_embeddings  # Path to force using one file for the embeddings
+            inputs.existing_embeddings  # Path to force using one file for the embeddings
         )
-        self.cols_embeddings = cols_embeddings
+        self.cols_embeddings = inputs.cols_embeddings
         self.timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
-        self.force_compute_embeddings = force_compute_embeddings
+        self.force_compute_embeddings = inputs.force_compute_embeddings
 
         # Create paths
-        self.path_bertopic = path_bertopic
+        self.path_bertopic = inputs.path_bertopic
         self.path_bertopic.joinpath("embeddings").mkdir(parents=True, exist_ok=True)
 
         # Check if the run already exists
@@ -253,9 +256,8 @@ class ComputeBertopic(BaseTask):
 
     def __stop_process_opportunity(self):
         """stop process by the user"""
-        if self.event is not None:
-            if self.event.is_set():
-                raise Exception("Process interrupted by user")
+        if self.is_aborted():
+            raise Exception("Process interrupted by user")
 
     def __init_paths(self) -> tuple[Path, Path]:
         """Creates a folder (projects/{project_slug}/bertopic/runs/{bertopic_run}/)
@@ -342,18 +344,14 @@ class ComputeBertopic(BaseTask):
             raise ValueError(f"Model {self.parameters.embedding_model} not supported.")
         self.update_progress(10)
         path_sbert_progress = self.path_run.joinpath("progress_sbert")
-        embeddings = ComputeSbert(
-            texts=df[self.col_text],
-            path_process=self.path_bertopic,
+        computed = encode_sbert(
+            df[self.col_text],
             model=self.parameters.embedding_model,
+            path_progress=path_sbert_progress,
             batch_size=self.parameters.embedding_batch_size,
             min_gpu=1,
-            path_progress=path_sbert_progress,
+            is_aborted=self.is_aborted,
         )
-        # transmit the event to allow interruption
-        embeddings.event = self.event
-        # launch computation
-        computed = embeddings()
         # clean up SBERT progress file
         path_sbert_progress.unlink(missing_ok=True)
         # save the embeddings to a file
@@ -636,14 +634,16 @@ class ComputeBertopic(BaseTask):
             "parameters": table_settings.as_raw_html(),
         }
 
-        input_template_path = "./activetigger/html/bertopic_report_template.html"
+        input_template_path = (
+            Path(activetigger.__file__).parent / "html" / "bertopic_report_template.html"
+        )
         output_file_path = self.path_run.joinpath("report.html")
         with open(output_file_path, "w", encoding="utf-8") as output_file:
             with open(input_template_path) as template_file:
                 j2_template = Template(template_file.read())
                 output_file.write(j2_template.render(jinja_data))
 
-    def __call__(self) -> EventsModel:
+    def run(self) -> EventsDict:
         """
         Compute BERTopic model
         Main steps:
@@ -753,7 +753,7 @@ class ComputeBertopic(BaseTask):
             task_timer.stop("save_files")
 
             self.path_run.joinpath("progress").unlink(missing_ok=True)
-            return EventsModel(events=task_timer.get_events())
+            return EventsDict({"events": task_timer.get_events()})
 
         except Exception as e:
             # Case an error happens
@@ -783,7 +783,6 @@ class ComputeBertopic(BaseTask):
                     umap_model,
                     hdbscan_model,
                     vectorizer_model,
-                    self.event,
                 )
             except NameError:
                 pass

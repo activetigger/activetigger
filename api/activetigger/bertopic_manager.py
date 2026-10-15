@@ -7,6 +7,10 @@ from typing import Callable
 import pandas as pd
 from fastapi.responses import FileResponse
 from slugify import slugify
+from task_manager.tasks.compute_bertopic_task import (
+    ComputeBertopicTaskInput,
+    compute_bertopic,
+)
 
 from activetigger.config import config
 from activetigger.datamodels import (
@@ -23,8 +27,7 @@ from activetigger.db.languagemodels import ModelsService
 from activetigger.db.manager import DatabaseManager
 from activetigger.errors import NotFoundError
 from activetigger.features import Features
-from activetigger.queue_manager import Queue
-from activetigger.tasks.compute_bertopic import ComputeBertopic
+from activetigger.tasks.task_manager_client import enqueue_celery_task
 
 
 class Bertopic:
@@ -43,13 +46,11 @@ class Bertopic:
         self,
         project_slug: str,
         path: Path,
-        queue: Queue,
         computing: list,
         features: Features,
         db_manager: DatabaseManager,
     ) -> None:
         self.project_slug = project_slug
-        self.queue = queue
         self.computing = computing
         self.path: Path = path.joinpath("bertopic")
         self.path.mkdir(parents=True, exist_ok=True)
@@ -93,21 +94,24 @@ class Bertopic:
             )
         self._materialize_feature_embeddings(parameters)
 
-        args = ComputeBertopic(
+        inputs = ComputeBertopicTaskInput(
             path_bertopic=self.path,
             path_data=path_data,
+            project_slug=self.project_slug,
+            name=name,
             col_id=col_id,
             col_text=col_text,
             parameters=parameters,
-            name=name,
             force_compute_embeddings=False,
             random_seed=config.random_seed,
         )
-        unique_id = self.queue.add_task("bertopic", self.project_slug, args, queue="cpu")
+        unique_id, abortable = enqueue_celery_task(compute_bertopic, inputs)
         self.computing.append(
             BertopicComputing(
                 user=user,
                 unique_id=unique_id,
+                managed_by_celery=True,
+                abortable_celery_task=abortable,
                 name=name,
                 path_data=path_data,
                 col_id=col_id,

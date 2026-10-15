@@ -361,7 +361,6 @@ class Project:
         self.bertopic = Bertopic(
             project_slug,
             self.params.dir,
-            self.queue,
             self.computing,
             self.features,
             self.db_manager,
@@ -2687,11 +2686,6 @@ class Project:
                             jsonl = self.params.dir.joinpath(f"gen_{e.unique_id}.jsonl")
                             if jsonl.exists():
                                 jsonl.unlink()
-                    case "bertopic":
-                        bertopic_model = cast(BertopicComputing, e)
-                        events = cast(EventsModel, results)
-                        self.bertopic.add(bertopic_model)
-                        self.monitoring.close_process(bertopic_model.unique_id, events)
                     case "extend_features":
                         self.features.map, self.features.n = self.features.get_map()
                         if self.features.n != len(self.data.index):
