@@ -16,9 +16,8 @@ def stop_celery_task(task_id: str, abortable: bool | None):
     if abortable:
         task = AbortableAsyncResult(task_id, app=celery_app)
         print(f"Aborting {task_id} {type(task).__name__}")
-        # abort() only flags the backend for a running task; a task still waiting
-        # in the queue would start anyway once a worker picks it up (and the flag
-        # expires with the result). revoke (no terminate) drops it on receipt.
+        # abort() only flags a running task; revoke drops a task still in the queue.
+        # revoke overwrites ABORTED with REVOKED, so is_aborted() accepts both states.
         task.abort()
         celery_app.control.revoke(task_id)
     else:

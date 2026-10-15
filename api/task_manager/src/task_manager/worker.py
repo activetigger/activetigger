@@ -16,6 +16,9 @@ def start_cpu_worker_pool():
         "worker",
         f"--loglevel={config.worker_loglevel}",
         f"--concurrency={config.cpu_worker_concurrency}",
+        # a child is forked from the already-imported parent (cheap) and exits
+        # after one task, so the memory a task allocated is returned to the OS
+        "--max-tasks-per-child=1",
         f"--queues={QueueName.CPU}",
         "--hostname=worker_cpu@%h",
         # "--purge",
@@ -28,15 +31,21 @@ def start_gpu_worker_pool():
     Start the worker for the GPU queue.
 
     Heavy tasks (training, embeddings, prediction) are routed to this queue
-    whether or not a GPU exists: the solo pool runs them one at a time, which
-    bounds memory use. Without a GPU they simply run on CPU.
+    whether or not a GPU exists and run one at a time (concurrency 1 by
+    default), which bounds memory use. Without a GPU they simply run on CPU.
+
+    Each task runs in a fresh forked child that exits afterwards: a solo pool
+    would keep the model memory (allocator arenas, CUDA context) in the long-
+    lived worker process. CUDA must therefore never be initialised in the
+    parent, i.e. at import time of a task module.
     """
     args = [
         "worker",
         f"--loglevel={config.worker_loglevel}",
-        # we might need to create one queue by GPU device having each pool solo
+        # we might need to create one queue by GPU device
         f"--concurrency={config.gpu_worker_concurrency}",
-        "--pool=solo",
+        "--pool=prefork",
+        "--max-tasks-per-child=1",
         f"--queues={QueueName.GPU}",
         "--hostname=worker_gpu@%h",
         # "--purge",

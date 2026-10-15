@@ -1,7 +1,8 @@
 from enum import StrEnum
 
 from celery import Task
-from celery.contrib.abortable import AbortableTask
+from celery.contrib.abortable import ABORTED, AbortableTask
+from celery.states import REVOKED
 
 from task_manager.utils import (
     TaskFailureReportForCallback,
@@ -48,4 +49,7 @@ class AutoCallbackTask(Task):
 
 
 class AbortableAutoCallbackTask(AutoCallbackTask, AbortableTask):
-    pass
+    def is_aborted(self, **kwargs) -> bool:
+        # stop = abort() + revoke(); the revoke overwrites ABORTED with REVOKED in the backend
+        task_id = kwargs.get("task_id", self.request.id)
+        return self.AsyncResult(task_id).state in (ABORTED, REVOKED)
