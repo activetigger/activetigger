@@ -49,7 +49,6 @@ from activetigger.datamodels import (
     ProjectModel,
     ProjectStateModel,
     ProjectUpdateModel,
-    PromptComputing,
     QuickModelInModel,
     StaticFileModel,
     TextDatasetModel,
@@ -301,7 +300,6 @@ class Project:
             self.prompts = Prompts(
                 project_slug,
                 self.params.dir,
-                self.queue,
                 self.computing,
                 self.features,
             )
@@ -2660,10 +2658,6 @@ class Project:
                             feature_computation.parameters,
                             results,
                         )
-                    case "prompt":
-                        prompt_computation = cast(PromptComputing, e)
-                        if self.prompts is not None and results is not None:
-                            self.prompts.receive_result(prompt_computation, results)
                     case "projection":
                         projection = cast(ProjectionComputing, e)
                         self.projections.add(projection, results)
@@ -2689,7 +2683,6 @@ class Project:
                             if jsonl.exists():
                                 jsonl.unlink()
                     case kind if kind.startswith("add_evalset_"):
-                        e = cast(ProcessComputing, e)
                         if results is not None and len(results) > 0:
                             (
                                 eval_dataset,

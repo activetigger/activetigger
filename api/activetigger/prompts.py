@@ -24,6 +24,10 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from task_manager.tasks.compute_prompt_embedding_task import (
+    ComputePromptEmbeddingTaskInput,
+    compute_prompt_embedding,
+)
 from task_manager.tasks.compute_similarity_with_features_task import (
     ComputeSimilarityWithFeaturesTaskInput,
     compute_similarity_with_features,
@@ -37,10 +41,6 @@ from activetigger.datamodels import (
 )
 from activetigger.errors import InvalidInputError, NotFoundError
 from activetigger.features import Features
-from activetigger.queue_manager import Queue
-from activetigger.tasks.base_task import BaseTask
-from activetigger.tasks.compute_multimodal_prompt import ComputeMultimodalPrompt
-from activetigger.tasks.compute_sbert_prompt import ComputeSbertPrompt
 from activetigger.tasks.task_manager_client import enqueue_celery_task
 
 # Feature kinds whose vectors live in a space we can encode a text query into.
@@ -64,14 +64,12 @@ class Prompts:
         self,
         project_slug: str,
         path_dir: Path,
-        queue: Queue,
         computing: list,
         features: Features,
     ) -> None:
         self.project_slug = project_slug
         self.path_dir = path_dir
         self.path_file = path_dir.joinpath(PROMPTS_FILE)
-        self.queue = queue
         self.computing = computing
         self.features = features
         # Cache of sorted rankings keyed by (prompt_id, dataset). Each entry
@@ -124,9 +122,9 @@ class Prompts:
 
     def add(self, text: str, feature_name: str, user: str) -> str:
         """
-        Queue the encoding of a new prompt. Returns the task unique_id.
-        The actual parquet row is appended by `receive_result` once the
-        GPU worker completes.
+        Enqueue the encoding of a new prompt on the GPU worker. Returns the
+        task unique_id. The parquet row is appended by `receive_result`
+        from the task callback.
         """
         text = text.strip()
         if not text:
@@ -134,19 +132,17 @@ class Prompts:
         model_name, kind = self._resolve_feature(feature_name)
         prompt_id = str(uuid.uuid4())
 
-        task: BaseTask
-        if kind == "multimodal-embeddings":
-            task = ComputeMultimodalPrompt(
-                text=text, model_name=model_name, path_process=self.path_dir
-            )
-        elif kind == "sentence-embeddings":
-            task = ComputeSbertPrompt(text=text, model_name=model_name, path_process=self.path_dir)
-        else:
-            # Defensive: _resolve_feature already gates on BINDABLE_FEATURE_KINDS,
-            # so this only fires if a new bindable kind is added without a task.
-            raise ValueError(f"No prompt encoder for feature kind '{kind}'")
-
-        unique_id = self.queue.add_task("prompt", self.project_slug, task, queue="gpu")
+        (unique_id, abortable) = enqueue_celery_task(
+            compute_prompt_embedding,
+            ComputePromptEmbeddingTaskInput(
+                project_slug=self.project_slug,
+                prompt_id=prompt_id,
+                text=text,
+                model_name=model_name,
+                kind=kind,
+                path_process=self.path_dir,
+            ),
+        )
 
         self.computing.append(
             PromptComputing(
@@ -158,6 +154,8 @@ class Prompts:
                 text=text,
                 feature_name=feature_name,
                 hf_name=model_name,
+                managed_by_celery=True,
+                abortable_celery_task=abortable,
             )
         )
         return unique_id
