@@ -2,6 +2,12 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+from task_manager.tasks.compute_lexicometrics_task import (
+    ComputeLexicometricsTaskInput,
+    compute_lexicometrics_task,
+)
+
+from activetigger.config import config
 from activetigger.datamodels import (
     LexicometricsComputing,
     LexicometricsModel,
@@ -10,8 +16,7 @@ from activetigger.datamodels import (
     LexicometricsStatisticsModel,
 )
 from activetigger.errors import AlreadyExistsError
-from activetigger.queue_manager import Queue
-from activetigger.tasks.compute_lexicometrics import ComputeLexicometrics
+from activetigger.tasks.task_manager_client import enqueue_celery_task
 
 
 class Lexicometrics:
@@ -24,13 +29,11 @@ class Lexicometrics:
 
     path: Path
     computing: list
-    queue: Queue
     available: LexicometricsModel | None
 
-    def __init__(self, path: Path, computing: list, queue: Queue) -> None:
+    def __init__(self, path: Path, computing: list) -> None:
         self.path = path
         self.computing = computing
-        self.queue = queue
         self.available = None
         self.load()
 
@@ -72,19 +75,21 @@ class Lexicometrics:
 
     def compute(self, project_slug: str, username: str, language: str) -> None:
         """
-        Launch the lexicometrics computation in the queue.
+        Launch the lexicometrics computation as a celery task.
 
-        The task reads the train dataset from the project directory itself.
+        The worker reads the train dataset from the project directory itself.
         """
         if len(self.training()) > 0:
             raise AlreadyExistsError("Lexicometrics are already being computed")
 
         parameters = LexicometricsParametersModel(language=language)
-        unique_id = self.queue.add_task(
-            "lexicometrics",
-            project_slug,
-            ComputeLexicometrics(
+        (unique_id, abortable) = enqueue_celery_task(
+            compute_lexicometrics_task,
+            ComputeLexicometricsTaskInput(
+                project_slug=project_slug,
+                username=username,
                 path_data=self.path,
+                train_file=config.train_file,
                 language=parameters.language,
                 tokenizer_name=parameters.tokenizer,
                 n_most_frequent=parameters.n_most_frequent,
@@ -102,6 +107,8 @@ class Lexicometrics:
                 time=datetime.now(timezone.utc),
                 kind="lexicometrics",
                 parameters=parameters,
+                managed_by_celery=True,
+                abortable_celery_task=abortable,
             )
         )
 
