@@ -1,3 +1,5 @@
+import pickle
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -5,6 +7,10 @@ from typing import Any
 import pandas as pd
 from fastapi.responses import FileResponse
 from pandas import DataFrame
+from task_manager.tasks.compute_projection_task import (
+    ComputeProjectionTaskInput,
+    compute_projection_task,
+)
 
 from activetigger.datamodels import (
     ProjectionComputing,
@@ -15,8 +21,7 @@ from activetigger.datamodels import (
 from activetigger.db.languagemodels import ModelsService
 from activetigger.db.manager import DatabaseManager
 from activetigger.errors import AlreadyExistsError, NotFoundError
-from activetigger.queue_manager import Queue
-from activetigger.tasks.compute_projection import ComputeProjection
+from activetigger.tasks.task_manager_client import enqueue_celery_task
 
 
 class Projections:
@@ -39,21 +44,18 @@ class Projections:
     loaded: dict[str, ProjectionDataModel]
     options: dict[str, dict[str, Any]]
     computing: list
-    queue: Queue
 
     def __init__(
         self,
         project_slug: str,
         path: Path,
         computing: list,
-        queue: Queue,
         db_manager: DatabaseManager,
     ) -> None:
         self.project_slug = project_slug
         self.path = path.joinpath("projections")
         self.path.mkdir(parents=True, exist_ok=True)
         self.computing = computing
-        self.queue = queue
         self.models_service = db_manager.language_models_service
         self.loaded = {}
         self.options = {
@@ -133,7 +135,7 @@ class Projections:
         normalize_features: bool = False,
     ) -> None:
         """
-        Launch the projection computation in the queue.
+        Launch the projection computation on the celery worker.
         """
         if not projection.name:
             raise Exception("A projection name is required")
@@ -144,16 +146,26 @@ class Projections:
                 f"A projection named '{projection.name}' is already being computed"
             )
 
-        unique_id = self.queue.add_task(
-            "projection",
-            project_slug,
-            ComputeProjection(
-                kind=projection.method,
-                features=features,
-                params=projection.parameters,
-                normalize_features=normalize_features,
-            ),
-        )
+        # the worker reads the features from disk and removes the file
+        features_path = self.path.joinpath(f"features_{uuid.uuid4().hex}.pkl")
+        with open(features_path, "wb") as f:
+            pickle.dump(features, f)
+        try:
+            (unique_id, abortable) = enqueue_celery_task(
+                compute_projection_task,
+                ComputeProjectionTaskInput(
+                    project_slug=project_slug,
+                    name=projection.name,
+                    features_path=features_path,
+                    path_process=self.path,
+                    method=projection.method,
+                    parameters=projection.parameters,
+                    normalize_features=normalize_features,
+                ),
+            )
+        except Exception:
+            features_path.unlink(missing_ok=True)
+            raise
         self.computing.append(
             ProjectionComputing(
                 unique_id=unique_id,
@@ -164,6 +176,8 @@ class Projections:
                 method=projection.method,
                 params=projection,
                 normalize_features=normalize_features,
+                managed_by_celery=True,
+                abortable_celery_task=abortable,
             )
         )
 

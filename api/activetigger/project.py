@@ -43,7 +43,6 @@ from activetigger.datamodels import (
     ProjectBaseModel,
     ProjectCreatingModel,
     ProjectDescriptionModel,
-    ProjectionComputing,
     ProjectionOutModel,
     ProjectionOutModelNode,
     ProjectModel,
@@ -351,7 +350,7 @@ class Project:
             self.db_manager, cast(list[GenerationComputing], self.computing)
         )
         self.projections = Projections(
-            project_slug, self.params.dir, self.computing, self.queue, self.db_manager
+            project_slug, self.params.dir, self.computing, self.db_manager
         )
         self.lexicometrics = Lexicometrics(self.params.dir, self.computing)
         self.bertopic = Bertopic(
@@ -2658,9 +2657,6 @@ class Project:
                             feature_computation.parameters,
                             results,
                         )
-                    case "projection":
-                        projection = cast(ProjectionComputing, e)
-                        self.projections.add(projection, results)
                     case "generation":
                         e = cast(GenerationComputing, e)
                         r = cast(
