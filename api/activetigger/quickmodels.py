@@ -13,6 +13,10 @@ from fastapi.responses import FileResponse
 from pandas import DataFrame
 from sklearn.preprocessing import StandardScaler
 from task_manager.tasks.predict_ml_task import PredictMLTaskInput, predict_ml
+from task_manager.tasks.predict_with_features_task import (
+    PredictWithFeaturesTaskInput,
+    predict_with_features,
+)
 from task_manager.tasks.train_ml import MODELS_WITHOUT_BALANCE
 from task_manager.tasks.train_ml_task import TrainMLMultiClassInput, train_ml
 
@@ -44,7 +48,6 @@ from activetigger.functions import (
     serve_temp_export,
 )
 from activetigger.queue_manager import Queue
-from activetigger.tasks.predict_with_features import PredictWithFeatures
 from activetigger.tasks.task_manager_client import enqueue_celery_task
 
 if TYPE_CHECKING:
@@ -585,19 +588,22 @@ class QuickModels:
         `QuickModelComputing` entry so the frontend can render a bar.
         """
         assert self.features is not None
-        specs = self.features.build_compute_specs(sm.features, data)
+        specs, data_path = self.features.build_compute_specs(sm.features, data)
 
-        task = PredictWithFeatures(
-            specs=specs,
-            path_process=self.features.path_all.parent,
-            path_models=self.features.path_models,
-            language=self.features.lang,
-            quickmodel=sm,
-            path_output=self.path.joinpath(sm.name),
-            file_name=f"predict_{dataset}.parquet",
-        )
-        unique_id = self.queue.add_task(
-            "predict_with_features", self.project_slug, task, queue="cpu"
+        (unique_id, abortable) = enqueue_celery_task(
+            predict_with_features,
+            PredictWithFeaturesTaskInput(
+                project_slug=self.project_slug,
+                name=sm.name,
+                dataset=dataset,
+                specs=specs,
+                data_path=data_path,
+                path_process=self.features.path_all.parent,
+                path_models=self.features.path_models,
+                language=self.features.lang,
+                path_quickmodel=self.path.joinpath(sm.name),
+                file_name=f"predict_{dataset}.parquet",
+            ),
         )
 
         progress_path = self.features.path_all.parent.joinpath(unique_id)
@@ -617,6 +623,8 @@ class QuickModels:
                 unique_id=unique_id,
                 time=datetime.now(timezone.utc),
                 kind="predict_with_features",
+                managed_by_celery=True,
+                abortable_celery_task=abortable,
                 status="predicting",
                 name=sm.name,
                 dataset=dataset,

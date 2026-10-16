@@ -12,7 +12,9 @@ import pandas as pd
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse
 from pandas import DataFrame
+from task_manager.tasks.compute_features_from_specs import FeatureSpec
 from task_manager.tasks.create_project_task import CreateProjectTaskInput, create_project_task
+from task_manager.tasks.extend_features_task import ExtendFeaturesTaskInput, extend_features
 
 from activetigger.bertopic_manager import Bertopic
 from activetigger.config import config
@@ -21,13 +23,12 @@ from activetigger.datamodels import (
     ActiveModel,
     AuthUserModel,
     BertModelModel,
-    BertopicComputing,
     ElementInModel,
     ElementOutModel,
     EvalSetDataModel,
     EvalSetImageModel,
-    EventsModel,
     ExportGenerationsParams,
+    ExtendFeaturesComputing,
     FeatureComputing,
     GenerationComputing,
     GenerationModel,
@@ -50,7 +51,6 @@ from activetigger.datamodels import (
     ProjectStateModel,
     ProjectUpdateModel,
     PromptComputing,
-    QuickModelComputing,
     QuickModelInModel,
     StaticFileModel,
     TextDatasetModel,
@@ -82,7 +82,6 @@ from activetigger.queue_manager import Queue
 from activetigger.quickmodels import QuickModels
 from activetigger.schemes import Schemes
 from activetigger.tasks.add_evalset import AddEvalSet, AddEvalSetImage
-from activetigger.tasks.extend_features import ExtendFeatures
 from activetigger.tasks.generate_call import GenerateCall
 from activetigger.tasks.task_manager_client import enqueue_celery_task, stop_celery_task
 from activetigger.tasks.update_datasets import UpdateDatasets
@@ -746,8 +745,8 @@ class Project:
         ):
             try:
                 data = self.features.concat_split_column("text", eval_dataset)
-                specs = self.features.build_compute_specs(list(features_meta), data)
-                self._enqueue_extend_features(specs, eval_dataset, username)
+                specs, data_path = self.features.build_compute_specs(list(features_meta), data)
+                self._enqueue_extend_features(specs, data_path, eval_dataset, username)
                 return
             except Exception as ex:
                 print(f"Cannot extend features for the new {eval_dataset} set: {ex}")
@@ -765,37 +764,56 @@ class Project:
             self.features.reset_features_file()
             self.quickmodels.drop_models(which="all")
             return
-        self._enqueue_extend_features([], eval_dataset, "system")
+        data_path = self.features.pickle_for_task(pd.Series(dtype=object))
+        self._enqueue_extend_features([], data_path, eval_dataset, "system")
 
     def _kill_running_feature_extensions(self) -> bool:
         running = [c for c in self.computing if getattr(c, "kind", None) == "extend_features"]
         for c in running:
             if c.managed_by_celery:
                 stop_celery_task(c.unique_id, c.abortable_celery_task)
+                # a revoked task never calls back: drop it and its pickles now
+                self.clean_process(c)
+                for f in getattr(c, "temp_files", []):
+                    Path(f).unlink(missing_ok=True)
             else:
                 self.queue.kill(c.unique_id)
         return bool(running)
 
-    def _enqueue_extend_features(self, specs: list[dict], eval_dataset: str, username: str) -> None:
+    def _enqueue_extend_features(
+        self, specs: list[FeatureSpec], data_path: Path, eval_dataset: str, username: str
+    ) -> None:
         eval_data = getattr(self.data, eval_dataset)
         new_index = eval_data.index if eval_data is not None else pd.Index([])
-        task = ExtendFeatures(
-            specs=specs,
-            path_process=self.features.path_all.parent,
-            path_models=self.features.path_models,
-            language=self.features.lang,
-            path_features=self.features.path_features,
-            eval_dataset=eval_dataset,
-            new_index=new_index,
-            full_index=self.data.index.index,
-        )
-        unique_id = self.queue.add_task("extend_features", self.name, task, queue="cpu")
+        indexes_path = self.features.pickle_for_task((new_index, self.data.index.index))
+        try:
+            (unique_id, abortable) = enqueue_celery_task(
+                extend_features,
+                ExtendFeaturesTaskInput(
+                    project_slug=self.name,
+                    specs=specs,
+                    data_path=data_path,
+                    indexes_path=indexes_path,
+                    path_process=self.features.path_all.parent,
+                    path_models=self.features.path_models,
+                    language=self.features.lang,
+                    path_features=self.features.path_features,
+                    eval_dataset=eval_dataset,
+                ),
+            )
+        except Exception:
+            data_path.unlink(missing_ok=True)
+            indexes_path.unlink(missing_ok=True)
+            raise
         self.computing.append(
-            ProcessComputing(
+            ExtendFeaturesComputing(
                 user=username,
                 unique_id=unique_id,
                 time=datetime.now(timezone.utc),
                 kind="extend_features",
+                managed_by_celery=True,
+                abortable_celery_task=abortable,
+                temp_files=[data_path, indexes_path],
             )
         )
 
@@ -2614,11 +2632,6 @@ class Project:
                         self.params.dir.joinpath(f"gen_{e.unique_id}.jsonl")
                     )
 
-                # a failed extension leaves a features file with the
-                # pre-eval-set shape; reset to the safe empty state
-                if e.kind == "extend_features":
-                    self._recover_features_after_failed_extension()
-
                 self.clean_process(e)
                 continue
 
@@ -2639,9 +2652,6 @@ class Project:
                             self.features.reset_features_file()
                             self.bertopic.clear_bertopic()
                             self.projections.clear_projections()
-                    case "predict_with_features":
-                        pf = cast(QuickModelComputing, e)
-                        self.quickmodels.mark_prediction_done(pf.name, pf.dataset)
                     case "feature":
                         feature_computation = cast(FeatureComputing, e)
                         self.features.add(
@@ -2655,10 +2665,6 @@ class Project:
                         prompt_computation = cast(PromptComputing, e)
                         if self.prompts is not None and results is not None:
                             self.prompts.receive_result(prompt_computation, results)
-                    case "prompt_similarity":
-                        # the task already saved the similarity parquet;
-                        # availability is derived from the file on disk
-                        pass
                     case "projection":
                         projection = cast(ProjectionComputing, e)
                         self.projections.add(projection, results)
@@ -2686,10 +2692,6 @@ class Project:
                             jsonl = self.params.dir.joinpath(f"gen_{e.unique_id}.jsonl")
                             if jsonl.exists():
                                 jsonl.unlink()
-                    case "extend_features":
-                        self.features.map, self.features.n = self.features.get_map()
-                        if self.features.n != len(self.data.index):
-                            self._recover_features_after_failed_extension()
                     case kind if kind.startswith("add_evalset_"):
                         e = cast(ProcessComputing, e)
                         if results is not None and len(results) > 0:

@@ -725,6 +725,11 @@ class ProcessComputing(BaseModel):
     managed_by_celery: bool | None = None
     abortable_celery_task: bool|None = None
 
+class ExtendFeaturesComputing(ProcessComputing):
+    # pickles handed to the worker, removed by the API if the task never runs
+    temp_files: list[Path] = []
+
+
 class UpdateComputing(ProcessComputing):
     update: ProjectUpdateModel
 

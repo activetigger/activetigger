@@ -24,6 +24,10 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from task_manager.tasks.compute_similarity_with_features_task import (
+    ComputeSimilarityWithFeaturesTaskInput,
+    compute_similarity_with_features,
+)
 
 from activetigger.datamodels import (
     PromptComputing,
@@ -37,7 +41,7 @@ from activetigger.queue_manager import Queue
 from activetigger.tasks.base_task import BaseTask
 from activetigger.tasks.compute_multimodal_prompt import ComputeMultimodalPrompt
 from activetigger.tasks.compute_sbert_prompt import ComputeSbertPrompt
-from activetigger.tasks.compute_similarity_with_features import ComputeSimilarityWithFeatures
+from activetigger.tasks.task_manager_client import enqueue_celery_task
 
 # Feature kinds whose vectors live in a space we can encode a text query into.
 BINDABLE_FEATURE_KINDS = {"multimodal-embeddings", "sentence-embeddings"}
@@ -369,20 +373,27 @@ class Prompts:
             ):
                 raise ValueError("A similarity computation is already running for this prompt")
 
-        data = self._dataset_series(dataset)
-        specs = self.features.build_compute_specs([feature_name], data)
+        # resolve everything that can fail before pickling the data for the worker
         prompt_row = self._read().loc[prompt_id]
+        data = self._dataset_series(dataset)
+        specs, data_path = self.features.build_compute_specs([feature_name], data)
 
-        task = ComputeSimilarityWithFeatures(
-            specs=specs,
-            path_process=self.features.path_all.parent,
-            path_models=self.features.path_models,
-            language=self.features.lang,
-            prompt_vector=prompt_vec,
-            path_output=self._similarity_dir(prompt_id),
-            file_name=f"similarity_{dataset}.parquet",
+        (unique_id, abortable) = enqueue_celery_task(
+            compute_similarity_with_features,
+            ComputeSimilarityWithFeaturesTaskInput(
+                project_slug=self.project_slug,
+                prompt_id=prompt_id,
+                dataset=dataset,
+                specs=specs,
+                data_path=data_path,
+                path_process=self.features.path_all.parent,
+                path_models=self.features.path_models,
+                language=self.features.lang,
+                prompt_vector=[float(x) for x in np.asarray(prompt_vec).reshape(-1)],
+                path_output=self._similarity_dir(prompt_id),
+                file_name=f"similarity_{dataset}.parquet",
+            ),
         )
-        unique_id = self.queue.add_task("prompt_similarity", self.project_slug, task, queue="gpu")
 
         progress_path = self.features.path_all.parent.joinpath(unique_id)
 
@@ -401,6 +412,8 @@ class Prompts:
                 unique_id=unique_id,
                 time=datetime.now(timezone.utc),
                 kind="prompt_similarity",
+                managed_by_celery=True,
+                abortable_celery_task=abortable,
                 prompt_id=prompt_id,
                 text=str(prompt_row["text"]),
                 feature_name=feature_name,

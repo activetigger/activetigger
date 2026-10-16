@@ -1,5 +1,6 @@
 import json
 import os
+import pickle
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -23,6 +24,7 @@ from task_manager.tasks.compute_fasttext_task import (
     ComputeFasttextTaskInput,
     compute_fasttext,
 )
+from task_manager.tasks.compute_features_from_specs import FeatureSpec
 from task_manager.tasks.compute_multimodal_task import (
     ComputeMultimodalTaskInput,
     compute_multimodal,
@@ -998,24 +1000,33 @@ class Features:
             return None
         raise ValueError("Error in the process")
 
-    def build_compute_specs(self, names: list[str], data: Series) -> list[dict[str, Any]]:
+    def pickle_for_task(self, obj: Any) -> Path:
         """
-        Assemble the `specs` list consumed by `PredictWithFeatures` for a
-        set of existing feature names.
+        Serialize an object for a celery task; the worker unlinks the file.
+        """
+        path = self.data.path_project.joinpath(f"task_{uuid.uuid4().hex}.pkl")
+        with open(path, "wb") as f:
+            pickle.dump(obj, f)
+        return path
+
+    def build_compute_specs(self, names: list[str], data: Series) -> tuple[list[FeatureSpec], Path]:
+        """
+        Assemble the specs consumed by the compute-features celery tasks for a
+        set of existing feature names, plus the pickled `data` series (texts
+        or image paths) shared by every spec.
 
         For each name:
           - checks it exists in the project,
           - checks its `kind` is in `COMPUTABLE_KINDS` (imported /
             prediction features can't be recomputed → `ValueError`),
           - retrieves the stored parameters from the DB,
-          - attaches the shared `data` series (texts or image paths),
           - resolves the trained-model path for `bert-embeddings` so
             the task stays independent of `LanguageModels`.
         """
         if not names:
             raise ValueError("No features to compute")
 
-        specs: list[dict[str, Any]] = []
+        specs: list[FeatureSpec] = []
         for name in names:
             if not self.exists(name):
                 raise ValueError(f"Feature '{name}' does not exist")
@@ -1026,20 +1037,15 @@ class Features:
             if kind not in self.COMPUTABLE_KINDS:
                 raise ValueError(f"Feature '{name}' has kind '{kind}' which is not computable")
 
-            spec: dict[str, Any] = {
-                "name": name,
-                "kind": kind,
-                "parameters": feature.parameters,
-                "data": data,
-            }
+            spec = FeatureSpec(name=name, kind=kind, parameters=feature.parameters)
             if kind == "bert-embeddings":
                 if self.languagemodels is None:
                     raise ValueError(
                         f"Feature '{name}' needs a LanguageModels manager to resolve its model path"
                     )
-                spec["model_path"] = self.languagemodels.path.joinpath(feature.parameters["model"])
+                spec.model_path = self.languagemodels.path.joinpath(feature.parameters["model"])
             specs.append(spec)
-        return specs
+        return specs, self.pickle_for_task(data)
 
     def concat_split_column(self, column: str, dataset: str = "all") -> Series:
         """

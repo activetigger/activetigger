@@ -38,8 +38,11 @@ class TaskCallback(ABC):
         # copy: clean_process mutates the list
         for process in list(project_manager.computing):
             if process.unique_id == task_id:
-                cls.on_complete_task_specific(task_id, task_result, project_manager, process)
-                project_manager.clean_process(process)
+                # always drop the entry, a raising hook must not leave a stale process
+                try:
+                    cls.on_complete_task_specific(task_id, task_result, project_manager, process)
+                finally:
+                    project_manager.clean_process(process)
 
     @classmethod
     @abstractmethod
@@ -59,8 +62,11 @@ class TaskCallback(ABC):
         for e in list(project_manager.computing):
             if e.unique_id == task_id:
                 project_manager.clean_process(e)
-        project_manager.status = "error"
         specific_message = cls.on_failure_task_specific(task_id, task_report, project_manager)
+        # a stopped task is not an error (same as the in-process "cancelled" state)
+        if "Process interrupted by user" in task_report.exception:
+            return
+        project_manager.status = "error"
         if specific_message:
             project_manager.errors.add(specific_message)
         # a pool child killed by the kernel: almost always RAM exhaustion

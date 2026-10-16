@@ -15,22 +15,26 @@ from activetigger.tasks.task_callback import TaskCallback
 
 
 class ComputeBertEmbeddingsCallback(TaskCallback):
-
-    # task_name is used to identify which callback to execute 
+    # task_name is used to identify which callback to execute
     task_name = ComputeBertEmbeddingsTask.name
 
     # the on_complete method will be executed when a task succeeds
     # it will be executed from the orchestrator allowing using its dependencies (db and all)
     @classmethod
-    def on_complete_task_specific(cls, task_id:str, task_result:ComputeBertEmbeddingsTaskResult, project_manager: Project, process):
+    def on_complete_task_specific(
+        cls,
+        task_id: str,
+        task_result: ComputeBertEmbeddingsTaskResult,
+        project_manager: Project,
+        process,
+    ):
         # load DataFrame from filesystem
-        results = pd.read_parquet(task_result['embeddings_path'])
+        results = pd.read_parquet(task_result["embeddings_path"])
         # add Feature to project manager
         project_manager.features.add(
-                name=task_result['parameters']['name'],
-                kind="compute_bert_features",
-                username= task_result['username'],
-                parameters=cast(dict, task_result['parameters']),
-                new_content=results,
+            name=task_result["parameters"]["name"],
+            kind="bert-embeddings",
+            username=task_result["username"],
+            parameters=cast(dict, task_result["parameters"]),
+            new_content=results,
         )
-    
