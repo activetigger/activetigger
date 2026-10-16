@@ -16,6 +16,7 @@ from task_manager.tasks.add_evalset_task import AddEvalsetTaskInput, add_evalset
 from task_manager.tasks.compute_features_from_specs import FeatureSpec
 from task_manager.tasks.create_project_task import CreateProjectTaskInput, create_project_task
 from task_manager.tasks.extend_features_task import ExtendFeaturesTaskInput, extend_features
+from task_manager.tasks.generate_call_task import GenerateCallTaskInput, generate_call_task
 from task_manager.tasks.update_datasets_task import (
     UpdateDatasetsTaskInput,
     update_datasets_task,
@@ -38,7 +39,6 @@ from activetigger.datamodels import (
     GenerationComputing,
     GenerationModel,
     GenerationRequest,
-    GenerationResult,
     ImageModelModel,
     NerModelModel,
     NextInModel,
@@ -83,7 +83,6 @@ from activetigger.prompts import BINDABLE_FEATURE_KINDS, Prompts
 from activetigger.queue_manager import Queue
 from activetigger.quickmodels import QuickModels
 from activetigger.schemes import Schemes
-from activetigger.tasks.generate_call import GenerateCall
 from activetigger.tasks.task_manager_client import enqueue_celery_task, stop_celery_task
 from activetigger.users import Users
 
@@ -2488,27 +2487,44 @@ class Project:
         if len(extract) == 0:
             raise Exception("No elements available for generation")
         model = self.generations.generations_service.get_gen_model(request.model_id)
-        # add task to the queue
-        unique_id = self.queue.add_task(
-            "generation",
-            self.name,
-            GenerateCall(
-                path_process=self.params.dir,
-                username=username,
-                project_slug=self.name,
-                df=extract,
-                prompt=request.prompt,
-                model=GenerationModel(**model.__dict__),
-                cols_context=self.params.cols_context,
-                dataset=request.dataset,
-                prompt_name=request.prompt_name if request.prompt_name else "",
-                n_workers=request.n_workers,
-            ),
+        prompt_name = request.prompt_name if request.prompt_name else ""
+        # sample and model (with decrypted credentials) go to the worker through a pickle
+        data_path = self.params.dir.joinpath(f"gen_{uuid.uuid4().hex}.pkl")
+        pd.to_pickle(
+            {"data": extract, "model": GenerationModel(**model.__dict__).model_dump()}, data_path
         )
+        try:
+            (unique_id, abortable) = enqueue_celery_task(
+                generate_call_task,
+                GenerateCallTaskInput(
+                    project_slug=self.name,
+                    username=username,
+                    dataset=request.dataset,
+                    prompt_name=prompt_name,
+                    prompt=request.prompt,
+                    cols_context=self.params.cols_context,
+                    n_workers=request.n_workers,
+                    data_path=data_path,
+                    path_process=self.params.dir,
+                ),
+            )
+        except Exception:
+            data_path.unlink(missing_ok=True)
+            raise
+        if self.params.dir is None:
+            raise Exception
+        progress_path = self.params.dir.joinpath(unique_id)
+
+        def get_progress() -> float | None:
+            try:
+                return int(progress_path.read_text())
+            except Exception:
+                return None
+
         self.computing.append(
             GenerationComputing(
                 unique_id=unique_id,
-                prompt_name=request.prompt_name if request.prompt_name else "",
+                prompt_name=prompt_name,
                 user=username,
                 project=self.name,
                 model_id=request.model_id,
@@ -2516,9 +2532,10 @@ class Project:
                 dataset=request.dataset,
                 time=datetime.now(timezone.utc),
                 kind="generation",
-                get_progress=GenerateCall.get_progress_callback(
-                    self.params.dir.joinpath(unique_id) if self.params.dir is not None else None
-                ),
+                get_progress=get_progress,
+                managed_by_celery=True,
+                abortable_celery_task=abortable,
+                temp_files=[data_path],
             )
         )
 
@@ -2528,7 +2545,7 @@ class Project:
         """
         self.computing.remove(e)
         # task manged by celery are not in the queue
-        if not e.managed_by_celery:
+        if e.managed_by_celery == False:
             self.queue.delete(e.unique_id)
         # inputs handed to a worker that may never have started
         for f in e.temp_files:
@@ -2617,12 +2634,6 @@ class Project:
                     message = f"Error for process {e.kind} : {exception}"
                 self.errors.add(message)
 
-                # recover partial generation results from the checkpoint file
-                if e.kind == "generation" and self.params.dir is not None:
-                    self._recover_generations_from_jsonl(
-                        self.params.dir.joinpath(f"gen_{e.unique_id}.jsonl")
-                    )
-
                 self.clean_process(e)
                 continue
 
@@ -2639,27 +2650,6 @@ class Project:
                             feature_computation.parameters,
                             results,
                         )
-                    case "generation":
-                        e = cast(GenerationComputing, e)
-                        r = cast(
-                            list[GenerationResult],
-                            results,
-                        )
-                        batch = e.dataset + "_" + str(e.prompt_name) + "_" + e.unique_id
-                        for row in r:
-                            self.generations.add(
-                                user=row.user,
-                                project_slug=row.project_slug,
-                                element_id=row.element_id,
-                                model_id=row.model_id,
-                                prompt=row.prompt,
-                                answer=row.answer,
-                                batch=batch,
-                            )
-                        if self.params.dir is not None:
-                            jsonl = self.params.dir.joinpath(f"gen_{e.unique_id}.jsonl")
-                            if jsonl.exists():
-                                jsonl.unlink()
             except Exception as ex:
                 print(f"Error in {e.kind} : {ex}")
                 self.errors.add(f"Error in {e.kind} : {str(ex)}")
