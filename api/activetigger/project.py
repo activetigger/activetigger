@@ -12,6 +12,7 @@ import pandas as pd
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse
 from pandas import DataFrame
+from task_manager.tasks.add_evalset_task import AddEvalsetTaskInput, add_evalset_task
 from task_manager.tasks.compute_features_from_specs import FeatureSpec
 from task_manager.tasks.create_project_task import CreateProjectTaskInput, create_project_task
 from task_manager.tasks.extend_features_task import ExtendFeaturesTaskInput, extend_features
@@ -78,7 +79,6 @@ from activetigger.prompts import BINDABLE_FEATURE_KINDS, Prompts
 from activetigger.queue_manager import Queue
 from activetigger.quickmodels import QuickModels
 from activetigger.schemes import Schemes
-from activetigger.tasks.add_evalset import AddEvalSet, AddEvalSetImage
 from activetigger.tasks.generate_call import GenerateCall
 from activetigger.tasks.task_manager_client import enqueue_celery_task, stop_celery_task
 from activetigger.tasks.update_datasets import UpdateDatasets
@@ -658,59 +658,47 @@ class Project:
             if evalset.col_id == "":
                 evalset.col_id = None
 
-        # check existing task in the queue → if there is already an add_evalset task for this project and this dataset, we return the status of the task without adding a new one
-        if self.queue.current:
-            add_eval_task = next(
-                (
-                    t
-                    for t in self.queue.current
-                    if t.kind == "add_evalset"
-                    and t.project_slug == project_slug
-                    and t.task.dataset == dataset  # ty: ignore[unresolved-attribute]
-                ),
-                None,
-            )
-            if add_eval_task:
-                raise Exception("this set is already being added")
+        # only one add_evalset task per dataset at a time
+        if any(c.kind == f"add_evalset_{dataset}" for c in self.computing):
+            raise Exception("this set is already being added")
 
         if isinstance(evalset, EvalSetImageModel):
             scheme_labels = (
                 self.schemes.available()[evalset.scheme].labels if evalset.scheme else None
             )
-            task = AddEvalSetImage(
-                dataset=dataset,
-                evalset=evalset,
-                project=self.params,
-                username=username,
-                index=self.data.get_full_id().index,
-                project_slug=project_slug,
-                scheme=scheme_labels,
-            )
+            payload = {"evalset_image": evalset, "scheme": scheme_labels}
         else:
             available_schemes = self.schemes.available()
             schemes_labels = {name: available_schemes[name].labels for name in evalset.cols_label}
-            task = AddEvalSet(
-                dataset=dataset,
-                evalset=evalset,
-                project=self.params,
-                username=username,
-                index=self.data.get_full_id().index,
-                project_slug=project_slug,
-                schemes=schemes_labels,
-            )
+            payload = {"evalset_data": evalset, "schemes": schemes_labels}
 
-        unique_id = self.queue.add_task(
-            "add_evalset",
-            project_slug,
-            task,
-            queue="cpu",
-        )
+        # the worker checks id collisions against every id already in the project
+        index_path = self.params.dir.joinpath(f"evalset_index_{uuid.uuid4().hex}.pkl")
+        pd.to_pickle(self.data.get_full_id().index, index_path)
+        try:
+            (unique_id, abortable) = enqueue_celery_task(
+                add_evalset_task,
+                AddEvalsetTaskInput(
+                    project_slug=project_slug,
+                    dataset=dataset,
+                    username=username,
+                    path_project=self.params.dir,
+                    index_path=index_path,
+                    **payload,
+                ),
+            )
+        except Exception:
+            index_path.unlink(missing_ok=True)
+            raise
         self.computing.append(
             ProcessComputing(
                 user=username,
                 unique_id=unique_id,
                 time=datetime.now(timezone.utc),
                 kind=f"add_evalset_{dataset}",
+                managed_by_celery=True,
+                abortable_celery_task=abortable,
+                temp_files=[index_path],
             )
         )
         if username == "root":
@@ -768,10 +756,8 @@ class Project:
         for c in running:
             if c.managed_by_celery:
                 stop_celery_task(c.unique_id, c.abortable_celery_task)
-                # a revoked task never calls back: drop it and its pickles now
+                # a revoked task never calls back: drop it (and its pickles) now
                 self.clean_process(c)
-                for f in getattr(c, "temp_files", []):
-                    Path(f).unlink(missing_ok=True)
             else:
                 self.queue.kill(c.unique_id)
         return bool(running)
@@ -2536,8 +2522,11 @@ class Project:
         """
         self.computing.remove(e)
         # task manged by celery are not in the queue
-        if e.managed_by_celery == False:
+        if not e.managed_by_celery:
             self.queue.delete(e.unique_id)
+        # inputs handed to a worker that may never have started
+        for f in e.temp_files:
+            Path(f).unlink(missing_ok=True)
 
     def _recover_generations_from_jsonl(self, path: Path) -> None:
         """
@@ -2678,37 +2667,6 @@ class Project:
                             jsonl = self.params.dir.joinpath(f"gen_{e.unique_id}.jsonl")
                             if jsonl.exists():
                                 jsonl.unlink()
-                    case kind if kind.startswith("add_evalset_"):
-                        if results is not None and len(results) > 0:
-                            (
-                                eval_dataset,
-                                user_name,
-                                proj_slug,
-                                schemes_elements,
-                            ) = results[0]
-                            for scheme_name, elements in schemes_elements:
-                                if elements:
-                                    self.db_manager.projects_service.add_annotations(
-                                        eval_dataset,
-                                        user_name,
-                                        proj_slug,
-                                        scheme_name,
-                                        elements,
-                                    )
-                            # update params with the new evalset
-                            setattr(self.params, eval_dataset, getattr(results[1], eval_dataset))
-                            setattr(
-                                self.params,
-                                f"n_{eval_dataset}",
-                                getattr(results[1], f"n_{eval_dataset}"),
-                            )
-                            self.db_manager.projects_service.update_project(
-                                self.params.project_slug, jsonable_encoder(self.params)
-                            )
-                            # load the new eval set before refreshing features so the
-                            # features file covers the full train+valid+test index
-                            self.data.load_dataset(eval_dataset)
-                            self._refresh_features_after_evalset(eval_dataset, user_name)
             except Exception as ex:
                 print(f"Error in {e.kind} : {ex}")
                 self.errors.add(f"Error in {e.kind} : {str(ex)}")

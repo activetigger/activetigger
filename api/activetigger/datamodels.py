@@ -723,11 +723,13 @@ class ProcessComputing(BaseModel):
     time: datetime.datetime
     kind: str
     managed_by_celery: bool | None = None
-    abortable_celery_task: bool|None = None
+    abortable_celery_task: bool | None = None
+    # files handed to the worker, removed by the API with the process
+    temp_files: list[Path] = []
+
 
 class ExtendFeaturesComputing(ProcessComputing):
-    # pickles handed to the worker, removed by the API if the task never runs
-    temp_files: list[Path] = []
+    pass
 
 
 class UpdateComputing(ProcessComputing):
@@ -1372,6 +1374,8 @@ class TrainMLResults(BaseModel):
 
 class EventsModel(BaseModel):
     events: dict[str, dict[str, str | None]]
+
+
 class EventsDict(TypedDict):
     events: dict[str, dict[str, str | None]]
 
