@@ -5,9 +5,11 @@ from task_manager.celery import celery_app
 # collections of utils methods to interact with celery task_manager
 
 
-def enqueue_celery_task(task, inputs) -> tuple[str, bool]:
+def enqueue_celery_task(task, inputs, queue: str | None = None) -> tuple[str, bool]:
     task_id = uuid()
-    task = task.s(inputs.model_dump(mode="json")).apply_async(task_id=task_id)
+    # queue overrides the task default (e.g. GPU for a wtpsplit preparation)
+    options = {"queue": queue} if queue else {}
+    task = task.s(inputs.model_dump(mode="json")).apply_async(task_id=task_id, **options)
     print(task, type(task).__name__)
     return task_id, isinstance(task, AbortableAsyncResult)
 

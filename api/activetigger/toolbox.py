@@ -8,8 +8,13 @@ from pathlib import Path
 
 import docx
 import pandas as pd
+from celery.result import AsyncResult
+from celery.states import FAILURE, REVOKED
 from fastapi import HTTPException
 from fastapi.responses import FileResponse
+from task_manager.auto_callback_task import QueueName
+from task_manager.celery import celery_app
+from task_manager.tasks.prepare_dataset_task import PrepareDatasetTaskInput, prepare_dataset_task
 
 from activetigger.config import config
 from activetigger.datamodels import (
@@ -19,8 +24,7 @@ from activetigger.datamodels import (
     PrepareTaskModel,
 )
 from activetigger.functions import safe_upload_path, slugify
-from activetigger.queue_manager import Queue
-from activetigger.tasks.prepare_dataset import PrepareDataset
+from activetigger.tasks.task_manager_client import enqueue_celery_task, stop_celery_task
 
 
 class Toolbox:
@@ -34,11 +38,8 @@ class Toolbox:
     MAX_DOCUMENT_BYTES = 50 * 1024 * 1024
     SESSION_MAX_AGE_SECONDS = 24 * 3600
     PREVIEW_ROWS = 5
-
-    queue: Queue
-
-    def __init__(self, queue: Queue) -> None:
-        self.queue = queue
+    # file in the session directory holding the id of its split task
+    TASK_FILE = "task"
 
     def _user_dir(self, username: str) -> Path:
         return Path(config.data_path).joinpath("prepare", slugify(username))
@@ -54,11 +55,11 @@ class Toolbox:
             raise HTTPException(status_code=404, detail="Session not found, please upload a file")
         return path
 
-    def _task_slug(self, username: str) -> str:
-        """
-        Pseudo project slug identifying the user's toolbox tasks in the queue
-        """
-        return f"prepare-{username}"
+    def _session_task_id(self, session_dir: Path) -> str | None:
+        try:
+            return session_dir.joinpath(self.TASK_FILE).read_text().strip() or None
+        except OSError:
+            return None
 
     def _clean_old_sessions(self, user_dir: Path) -> None:
         if not user_dir.exists():
@@ -186,7 +187,7 @@ class Toolbox:
 
     def split(self, username: str, params: PrepareSplitModel) -> PrepareTaskModel:
         """
-        Launch the split task on the queue (gpu queue for wtpsplit)
+        Launch the split task on a celery worker (GPU queue for wtpsplit)
         """
         session_dir = self._session_dir(username, params.session_id)
         if not session_dir.joinpath("raw.parquet").exists():
@@ -217,27 +218,35 @@ class Toolbox:
         session_dir.joinpath("result.parquet").unlink(missing_ok=True)
         session_dir.joinpath("progress").unlink(missing_ok=True)
 
-        task = PrepareDataset(session_dir, params)
         try:
-            task_id = self.queue.add_task(
-                "prepare_dataset",
-                self._task_slug(username),
-                task,
-                queue="gpu" if params.method == "wtpsplit" else "cpu",
+            (task_id, _) = enqueue_celery_task(
+                prepare_dataset_task,
+                PrepareDatasetTaskInput(
+                    username=username,
+                    session_id=params.session_id,
+                    path_session=session_dir,
+                    params=params,
+                ),
+                queue=QueueName.GPU if params.method == "wtpsplit" else None,
             )
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
+        # remember the task so status/stop can check it belongs to this session
+        session_dir.joinpath(self.TASK_FILE).write_text(task_id)
         return PrepareTaskModel(task_id=task_id)
 
     def stop(self, username: str, task_id: str) -> None:
         """
         Stop a running split task of the user
         """
-        element = self.queue.get(task_id)
-        if element is None or element.project_slug != self._task_slug(username):
+        user_dir = self._user_dir(username)
+        owned = user_dir.exists() and any(
+            session.is_dir() and self._session_task_id(session) == task_id
+            for session in user_dir.iterdir()
+        )
+        if not owned:
             raise HTTPException(status_code=404, detail="Task not found")
-        # TODO use revoke_celery_task in place of self.queue.kill once PrepareDataset Task has been migrated
-        self.queue.kill(task_id)
+        stop_celery_task(task_id, abortable=True)
 
     def status(self, username: str, session_id: str, task_id: str) -> PrepareStatusModel:
         """
@@ -246,32 +255,31 @@ class Toolbox:
         session_dir = self._session_dir(username, session_id)
         path_result = session_dir.joinpath("result.parquet")
 
-        element = self.queue.get(task_id)
-        if element is None or element.project_slug != self._task_slug(username):
-            # the queue may already have been cleaned
-            if path_result.exists():
-                df = pd.read_parquet(path_result)
-                return PrepareStatusModel(status="done", n_rows=len(df), preview=self._preview(df))
-            return PrepareStatusModel(status="not found")
-
-        if element.state in ["pending", "running"]:
-            progress = None
-            try:
-                progress = float(session_dir.joinpath("progress").read_text())
-            except (OSError, ValueError):
-                pass
-            return PrepareStatusModel(status=element.state, progress=progress)
-
-        if element.state == "done" and path_result.exists():
+        # the result is only written at the very end and removed when a new split starts
+        if path_result.exists():
             df = pd.read_parquet(path_result)
             return PrepareStatusModel(status="done", n_rows=len(df), preview=self._preview(df))
+        if self._session_task_id(session_dir) != task_id:
+            return PrepareStatusModel(status="not found")
 
-        error = "Task failed"
-        if element.state == "cancelled":
-            error = "Task cancelled"
-        elif element.future is not None and element.future.done() and element.future.exception():
-            error = str(element.future.exception())
-        return PrepareStatusModel(status="failed", error=error)
+        result = AsyncResult(task_id, app=celery_app)
+        state = result.state
+        if state in (REVOKED, "ABORTED"):
+            return PrepareStatusModel(status="failed", error="Task cancelled")
+        if state == FAILURE:
+            error = str(result.result) if result.result is not None else "Task failed"
+            if "interrupted by user" in error:
+                error = "Task cancelled"
+            return PrepareStatusModel(status="failed", error=error)
+
+        # queued or running: the worker writes the progress file once it starts
+        progress = None
+        try:
+            progress = float(session_dir.joinpath("progress").read_text())
+        except (OSError, ValueError):
+            pass
+        status = "running" if progress is not None else "pending"
+        return PrepareStatusModel(status=status, progress=progress)
 
     def export(self, username: str, session_id: str, format: str) -> FileResponse:
         """

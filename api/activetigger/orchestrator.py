@@ -117,7 +117,7 @@ class Orchestrator:
         self.messages = Messages(self.db_manager)
         self.users = Users(self.db_manager, self.messages)
         self.monitoring = Monitoring(self.db_manager)
-        self.toolbox = Toolbox(self.queue)
+        self.toolbox = Toolbox()
 
         # projects in memory
         self.projects = {}
