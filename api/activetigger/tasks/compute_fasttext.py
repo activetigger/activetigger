@@ -1,19 +1,15 @@
-import os
 from pathlib import Path
 
-import fasttext
-import pandas as pd
-from fasttext.util import download_model
 from pandas import DataFrame, Series
+from task_manager.tasks.compute_fasttext import encode_fasttext
 
-from activetigger.functions import tokenize
 from activetigger.tasks.base_task import BaseTask
 
 
 class ComputeFasttext(BaseTask):
     """
-    Compute Fastext feature
-    TODO : check of possible to avoid loop ?
+    In-process fasttext embeddings for composite tasks (feature recomputation).
+    Standalone feature computation goes through the celery task; both share encode_fasttext.
     """
 
     kind = "compute_feature_fastext"
@@ -35,52 +31,16 @@ class ComputeFasttext(BaseTask):
         self.event = None
 
     def __call__(self) -> DataFrame:
-        """
-        Compute fasttext embedding
-        Download the model if needed
-        Args:
-            texts (pandas.Series): texts
-            model (str): model to use
-        Returns:
-            pandas.DataFrame: embeddings
-        """
-        if not self.path_models.exists():
-            raise Exception(f"path {str(self.path_models)} does not exist")
-
+        # callers watch path_process/unique_id for progress
         progress_path = self.path_process.joinpath(self.unique_id)
         try:
-            current_directory = os.getcwd()
-            os.chdir(self.path_models)
-
-            # if no model is specified, try to dl the language model
-            if self.model is None or self.model == "" or self.model == "generic":
-                model_name = download_model(self.language, if_exists="ignore")
-            else:
-                model_name = self.model
-                if not Path(model_name).exists():
-                    raise FileNotFoundError(f"Model {model_name} not found")
-
-            os.chdir(current_directory)
-            texts_tk = tokenize(self.texts)
-            ft = fasttext.load_model(str(self.path_models.joinpath(model_name)))
-            emb = []
-            for t in texts_tk:
-                emb.append(ft.get_sentence_vector(t.replace("\n", " ")))
-                # manage progress
-                if len(emb) % 100 == 0:
-                    progress_percent = len(emb) / len(texts_tk) * 100
-                    with open(progress_path, "w") as f:
-                        f.write(str(round(progress_percent, 1)))
-                    print(progress_percent)
-                # check if the user want to stop the process
-                if self.event is not None:
-                    if self.event.is_set():
-                        raise Exception("Process interrupted by user")
-
-            # emb = [ft.get_sentence_vector(t.replace("\n", " ")) for t in texts_tk]
-            df = pd.DataFrame(emb, index=self.texts.index)
-            # WARN: this seems strange. Maybe replace with a more explicit syntax
-            df.columns = ["ft%03d" % (x + 1) for x in range(len(df.columns))]
-            return df
+            return encode_fasttext(
+                self.texts,
+                language=self.language,
+                path_models=self.path_models,
+                path_progress=progress_path,
+                model=self.model,
+                is_aborted=lambda: self.event is not None and self.event.is_set(),
+            )
         finally:
             progress_path.unlink(missing_ok=True)
