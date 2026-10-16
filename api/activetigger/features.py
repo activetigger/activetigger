@@ -18,6 +18,7 @@ from task_manager.tasks.compute_clip_imagexp_task import (
     ComputeClipImagexpTaskInput,
     compute_clip_imagexp,
 )
+from task_manager.tasks.compute_dfm_task import ComputeDfmTaskInput, compute_dfm_task
 from task_manager.tasks.compute_sbert_task import ComputeSbertTaskInput, compute_sbert
 
 from activetigger.config import config
@@ -30,7 +31,6 @@ from activetigger.datamodels import (
 from activetigger.db.projects import ProjectsService
 from activetigger.errors import AlreadyExistsError, InvalidInputError, NotFoundError
 from activetigger.queue_manager import Queue
-from activetigger.tasks.compute_dfm import ComputeDfm
 from activetigger.tasks.compute_fasttext import ComputeFasttext
 from activetigger.tasks.compute_multimodal import ComputeMultimodal
 from activetigger.tasks.task_manager_client import enqueue_celery_task
@@ -934,11 +934,6 @@ class Features:
             }
 
         if kind == "dfm":
-            args = parameters.copy()
-            args["texts"] = df
-            args["language"] = self.lang
-            unique_id = self.queue.add_task("feature", self.project_slug, ComputeDfm(**args))
-            del args
             parameters = {
                 "name": name,
                 "kind": kind,
@@ -950,6 +945,23 @@ class Features:
                 "dfm_norm": parameters.get("dfm_norm", None),
                 "dfm_log": parameters.get("dfm_log", None),
             }
+            # serialize df on disk for transmission to Celery task
+            texts_path = self.data.path_project.joinpath(f"texts_{uuid.uuid4().hex}.pkl")
+            df.to_pickle(texts_path)
+            task_managed_by_celery = True
+            # NOTE: as before, the dfm_* UI values are recorded but the vectoriser runs with defaults
+            (unique_id, abortable) = enqueue_celery_task(
+                compute_dfm_task,
+                ComputeDfmTaskInput(
+                    feature_name=name,
+                    username=username,
+                    project_slug=self.project_slug,
+                    texts_path=texts_path,
+                    path_process=self.path_all.parent,
+                    parameters=parameters,
+                    language=self.lang,
+                ),
+            )
 
         if unique_id:
             self.computing.append(
