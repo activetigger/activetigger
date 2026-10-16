@@ -40,7 +40,6 @@ from activetigger.datamodels import (
 )
 from activetigger.db.projects import ProjectsService
 from activetigger.errors import AlreadyExistsError, InvalidInputError, NotFoundError
-from activetigger.queue_manager import Queue
 from activetigger.tasks.task_manager_client import enqueue_celery_task
 
 # Experimental image projects: list of selectable image embedding models.
@@ -101,7 +100,6 @@ class Features:
     project_slug: str
     data: Data
     path_model: Path
-    queue: Queue
     computing: list
     informations: dict
     content: DataFrame
@@ -116,7 +114,6 @@ class Features:
         project_slug: str,
         data: Data,
         models_path: Path,
-        queue: Any,
         computing: list,
         db_manager,
         lang: str,
@@ -132,7 +129,6 @@ class Features:
         self.path_features = data.path_features
         self.path_all = data.path_data_all
         self.path_models = models_path
-        self.queue = queue
         self.informations = {}
 
         self.lang = lang
@@ -700,10 +696,9 @@ class Features:
         }:
             raise InvalidInputError("Kind not recognized")
 
-        # internal flag to distinguish task managed by celery from those manage by the internal queue
-        # this flag is used temporarly to keep the existing monitoring system while having some tasks in celery
-        task_managed_by_celery = False
         abortable = None
+        # pickles handed to the worker, removed with the process entry
+        temp_files: list[Path] = []
 
         # Experimental image projects: gate text-only feature kinds.
         if self.kind == "image" and kind not in {
@@ -783,7 +778,7 @@ class Features:
             # serialize df on disk for transmission to Celery task
             texts_path = self.data.path_project.joinpath(f"texts_{uuid.uuid4().hex}.pkl")
             df.to_pickle(texts_path)
-            task_managed_by_celery = True
+            temp_files.append(texts_path)
             (unique_id, abortable) = enqueue_celery_task(
                 compute_sbert,
                 ComputeSbertTaskInput(
@@ -811,6 +806,7 @@ class Features:
 
             texts_path = self.data.path_project.joinpath("texts.pkl")
             df.to_pickle(texts_path)
+            temp_files.append(texts_path)
             if self.languagemodels is None:
                 raise ValueError("No LanguageModels manager available for bert-embeddings")
             model_name = parameters.get("model")
@@ -827,7 +823,6 @@ class Features:
             batch_size = int(parameters.get("batch_size", 32))
             # queue celery task
 
-            task_managed_by_celery = True
             (unique_id, abortable) = enqueue_celery_task(
                 compute_bert_embeddings,
                 ComputeBertEmbeddingsTaskInput(
@@ -867,7 +862,7 @@ class Features:
             # serialize image paths on disk for transmission to Celery task
             paths_path = self.data.path_project.joinpath(f"paths_{uuid.uuid4().hex}.pkl")
             df.to_pickle(paths_path)
-            task_managed_by_celery = True
+            temp_files.append(paths_path)
             (unique_id, abortable) = enqueue_celery_task(
                 compute_clip_imagexp,
                 ComputeClipImagexpTaskInput(
@@ -903,7 +898,7 @@ class Features:
             # serialize image paths on disk for transmission to Celery task
             paths_path = self.data.path_project.joinpath(f"paths_{uuid.uuid4().hex}.pkl")
             df.to_pickle(paths_path)
-            task_managed_by_celery = True
+            temp_files.append(paths_path)
             (unique_id, abortable) = enqueue_celery_task(
                 compute_multimodal,
                 ComputeMultimodalTaskInput(
@@ -931,7 +926,7 @@ class Features:
             # serialize df on disk for transmission to Celery task
             texts_path = self.data.path_project.joinpath(f"texts_{uuid.uuid4().hex}.pkl")
             df.to_pickle(texts_path)
-            task_managed_by_celery = True
+            temp_files.append(texts_path)
             (unique_id, abortable) = enqueue_celery_task(
                 compute_fasttext,
                 ComputeFasttextTaskInput(
@@ -968,7 +963,7 @@ class Features:
             # serialize df on disk for transmission to Celery task
             texts_path = self.data.path_project.joinpath(f"texts_{uuid.uuid4().hex}.pkl")
             df.to_pickle(texts_path)
-            task_managed_by_celery = True
+            temp_files.append(texts_path)
             # NOTE: as before, the dfm_* UI values are recorded but the vectoriser runs with defaults
             (unique_id, abortable) = enqueue_celery_task(
                 compute_dfm_task,
@@ -993,8 +988,8 @@ class Features:
                     user=username,
                     name=name,
                     time=datetime.now(timezone.utc),
-                    managed_by_celery=task_managed_by_celery,
                     abortable_celery_task=abortable,
+                    temp_files=temp_files,
                 )
             )
             return None

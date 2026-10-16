@@ -30,7 +30,6 @@ from activetigger.db.languagemodels import ModelsService
 from activetigger.db.manager import DatabaseManager
 from activetigger.errors import AlreadyExistsError, InvalidInputError, NotFoundError
 from activetigger.functions import get_model_metrics
-from activetigger.queue_manager import Queue
 from activetigger.tasks.task_manager_client import enqueue_celery_task
 
 
@@ -47,7 +46,6 @@ class ImageModels:
 
     project_slug: str
     path: Path
-    queue: Queue
     computing: list
     models_service: ModelsService
     db_manager: DatabaseManager
@@ -59,7 +57,6 @@ class ImageModels:
         self,
         project_slug: str,
         path: Path,
-        queue: Queue,
         computing: list,
         db_manager: DatabaseManager,
         list_models: str | None = None,
@@ -76,7 +73,6 @@ class ImageModels:
             adapt=False,
         )
         self.project_slug = project_slug
-        self.queue = queue
         self.computing = computing
         self.models_service = db_manager.language_models_service
         self.path: Path = Path(path).joinpath("image").absolute()
@@ -255,7 +251,6 @@ class ImageModels:
                 dataset=None,
                 params=params_db.model_dump(),
                 get_progress=self.get_progress(model_name, status="training"),
-                managed_by_celery=True,
                 abortable_celery_task=abortable,
             )
         )
@@ -332,7 +327,6 @@ class ImageModels:
                 dataset=dataset,
                 status=status,
                 get_progress=self.get_progress(name, status=status),
-                managed_by_celery=True,
                 abortable_celery_task=abortable,
             )
         )

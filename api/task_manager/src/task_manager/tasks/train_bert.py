@@ -251,7 +251,7 @@ class TrainBert:
         # logger.info() is dropped — status.log stays empty
         logger.setLevel(logging.INFO)
         logger.propagate = False
-        # the logger is a per-process singleton and loky reuses workers:
+        # the logger is a per-process singleton and worker processes may be reused:
         # drop handlers from previous trainings or logs leak across models
         for handler in logger.handlers[:]:
             logger.removeHandler(handler)

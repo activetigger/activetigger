@@ -2,7 +2,6 @@
 Define the orchestrator and launch the instance that will span projects
 Each project share a few elements:
 - database manager
-- queue
 - users management
 - messages management
 """
@@ -51,7 +50,6 @@ from activetigger.functions import (
 from activetigger.messages import Messages
 from activetigger.monitoring import Monitoring
 from activetigger.project import Project
-from activetigger.queue_manager import Queue
 from activetigger.tasks.task_manager_client import enqueue_celery_task, stop_celery_task
 from activetigger.toolbox import Toolbox
 from activetigger.uploads import get_upload_staging
@@ -67,13 +65,10 @@ class Orchestrator:
     starting_time: float
     db_name: str
     jwt_algorithm: str
-    n_workers_cpu: int
-    n_workers_gpu: int
     path: Path
     path_models: Path
     projects: dict[str, Project]
     db_manager: DatabaseManager
-    queue: Queue
     users: Users
     messages: Messages
     max_projects: int
@@ -89,8 +84,6 @@ class Orchestrator:
 
         self.max_projects = config.max_loaded_projects
         self.jwt_algorithm = config.jwt_algorithm
-        self.n_workers_cpu = config.n_workers_cpu
-        self.n_workers_gpu = config.n_workers_gpu
 
         # Define path
         self.path: Path = Path(config.data_path) / "projects"
@@ -114,10 +107,6 @@ class Orchestrator:
 
         # attributes of the server
         self.db_manager = DatabaseManager()
-        self.queue = Queue(
-            nb_workers_cpu=self.n_workers_cpu,
-            nb_workers_gpu=self.n_workers_gpu,
-        )
         self.messages = Messages(self.db_manager)
         self.users = Users(self.db_manager, self.messages)
         self.monitoring = Monitoring(self.db_manager)
@@ -162,7 +151,6 @@ class Orchestrator:
         the loop when the orchestrator was instantiated outside one
         (module-import-time init, tests).
         """
-        self.queue.ensure_update_task()
         if self._update_task is not None and not self._update_task.done():
             return
         try:
@@ -178,14 +166,12 @@ class Orchestrator:
         if self._update_task:
             self._update_task.cancel()
         self._running = False
-        del self.queue
         print("Server off")
 
     def reset(self):
         """
-        Erase the waiting queue and projects in memory
+        Erase the projects in memory
         """
-        self.queue.restart()
         self.projects = {}
         self.project_creation_ongoing = {}
         self.project_duplication_ongoing = {}
@@ -203,7 +189,6 @@ class Orchestrator:
             project.filename = sanitize_uploaded_filename(project.filename)
         self.project_creation_ongoing[project_slug] = Project(
             project_slug,
-            self.queue,
             self.db_manager,
             path_models=self.path_models,
             users=self.users,
@@ -226,30 +211,19 @@ class Orchestrator:
 
     def _sync_update_processes(self, project_lifetime: int) -> None:
         """
-        Synchronous work for the update loop (runs in a thread to avoid
-        blocking the async event loop).
+        Synchronous housekeeping for the update loop (runs in a thread to avoid
+        blocking the async event loop); task results arrive through the callbacks.
         """
         timer = time.time()
 
-        # Run project update_processes BEFORE clean_old_processes: the queue's
-        # _refresh_states transitions completed futures to state="done", and
-        # clean_old_processes reaps anything in TERMINAL_STATES — so reaping
-        # first would drop tasks before finish_project_creation gets a chance
-        # to consume the result, leaving creating projects stuck forever.
+        # evict idle projects, never one with tasks in flight
         to_del = []
         for p, project in list(self.projects.items()):
-            try:
-                if (timer - project.starting_time) > project_lifetime:
-                    # Never evict a project with tasks in flight
-                    if project.computing:
-                        project.starting_time = timer
-                    else:
-                        to_del.append(p)
-                        continue
-                project.update_processes()
-            except Exception as e:
-                print(f"Error while updating project {p}: {e}")
-                project.errors.add(f"Error while updating processes: {e}")
+            if (timer - project.starting_time) > project_lifetime:
+                if project.computing:
+                    project.starting_time = timer
+                else:
+                    to_del.append(p)
         for p in to_del:
             del self.projects[p]
 
@@ -257,7 +231,6 @@ class Orchestrator:
         to_del = []
         for p, project in list(self.project_creation_ongoing.items()):
             try:
-                project.update_processes()
                 if project.status == "created":
                     to_del.append(p)
                 if project.status == "error":
@@ -275,9 +248,6 @@ class Orchestrator:
                 to_del.append(p)
         for p in to_del:
             self.project_creation_ongoing.pop(p, None)
-
-        # Reap terminal/stuck tasks last, after results have been consumed.
-        self.queue.clean_old_processes(timeout=4)
 
         # drop abandoned chunked-upload staging sessions
         try:
@@ -384,13 +354,11 @@ class Orchestrator:
             ]
             for p in self.projects
         }
-        # TODO: running/queued tasks in task manager
-
-        # running processes in the queue
+        # every process in flight on the celery workers, across loaded projects
         queue = {
-            i.unique_id: i.model_dump()
-            for i in self.queue.state()
-            if i.state in ["pending", "running"]
+            c.unique_id: {"unique_id": c.unique_id, "kind": c.kind, "state": "running"}
+            for p in self.projects
+            for c in self.projects[p].computing
         }
 
         # use cached heavy stats
@@ -507,7 +475,6 @@ class Orchestrator:
         try:
             self.projects[project_slug] = Project(
                 project_slug,
-                self.queue,
                 self.db_manager,
                 path_models=self.path_models,
                 users=self.users,
@@ -533,20 +500,16 @@ class Orchestrator:
         print(f"killing {process_id}")
         # TODO: we would need to know if it's abortable
         stop_celery_task(process_id, None)
-        self.queue.kill(process_id)
         self.log_action(username, f"KILL PROCESS: {process_id}", "all")
 
     def stop_process(self, process: ProcessComputing, project_slug: str, username: str) -> None:
         """
         Stop a specific process
         """
-        if process.managed_by_celery:
-            stop_celery_task(process.unique_id, process.abortable_celery_task)
-            # a revoked task never calls back: drop it from the project now
-            if project_slug in self.projects:
-                self.projects[project_slug].clean_process(process)
-        else:
-            self.queue.kill(process.unique_id)
+        stop_celery_task(process.unique_id, process.abortable_celery_task)
+        # a revoked task never calls back: drop it from the project now
+        if project_slug in self.projects:
+            self.projects[project_slug].clean_process(process)
         if process.kind in ("train_bert", "train_image", "train_ner"):
             process = cast(LMComputing, process)
             self.db_manager.language_models_service.delete_model(project_slug, process.model_name)

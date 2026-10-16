@@ -31,7 +31,6 @@ from activetigger.db.languagemodels import ModelsService
 from activetigger.db.manager import DatabaseManager
 from activetigger.errors import AlreadyExistsError, InvalidInputError, NotFoundError
 from activetigger.functions import get_model_metrics
-from activetigger.queue_manager import Queue
 from activetigger.tasks.task_manager_client import enqueue_celery_task
 
 
@@ -42,7 +41,6 @@ class LanguageModels:
 
     project_slug: str
     path: Path
-    queue: Queue
     computing: list
     language_models_service: ModelsService
     db_manager: DatabaseManager
@@ -54,14 +52,12 @@ class LanguageModels:
         self,
         project_slug: str,
         path: Path,
-        queue: Queue,
         computing: list,
         db_manager: DatabaseManager,
         list_models: str | None = None,
     ) -> None:
         self.params_default = LMParametersModel()
         self.project_slug = project_slug
-        self.queue = queue
         self.computing = computing
         self.language_models_service = db_manager.language_models_service
         self.path: Path = Path(path).joinpath("bert")
@@ -315,7 +311,6 @@ class LanguageModels:
                 dataset=None,
                 params=params.model_dump(),
                 get_progress=self.get_progress(model_name, status="training"),
-                managed_by_celery=True,
                 abortable_celery_task=abortable,
             )
         )
@@ -411,7 +406,6 @@ class LanguageModels:
                 dataset=dataset,
                 status=status,
                 get_progress=self.get_progress(name, status=status),
-                managed_by_celery=True,
                 abortable_celery_task=abortable,
             )
         )

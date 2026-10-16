@@ -110,7 +110,6 @@ class Bertopic:
             BertopicComputing(
                 user=user,
                 unique_id=unique_id,
-                managed_by_celery=True,
                 abortable_celery_task=abortable,
                 name=name,
                 path_data=path_data,

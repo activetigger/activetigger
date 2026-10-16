@@ -31,7 +31,6 @@ from activetigger.db.languagemodels import ModelsService
 from activetigger.db.manager import DatabaseManager
 from activetigger.errors import AlreadyExistsError, InvalidInputError, NotFoundError
 from activetigger.functions import get_model_metrics
-from activetigger.queue_manager import Queue
 from activetigger.tasks.task_manager_client import enqueue_celery_task
 
 
@@ -48,7 +47,6 @@ class NerModels:
 
     project_slug: str
     path: Path
-    queue: Queue
     computing: list
     models_service: ModelsService
     db_manager: DatabaseManager
@@ -60,14 +58,12 @@ class NerModels:
         self,
         project_slug: str,
         path: Path,
-        queue: Queue,
         computing: list,
         db_manager: DatabaseManager,
         list_models: str | None = None,
     ) -> None:
         self.params_default = LMParametersModel()
         self.project_slug = project_slug
-        self.queue = queue
         self.computing = computing
         self.models_service = db_manager.language_models_service
         self.path = Path(path).joinpath("ner")
@@ -208,7 +204,6 @@ class NerModels:
                 dataset=None,
                 params=params_db.model_dump(),
                 get_progress=self.get_progress(name, status="training"),
-                managed_by_celery=True,
                 abortable_celery_task=abortable,
             )
         )
@@ -282,7 +277,6 @@ class NerModels:
                 dataset=dataset,
                 status=status,
                 get_progress=self.get_progress(name, status=status),
-                managed_by_celery=True,
                 abortable_celery_task=abortable,
             )
         )

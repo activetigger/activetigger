@@ -9,6 +9,7 @@ from task_manager.utils import TaskFailureReportForCallback
 from activetigger.datamodels import ProcessComputing
 from activetigger.orchestrator import get_orchestrator
 from activetigger.project import Project
+from activetigger.tasks.task_manager_client import was_stopped
 
 
 # TaskCallback is a generic class to specify task callback definitions
@@ -64,7 +65,7 @@ class TaskCallback(ABC):
                 project_manager.clean_process(e)
         specific_message = cls.on_failure_task_specific(task_id, task_report, project_manager)
         # a stopped task is not an error (same as the in-process "cancelled" state)
-        if "Process interrupted by user" in task_report.exception:
+        if "Process interrupted by user" in task_report.exception or was_stopped(task_id):
             return
         project_manager.status = "error"
         if specific_message:

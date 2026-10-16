@@ -107,7 +107,6 @@ class Lexicometrics:
                 time=datetime.now(timezone.utc),
                 kind="lexicometrics",
                 parameters=parameters,
-                managed_by_celery=True,
                 abortable_celery_task=abortable,
             )
         )

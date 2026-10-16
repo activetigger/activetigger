@@ -39,7 +39,6 @@ dependencies = [
 		"plotly",
 		"matplotlib",
 		"scikit-learn",
-		"loky",
 		"einops",
 		"accelerate>=1.13.0",
 		"sacremoses>=0.1.1",

@@ -47,7 +47,6 @@ from activetigger.functions import (
     get_model_metrics,
     serve_temp_export,
 )
-from activetigger.queue_manager import Queue
 from activetigger.tasks.task_manager_client import enqueue_celery_task
 
 if TYPE_CHECKING:
@@ -63,7 +62,6 @@ class QuickModels:
     """
 
     path: Path
-    queue: Queue
     available_models: dict[str, Any]
     computing: list
     loaded: dict
@@ -74,7 +72,6 @@ class QuickModels:
         self,
         project_slug: str,
         path: Path,
-        queue: Queue,
         computing: list,
         db_manager: DatabaseManager,
         features: "Features | None" = None,
@@ -93,7 +90,6 @@ class QuickModels:
         self.project_slug = project_slug
         self.language_models_service = db_manager.language_models_service
         self.computing = computing
-        self.queue = queue
         self.features = features
 
         # Models and default parameters
@@ -200,7 +196,6 @@ class QuickModels:
             test_size=test_size,
             retrain=retrain,
             dataset="train",
-            managed_by_celery=True,
             abortable_celery_task=abortable,
         )
         self.computing.append(req)
@@ -477,7 +472,6 @@ class QuickModels:
                 model_type=sm.model_type,
                 model_params=sm.model_params,
                 labels=sm.labels,
-                managed_by_celery=True,
                 abortable_celery_task=abortable,
             )
         )
@@ -623,7 +617,6 @@ class QuickModels:
                 unique_id=unique_id,
                 time=datetime.now(timezone.utc),
                 kind="predict_with_features",
-                managed_by_celery=True,
                 abortable_celery_task=abortable,
                 status="predicting",
                 name=sm.name,

@@ -50,34 +50,6 @@ class PredictedLabel(BaseModel):
     entropy: float | None = None
 
 
-class QueueTaskModel(BaseModel):
-    """
-    Task in the queue
-    """
-
-    unique_id: str
-    kind: str
-    project_slug: str
-    state: str
-    future: Optional[Any] = None  # Future object from concurrent.futures
-    event: Any = None  # Event object for signaling
-    starting_time: datetime.datetime
-    running_since: Optional[datetime.datetime] = None
-    queue: str
-    task: Callable[..., Any] | None
-
-
-class QueueStateTaskModel(BaseModel):
-    """
-    Task in the queue with state
-    """
-
-    unique_id: str
-    kind: str
-    state: str
-    exception: Any = None
-
-
 class ProjectBaseModel(BaseModel):
     """
     Parameters of a project to save in the database
@@ -722,7 +694,6 @@ class ProcessComputing(BaseModel):
     unique_id: str
     time: datetime.datetime
     kind: str
-    managed_by_celery: bool | None = None
     abortable_celery_task: bool | None = None
     # files handed to the worker, removed by the API with the process
     temp_files: list[Path] = []
@@ -1459,7 +1430,6 @@ class ProjectCreatingModel(ProcessComputing):
     time: datetime.datetime
     kind: str
     status: str
-    managed_by_celery: Literal[True] | None = True
 
 
 class TopicsOutModel(BaseModel):

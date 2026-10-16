@@ -154,7 +154,6 @@ class Prompts:
                 text=text,
                 feature_name=feature_name,
                 hf_name=model_name,
-                managed_by_celery=True,
                 abortable_celery_task=abortable,
             )
         )
@@ -410,7 +409,6 @@ class Prompts:
                 unique_id=unique_id,
                 time=datetime.now(timezone.utc),
                 kind="prompt_similarity",
-                managed_by_celery=True,
                 abortable_celery_task=abortable,
                 prompt_id=prompt_id,
                 text=str(prompt_row["text"]),

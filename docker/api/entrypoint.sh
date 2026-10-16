@@ -101,7 +101,7 @@ else
   echo
   # Single worker is intentional: the orchestrator holds in-memory project state
   # and runs a background asyncio update loop. Heavy compute is offloaded to
-  # multiprocessing workers via queue_manager. --proxy-headers is required
+  # the celery workers started above. --proxy-headers is required
   # because nginx forwards X-Forwarded-* in front of the API.
   exec uv run --no-sync uvicorn activetigger.app.main:app \
     --host 0.0.0.0 \

@@ -80,7 +80,6 @@ from activetigger.monitoring import Monitoring
 from activetigger.nermodels import NerModels
 from activetigger.projections import Projections
 from activetigger.prompts import BINDABLE_FEATURE_KINDS, Prompts
-from activetigger.queue_manager import Queue
 from activetigger.quickmodels import QuickModels
 from activetigger.schemes import Schemes
 from activetigger.tasks.task_manager_client import enqueue_celery_task, stop_celery_task
@@ -175,7 +174,6 @@ class Project:
     status: str
     starting_time: float
     name: str
-    queue: Queue
     computing: list[ProcessComputing]
     path_models: Path
     data: Data
@@ -195,7 +193,6 @@ class Project:
     def __init__(
         self,
         project_slug: str,
-        queue: Queue,
         db_manager: DatabaseManager,
         path_models: Path,
         users: Users,
@@ -207,7 +204,6 @@ class Project:
         """
         self.status = "initialize"
         self.starting_time = time.time()
-        self.queue = queue
         self.computing = []
         self.db_manager = db_manager
         self.path_models = path_models
@@ -278,7 +274,6 @@ class Project:
         self.languagemodels = LanguageModels(
             project_slug,
             self.params.dir,
-            self.queue,
             self.computing,
             self.db_manager,
             config.resolve_file(config.file_bert_models),
@@ -287,7 +282,6 @@ class Project:
             project_slug,
             self.data,
             self.path_models,
-            self.queue,
             cast(list[FeatureComputing], self.computing),
             self.db_manager,
             self.params.language,
@@ -321,7 +315,6 @@ class Project:
             self.imagemodels = ImageModels(
                 project_slug,
                 self.params.dir,
-                self.queue,
                 self.computing,
                 self.db_manager,
                 config.resolve_file(config.file_image_models),
@@ -335,7 +328,6 @@ class Project:
             self.nermodels = NerModels(
                 project_slug,
                 self.params.dir,
-                self.queue,
                 self.computing,
                 self.db_manager,
                 config.resolve_file(config.file_bert_models),
@@ -343,7 +335,6 @@ class Project:
         self.quickmodels = QuickModels(
             project_slug,
             self.params.dir,
-            self.queue,
             self.computing,
             self.db_manager,
             features=self.features,
@@ -698,7 +689,6 @@ class Project:
                 unique_id=unique_id,
                 time=datetime.now(timezone.utc),
                 kind=f"add_evalset_{dataset}",
-                managed_by_celery=True,
                 abortable_celery_task=abortable,
                 temp_files=[index_path],
             )
@@ -756,12 +746,9 @@ class Project:
     def _kill_running_feature_extensions(self) -> bool:
         running = [c for c in self.computing if getattr(c, "kind", None) == "extend_features"]
         for c in running:
-            if c.managed_by_celery:
-                stop_celery_task(c.unique_id, c.abortable_celery_task)
-                # a revoked task never calls back: drop it (and its pickles) now
-                self.clean_process(c)
-            else:
-                self.queue.kill(c.unique_id)
+            stop_celery_task(c.unique_id, c.abortable_celery_task)
+            # a revoked task never calls back: drop it (and its pickles) now
+            self.clean_process(c)
         return bool(running)
 
     def _enqueue_extend_features(
@@ -795,7 +782,6 @@ class Project:
                 unique_id=unique_id,
                 time=datetime.now(timezone.utc),
                 kind="extend_features",
-                managed_by_celery=True,
                 abortable_celery_task=abortable,
                 temp_files=[data_path, indexes_path],
             )
@@ -2021,7 +2007,6 @@ class Project:
                 time=datetime.now(timezone.utc),
                 kind="update_datasets",
                 update=update,
-                managed_by_celery=True,
                 abortable_celery_task=abortable,
             )
         )
@@ -2533,7 +2518,6 @@ class Project:
                 time=datetime.now(timezone.utc),
                 kind="generation",
                 get_progress=get_progress,
-                managed_by_celery=True,
                 abortable_celery_task=abortable,
                 temp_files=[data_path],
             )
@@ -2541,12 +2525,9 @@ class Project:
 
     def clean_process(self, e: ProcessComputing) -> None:
         """
-        Clean a process from computing and queue
+        Clean a process from computing
         """
         self.computing.remove(e)
-        # task manged by celery are not in the queue
-        if e.managed_by_celery == False:
-            self.queue.delete(e.unique_id)
         # inputs handed to a worker that may never have started
         for f in e.temp_files:
             Path(f).unlink(missing_ok=True)
@@ -2581,87 +2562,6 @@ class Project:
             path.unlink()
         except Exception as ex:
             print(f"Failed to recover generation checkpoint {path}: {ex}")
-
-    def update_processes(self) -> None:
-        """
-        Update completed processes and do specific operations regarding their kind
-        - get the result from the queue
-        - add the result if needed
-        - manage error if needed
-        """
-        add_predictions = {}
-
-        # loop on the current process
-        for e in [e for e in self.computing.copy() if e.managed_by_celery != True]:
-            # get the process
-            process = self.queue.get(e.unique_id)
-            if process is None:
-                self.clean_process(e)
-                continue
-
-            # check if the process is done, else continue
-            if process.future is None or not process.future.done():
-                continue
-
-            # log error if exists in the process execution
-            exception = process.future.exception()
-            if exception:
-                # User-initiated cancellations are not errors; clean up silently.
-                if process.state == "cancelled":
-                    print(f"Process {e.kind} cancelled by user")
-                    if e.kind == "extend_features":
-                        self._recover_features_after_failed_extension()
-                    self.clean_process(e)
-                    continue
-                print(f"Error in {e.kind} : {exception}")
-                exception_str = str(exception)
-                if any(
-                    s in exception_str
-                    for s in [
-                        "CUDA",
-                        "CUDACachingAllocator",
-                        "out of memory",
-                        "NVML",
-                        "cuda",
-                    ]
-                ):
-                    message = (
-                        f"Error for process {e.kind} : GPU error — not enough GPU memory available. "
-                        "Try reducing the batch size, the max sequence length, or using a smaller model. "
-                        f"Details: {exception_str}"
-                    )
-                else:
-                    message = f"Error for process {e.kind} : {exception}"
-                self.errors.add(message)
-
-                self.clean_process(e)
-                continue
-
-            # get the result and do specific operations, if it fails, log the error
-            try:
-                results = process.future.result()
-                match e.kind:
-                    case "feature":
-                        feature_computation = cast(FeatureComputing, e)
-                        self.features.add(
-                            feature_computation.name,
-                            feature_computation.type,
-                            feature_computation.user,
-                            feature_computation.parameters,
-                            results,
-                        )
-            except Exception as ex:
-                print(f"Error in {e.kind} : {ex}")
-                self.errors.add(f"Error in {e.kind} : {str(ex)}")
-            # clean the process from the list and the queue
-            finally:
-                self.clean_process(e)  # ty: ignore[invalid-argument-type]
-
-        # if there are predictions, add them
-        if len(add_predictions) > 0:
-            errors = self.features.add_predictions(add_predictions)
-            for err in errors:
-                self.errors.add(err)
 
     # def dump(self, with_files=True) -> None:
     #     """

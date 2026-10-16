@@ -176,7 +176,6 @@ class Projections:
                 method=projection.method,
                 params=projection,
                 normalize_features=normalize_features,
-                managed_by_celery=True,
                 abortable_celery_task=abortable,
             )
         )
