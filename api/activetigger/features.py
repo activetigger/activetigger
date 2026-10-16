@@ -14,6 +14,10 @@ from task_manager.tasks.compute_bert_embeddings_task import (
     ComputeBertEmbeddingsTaskInput,
     compute_bert_embeddings,
 )
+from task_manager.tasks.compute_clip_imagexp_task import (
+    ComputeClipImagexpTaskInput,
+    compute_clip_imagexp,
+)
 from task_manager.tasks.compute_sbert_task import ComputeSbertTaskInput, compute_sbert
 
 from activetigger.config import config
@@ -26,7 +30,6 @@ from activetigger.datamodels import (
 from activetigger.db.projects import ProjectsService
 from activetigger.errors import AlreadyExistsError, InvalidInputError, NotFoundError
 from activetigger.queue_manager import Queue
-from activetigger.tasks.compute_clip_imagexp import ComputeClipImagexp
 from activetigger.tasks.compute_dfm import ComputeDfm
 from activetigger.tasks.compute_fasttext import ComputeFasttext
 from activetigger.tasks.compute_multimodal import ComputeMultimodal
@@ -853,17 +856,23 @@ class Features:
                 raise InvalidInputError(f"Unknown image embedding model: {ui_label}")
 
             batch_size = int(parameters.get("batch_size", 16))
-            unique_id = self.queue.add_task(
-                "feature",
-                self.project_slug,
-                ComputeClipImagexp(
-                    paths=df,
+            # serialize image paths on disk for transmission to Celery task
+            paths_path = self.data.path_project.joinpath(f"paths_{uuid.uuid4().hex}.pkl")
+            df.to_pickle(paths_path)
+            task_managed_by_celery = True
+            (unique_id, abortable) = enqueue_celery_task(
+                compute_clip_imagexp,
+                ComputeClipImagexpTaskInput(
+                    feature_name=name,
+                    username=username,
+                    project_slug=self.project_slug,
+                    paths_path=paths_path,
                     path_process=self.path_all.parent,
-                    model=spec["model"],
+                    model=ui_label,
+                    clip_model=spec["model"],
                     pretrained=spec["pretrained"],
                     batch_size=batch_size,
                 ),
-                queue="gpu",
             )
 
             parameters = {
