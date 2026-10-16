@@ -6,6 +6,7 @@ Each project share a few elements:
 - users management
 - messages management
 """
+
 import asyncio
 import os
 import shutil
@@ -19,6 +20,10 @@ import pandas as pd
 import psutil
 import pyarrow.parquet as pq
 from jose import jwt
+from task_manager.tasks.duplicate_project_task import (
+    DuplicateProjectTaskInput,
+    duplicate_project_task,
+)
 
 from activetigger import __version__
 from activetigger.config import config
@@ -47,8 +52,7 @@ from activetigger.messages import Messages
 from activetigger.monitoring import Monitoring
 from activetigger.project import Project
 from activetigger.queue_manager import Queue
-from activetigger.tasks.duplicate_project import DuplicateProject
-from activetigger.tasks.task_manager_client import stop_celery_task
+from activetigger.tasks.task_manager_client import enqueue_celery_task, stop_celery_task
 from activetigger.toolbox import Toolbox
 from activetigger.uploads import get_upload_staging
 from activetigger.users import Users
@@ -125,8 +129,7 @@ class Orchestrator:
         # projects in creation
         self.project_creation_ongoing = {}
 
-        # projects being duplicated (filesystem copy in the queue + pending
-        # DB clone in the main process).
+        # projects being duplicated (copy on a celery worker, DB clone in the callback)
         self.project_duplication_ongoing: dict[str, dict[str, Any]] = {}
 
         # store creation errors so they survive project cleanup
@@ -272,12 +275,6 @@ class Orchestrator:
                 to_del.append(p)
         for p in to_del:
             self.project_creation_ongoing.pop(p, None)
-
-        # finalize in-flight project duplications (copy task → DB clone)
-        try:
-            self._sync_finish_duplications()
-        except Exception as e:
-            print(f"Error while finishing duplications: {e}")
 
         # Reap terminal/stuck tasks last, after results have been consumed.
         self.queue.clean_old_processes(timeout=4)
@@ -529,7 +526,7 @@ class Orchestrator:
             return None
         del self.projects[project_slug]
 
-    def stop_process_by_process_id(self, process_id: str,  username: str) -> None:
+    def stop_process_by_process_id(self, process_id: str, username: str) -> None:
         """
         Stop a specific process id
         """
@@ -538,8 +535,8 @@ class Orchestrator:
         stop_celery_task(process_id, None)
         self.queue.kill(process_id)
         self.log_action(username, f"KILL PROCESS: {process_id}", "all")
-    
-    def stop_process(self, process: ProcessComputing, project_slug:str,  username: str) -> None:
+
+    def stop_process(self, process: ProcessComputing, project_slug: str, username: str) -> None:
         """
         Stop a specific process
         """
@@ -552,11 +549,8 @@ class Orchestrator:
             self.queue.kill(process.unique_id)
         if process.kind in ("train_bert", "train_image", "train_ner"):
             process = cast(LMComputing, process)
-            self.db_manager.language_models_service.delete_model(
-                project_slug, process.model_name
-            )
+            self.db_manager.language_models_service.delete_model(project_slug, process.model_name)
         self.log_action(username, f"KILL PROCESS: {process.unique_id}", "all")
-
 
     def stop_user_processes(
         self, username: str, project_slug: str | None = None, kind: str | list[str] | None = None
@@ -595,8 +589,8 @@ class Orchestrator:
             processes = {p: self.projects[p].get_process(kind, username) for p in self.projects}
             for project in processes:
                 for process in processes[project]:
-                    self.stop_process(process, project,  username)
-                    
+                    self.stop_process(process, project, username)
+
         # kill all the processes of the user for a specific project
         else:
             if project_slug not in self.projects:
@@ -641,11 +635,10 @@ class Orchestrator:
         """
         Kick off the duplication of an existing project. Non-blocking.
 
-        Queues a DuplicateProject task that copies the source project directory
+        Sends a celery task that copies the source project directory
         (data, features, trained model files…) and any static export files.
-        The orchestrator update loop picks up the completed copy and clones the
-        DB rows in the main process (see `_sync_finish_duplications`). Returns
-        the target slug immediately so callers can poll `/projects/status`.
+        The task callback clones the DB rows (see DuplicateProjectCallback).
+        Returns the target slug immediately so callers can poll `/projects/status`.
         """
         if not self.exists(source_slug):
             raise NotFoundError("Source project does not exist")
@@ -687,83 +680,32 @@ class Orchestrator:
         target_static = f"{config.data_path}/projects/static/{target_slug}"
         has_static = Path(source_static).exists()
 
-        task = DuplicateProject(
-            source_dir=source_dir_str,
-            target_dir=target_dir_str,
-            source_static_dir=source_static if has_static else None,
-            target_static_dir=target_static if has_static else None,
-        )
-        task_id = self.queue.add_task("duplicate_project", target_slug, task, queue="cpu")
+        try:
+            (task_id, _) = enqueue_celery_task(
+                duplicate_project_task,
+                DuplicateProjectTaskInput(
+                    source_slug=source_slug,
+                    target_slug=target_slug,
+                    username=username,
+                    source_dir=Path(source_dir_str),
+                    target_dir=target_dir,
+                    source_static_dir=Path(source_static) if has_static else None,
+                    target_static_dir=Path(target_static) if has_static else None,
+                    target_params=target_params,
+                ),
+            )
+        except Exception as e:
+            raise Exception(f"Failed to start duplication: {e}") from e
 
+        # only used to report "duplicating" in /projects/status until the callback runs
         self.project_duplication_ongoing[target_slug] = {
             "task_id": task_id,
             "source_slug": source_slug,
             "username": username,
-            "source_dir": source_dir_str,
-            "target_dir": target_dir_str,
-            "target_static": target_static,
-            "target_params": target_params,
             "starting_time": time.time(),
         }
 
         return target_slug
-
-    def _sync_finish_duplications(self) -> None:
-        """
-        Pick up completed DuplicateProject tasks and finish them by cloning
-        the DB rows in the main process.
-        """
-        to_del: list[str] = []
-        for target_slug, info in list(self.project_duplication_ongoing.items()):
-            task = self.queue.get(info["task_id"])
-            if task is None:
-                shutil.rmtree(info["target_dir"], ignore_errors=True)
-                shutil.rmtree(info["target_static"], ignore_errors=True)
-                self.creation_errors[target_slug] = "Duplication task disappeared"
-                to_del.append(target_slug)
-                continue
-
-            if task.state in ("pending", "running"):
-                continue
-
-            future = task.future
-            exception = future.exception() if future is not None and future.done() else None
-
-            if task.state == "cancelled" or exception is not None:
-                shutil.rmtree(info["target_dir"], ignore_errors=True)
-                shutil.rmtree(info["target_static"], ignore_errors=True)
-                self.creation_errors[target_slug] = (
-                    f"Duplication failed: {exception}" if exception else "Duplication cancelled"
-                )
-                self.queue.delete(info["task_id"])
-                to_del.append(target_slug)
-                continue
-
-            # filesystem copy succeeded — clone the DB rows
-            try:
-                self.db_manager.projects_service.duplicate_project(
-                    source_slug=info["source_slug"],
-                    target_slug=target_slug,
-                    target_parameters=info["target_params"],
-                    user_name=info["username"],
-                    source_dir=info["source_dir"],
-                    target_dir=info["target_dir"],
-                )
-                self.log_action(
-                    info["username"],
-                    f"DUPLICATE PROJECT: {info['source_slug']} -> {target_slug}",
-                    target_slug,
-                )
-            except Exception as e:
-                shutil.rmtree(info["target_dir"], ignore_errors=True)
-                shutil.rmtree(info["target_static"], ignore_errors=True)
-                self.creation_errors[target_slug] = f"DB duplication failed: {e}"
-
-            self.queue.delete(info["task_id"])
-            to_del.append(target_slug)
-
-        for slug in to_del:
-            self.project_duplication_ongoing.pop(slug, None)
 
     def clean_unfinished_project(
         self, project_slug: str | None = None, project_name: str | None = None
@@ -859,10 +801,10 @@ class Orchestrator:
         return toy_datasets
 
 
-orchestrator:Orchestrator|None = None
+orchestrator: Orchestrator | None = None
 
 
-def get_orchestrator()->Orchestrator:
+def get_orchestrator() -> Orchestrator:
     global orchestrator
     if orchestrator is None:
         orchestrator = Orchestrator()
