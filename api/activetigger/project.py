@@ -16,6 +16,10 @@ from task_manager.tasks.add_evalset_task import AddEvalsetTaskInput, add_evalset
 from task_manager.tasks.compute_features_from_specs import FeatureSpec
 from task_manager.tasks.create_project_task import CreateProjectTaskInput, create_project_task
 from task_manager.tasks.extend_features_task import ExtendFeaturesTaskInput, extend_features
+from task_manager.tasks.update_datasets_task import (
+    UpdateDatasetsTaskInput,
+    update_datasets_task,
+)
 
 from activetigger.bertopic_manager import Bertopic
 from activetigger.config import config
@@ -81,7 +85,6 @@ from activetigger.quickmodels import QuickModels
 from activetigger.schemes import Schemes
 from activetigger.tasks.generate_call import GenerateCall
 from activetigger.tasks.task_manager_client import enqueue_celery_task, stop_celery_task
-from activetigger.tasks.update_datasets import UpdateDatasets
 from activetigger.users import Users
 
 
@@ -2001,15 +2004,16 @@ class Project:
         if update.language and update.language != self.params.language:
             self.params.language = update.language
 
-        # for other updates, add task to the queue
-        unique_id = self.queue.add_task(
-            kind="update_datasets",
-            project_slug=self.name,
-            task=UpdateDatasets(
-                project_params=self.params,
+        # for other updates, send a task to a worker; the callback saves the params
+        (unique_id, abortable) = enqueue_celery_task(
+            update_datasets_task,
+            UpdateDatasetsTaskInput(
+                project_slug=self.name,
+                path_project=self.params.dir,
+                cols_context=self.params.cols_context,
+                cols_text=self.params.cols_text,
                 update=update,
             ),
-            queue="cpu",
         )
         self.computing.append(
             UpdateComputing(
@@ -2018,6 +2022,8 @@ class Project:
                 time=datetime.now(timezone.utc),
                 kind="update_datasets",
                 update=update,
+                managed_by_celery=True,
+                abortable_celery_task=abortable,
             )
         )
 
@@ -2624,19 +2630,6 @@ class Project:
             try:
                 results = process.future.result()
                 match e.kind:
-                    case "update_datasets":
-                        e = cast(UpdateComputing, e)
-                        self.db_manager.projects_service.update_project(
-                            self.params.project_slug, jsonable_encoder(results[0])
-                        )
-                        self.params = results[0]
-                        # reload the data in memory
-                        self.data.load_dataset("all")
-                        # reset the features file and load the dataset again
-                        if results[1]:
-                            self.features.reset_features_file()
-                            self.bertopic.clear_bertopic()
-                            self.projections.clear_projections()
                     case "feature":
                         feature_computation = cast(FeatureComputing, e)
                         self.features.add(

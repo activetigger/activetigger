@@ -208,6 +208,8 @@ class ProjectsService:
             project = session.scalars(select(Projects).filter_by(project_slug=project_slug)).first()
             if project is None:
                 return None
+            # models without a scheme (projections) are not reached by the cascades
+            session.execute(delete(Models).where(Models.project_slug == project_slug))
             session.delete(project)
 
     def duplicate_project(
