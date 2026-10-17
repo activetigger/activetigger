@@ -700,9 +700,6 @@ class TrainImage:
                 release_device_memory()
             except Exception as e:
                 print("Error in cleaning GPU memory", e)
-            try:
-                os.unlink(self.path_df)
-            except Exception as e:
-                print("Error removing temporary training data", e)
+            Path(self.path_df).unlink(missing_ok=True)
 
         return EventsDict({"events": task_timer.get_events()})

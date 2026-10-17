@@ -208,6 +208,7 @@ class NerModels:
                 params=params_db.model_dump(),
                 get_progress=self.get_progress(name, status="training"),
                 abortable_celery_task=abortable,
+                temp_files=[path_df],
             ),
         )
         return unique_id
@@ -284,6 +285,7 @@ class NerModels:
                 status=status,
                 get_progress=self.get_progress(name, status=status),
                 abortable_celery_task=abortable,
+                temp_files=[path_df] if path_df else [],
             ),
         )
         return unique_id

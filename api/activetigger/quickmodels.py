@@ -197,6 +197,7 @@ class QuickModels:
             retrain=retrain,
             dataset="train",
             abortable_celery_task=abortable,
+            temp_files=[path_df],
         )
         enqueue_celery_task(train_ml, inputs, self.computing, req)
         return unique_id
@@ -476,6 +477,7 @@ class QuickModels:
                 model_params=sm.model_params,
                 labels=sm.labels,
                 abortable_celery_task=abortable,
+                temp_files=[path_df],
             ),
         )
         print("Predicting process started")
@@ -622,6 +624,7 @@ class QuickModels:
                 time=datetime.now(timezone.utc),
                 kind="predict_with_features",
                 abortable_celery_task=abortable,
+                temp_files=[data_path],
                 status="predicting",
                 name=sm.name,
                 dataset=dataset,

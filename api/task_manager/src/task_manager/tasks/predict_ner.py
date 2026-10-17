@@ -319,10 +319,7 @@ class PredictNer:
             gc.collect()
             release_device_memory()
             if self.path_df is not None:
-                try:
-                    os.unlink(self.path_df)
-                except Exception as e:
-                    print("Error removing temporary prediction data", e)
+                Path(self.path_df).unlink(missing_ok=True)
 
         return PredictNerResult(
             path=str(self.path.joinpath(self.file_name)),

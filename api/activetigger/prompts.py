@@ -412,6 +412,7 @@ class Prompts:
                 time=datetime.now(timezone.utc),
                 kind="prompt_similarity",
                 abortable_celery_task=abortable,
+                temp_files=[data_path],
                 prompt_id=prompt_id,
                 text=str(prompt_row["text"]),
                 feature_name=feature_name,

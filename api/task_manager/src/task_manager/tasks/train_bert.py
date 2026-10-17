@@ -805,6 +805,8 @@ class TrainBert:
                 ) from e
             raise e
         finally:
+            # first: a failure before the trainer exists must still drop the input
+            Path(self.path_df).unlink(missing_ok=True)
             print("Cleaning memory")
             try:
                 del (
@@ -814,7 +816,6 @@ class TrainBert:
                     self.ds,
                     device,
                 )
-                os.unlink(self.path_df)
                 release_device_memory()
                 gc.collect()
 

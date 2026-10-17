@@ -459,10 +459,7 @@ class PredictImage:
             except Exception as e:
                 print("Error in cleaning GPU memory", e)
             if self.path_df is not None:
-                try:
-                    os.unlink(self.path_df)
-                except Exception as e:
-                    print("Error removing temporary prediction data", e)
+                Path(self.path_df).unlink(missing_ok=True)
 
         return PredictImageResult(
             path=str(self.path.joinpath(self.file_name)),

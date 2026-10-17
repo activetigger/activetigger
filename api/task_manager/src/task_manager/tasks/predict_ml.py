@@ -1,5 +1,4 @@
 import json
-import os
 import pickle
 import time
 from collections.abc import Callable
@@ -169,10 +168,7 @@ class PredictMLMultiClass:
                 self.__create_saving_files(Y_pred_full, metrics)
             task_timer.stop("save_files")
         finally:
-            try:
-                os.unlink(self.path_df)
-            except Exception as e:
-                print("Error removing temporary prediction data", e)
+            Path(self.path_df).unlink(missing_ok=True)
 
         return PredictMLResult(
             path=str(self.path.joinpath(self.file_name)),

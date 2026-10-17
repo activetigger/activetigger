@@ -255,6 +255,7 @@ class ImageModels:
                 params=params_db.model_dump(),
                 get_progress=self.get_progress(model_name, status="training"),
                 abortable_celery_task=abortable,
+                temp_files=[path_df],
             ),
         )
         return unique_id
@@ -334,6 +335,7 @@ class ImageModels:
                 status=status,
                 get_progress=self.get_progress(name, status=status),
                 abortable_celery_task=abortable,
+                temp_files=[path_df] if path_df else [],
             ),
         )
 

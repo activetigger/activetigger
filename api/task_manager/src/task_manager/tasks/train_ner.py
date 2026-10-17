@@ -730,9 +730,6 @@ class TrainNer:
                 gc.collect()
             except Exception as e:
                 print("Error cleaning memory", e)
-            try:
-                os.unlink(self.path_df)
-            except Exception as e:
-                print("Error removing temporary training data", e)
+            Path(self.path_df).unlink(missing_ok=True)
 
         return EventsDict({"events": task_timer.get_events()})
