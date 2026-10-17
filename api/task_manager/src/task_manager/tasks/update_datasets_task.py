@@ -48,7 +48,10 @@ def update_datasets_task(
     fields = update_datasets(
         inputs.path_project, inputs.cols_context, inputs.cols_text, inputs.update
     )
-    return {"project_slug": inputs.project_slug,  "cols_context": fields["cols_context"],
+    return {
+        "project_slug": inputs.project_slug,
+        "cols_context": fields["cols_context"],
         "cols_text": fields["cols_text"],
-        "n_train": None,
-        "reset_features": fields["reset_features"]}
+        "n_train": fields["n_train"],
+        "reset_features": fields["reset_features"],
+    }

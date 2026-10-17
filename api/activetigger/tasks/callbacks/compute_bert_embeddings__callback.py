@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import cast
 
 import pandas as pd
@@ -28,13 +29,15 @@ class ComputeBertEmbeddingsCallback(TaskCallback):
         project_manager: Project,
         process,
     ):
-        # load DataFrame from filesystem
-        results = pd.read_parquet(task_result["embeddings_path"])
-        # add Feature to project manager
-        project_manager.features.add(
-            name=task_result["parameters"]["name"],
-            kind="bert-embeddings",
-            username=task_result["username"],
-            parameters=cast(dict, task_result["parameters"]),
-            new_content=results,
-        )
+        embeddings_path = Path(task_result["embeddings_path"])
+        try:
+            results = pd.read_parquet(embeddings_path)
+            project_manager.features.add(
+                name=task_result["parameters"]["name"],
+                kind="bert-embeddings",
+                username=task_result["username"],
+                parameters=cast(dict, task_result["parameters"]),
+                new_content=results,
+            )
+        finally:
+            embeddings_path.unlink(missing_ok=True)

@@ -802,11 +802,6 @@ class Features:
             }
 
         if kind == "bert-embeddings":
-            # serialize df on disk for transmission to Celery task
-
-            texts_path = self.data.path_project.joinpath("texts.pkl")
-            df.to_pickle(texts_path)
-            temp_files.append(texts_path)
             if self.languagemodels is None:
                 raise ValueError("No LanguageModels manager available for bert-embeddings")
             model_name = parameters.get("model")
@@ -821,8 +816,11 @@ class Features:
 
             max_length_tokens = int(parameters.get("max_length_tokens", 512))
             batch_size = int(parameters.get("batch_size", 32))
-            # queue celery task
 
+            # serialize df on disk for transmission to Celery task
+            texts_path = self.data.path_project.joinpath(f"texts_{uuid.uuid4().hex}.pkl")
+            df.to_pickle(texts_path)
+            temp_files.append(texts_path)
             (unique_id, abortable) = enqueue_celery_task(
                 compute_bert_embeddings,
                 ComputeBertEmbeddingsTaskInput(

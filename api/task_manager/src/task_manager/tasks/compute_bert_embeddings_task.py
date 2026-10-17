@@ -75,7 +75,8 @@ def compute_bert_embeddings(
     finally:
         path_progress.unlink(missing_ok=True)
         props.texts_path.unlink(missing_ok=True)
-    embeddings_path = props.model_dir.joinpath("embeddings.parquet")
+    # one file per task: several bert-embeddings features can run concurrently
+    embeddings_path = props.path_process.joinpath(f"bert_{self.request.id}.parquet")
     emb.to_parquet(embeddings_path)
     return {
         "project_slug": props.project_slug,
