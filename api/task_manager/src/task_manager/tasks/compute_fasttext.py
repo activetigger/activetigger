@@ -45,15 +45,14 @@ def encode_fasttext(
     emb = []
     for t in texts_tk:
         emb.append(ft.get_sentence_vector(t.replace("\n", " ")))
-        # manage progress
+        # every 100 texts: write progress and poll the abort flag (a redis round trip)
         if len(emb) % 100 == 0:
             progress_percent = len(emb) / len(texts_tk) * 100
             with open(path_progress, "w") as f:
                 f.write(str(round(progress_percent, 1)))
             print(progress_percent)
-        # check if the user want to stop the process
-        if is_aborted is not None and is_aborted():
-            raise Exception("Process interrupted by user")
+            if is_aborted is not None and is_aborted():
+                raise Exception("Process interrupted by user")
 
     df = pd.DataFrame(emb, index=texts.index)
     df.columns = ["ft%03d" % (x + 1) for x in range(len(df.columns))]

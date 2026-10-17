@@ -78,6 +78,10 @@ ISO_TO_NLTK = {
 }
 
 
+# name of the file holding the id of the task that created a run directory
+RUN_OWNER_FILE = ".task_id"
+
+
 def visualize_documents(
     topics: list[int],
     topic_info: pd.DataFrame,
@@ -249,10 +253,16 @@ class ComputeBertopic:
         self.path_bertopic = inputs.path_bertopic
         self.path_bertopic.joinpath("embeddings").mkdir(parents=True, exist_ok=True)
 
-        # Check if the run already exists
+        # claim the run directory atomically: two tasks with the same name cannot both own it
         self.path_run = self.path_bertopic.joinpath("runs").joinpath(self.name)
-        if self.path_run.exists():
-            raise ValueError(f"Run {self.name} already exists, please chose another name.")
+        try:
+            self.path_run.mkdir(parents=True)
+        except FileExistsError:
+            raise ValueError(
+                f"Run {self.name} already exists, please chose another name."
+            ) from None
+        # ownership marker: the API only removes a failed run it can match to this task
+        self.path_run.joinpath(RUN_OWNER_FILE).write_text(self.unique_id)
 
     def __stop_process_opportunity(self):
         """stop process by the user"""
