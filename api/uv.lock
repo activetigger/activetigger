@@ -3512,6 +3512,7 @@ source = { editable = "task_manager" }
 dependencies = [
     { name = "celery", extra = ["redis"], marker = "sys_platform == 'darwin' or sys_platform == 'linux' or (extra == 'extra-12-activetigger-cpu' and extra == 'extra-12-activetigger-gpu')" },
     { name = "pydantic", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or (extra == 'extra-12-activetigger-cpu' and extra == 'extra-12-activetigger-gpu')" },
+    { name = "python-dotenv", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or (extra == 'extra-12-activetigger-cpu' and extra == 'extra-12-activetigger-gpu')" },
     { name = "requests", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or (extra == 'extra-12-activetigger-cpu' and extra == 'extra-12-activetigger-gpu')" },
     { name = "watchdog", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or (extra == 'extra-12-activetigger-cpu' and extra == 'extra-12-activetigger-gpu')" },
 ]
@@ -3520,6 +3521,7 @@ dependencies = [
 requires-dist = [
     { name = "celery", extras = ["redis"], specifier = ">=5.6.3" },
     { name = "pydantic", specifier = ">=2.0" },
+    { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "requests", specifier = ">=2.34.2" },
     { name = "watchdog", specifier = ">=6.0.0" },
 ]

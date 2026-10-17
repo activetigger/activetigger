@@ -110,6 +110,15 @@ Launch the server (on 0.0.0.0 port 5000 by default, you can configure exposed po
 uv run python -m activetigger
 ```
 
+Tasks (project creation, features, training, prediction) run in celery workers which need a redis broker. Start redis (for instance `docker run -p 6379:6379 redis`) and, from the `api` directory, the two worker pools in separate terminals:
+
+```bash
+uv run celery-worker-cpu
+uv run celery-worker-gpu
+```
+
+The workers read `api/.env` like the API (see `.env.sample`): `REDIS_URL` (default `redis://localhost:6379`), `ORCHESTRATOR_API_URL` (default `http://localhost:5000`, must match the `-p` port of the API), `WORKER_LOGLEVEL` (default `INFO`), `N_WORKERS_CPU` and `N_WORKERS_GPU`.
+
 
 #### Check the API
 

@@ -2,8 +2,13 @@ import os
 import secrets
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+# same .env as the API (api/.env in local dev); docker passes the real environment
+load_dotenv()
+
 redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
-worker_loglevel = os.environ.get("WORKER_LOGLEVEL", "DEBUG")
+worker_loglevel = os.environ.get("WORKER_LOGLEVEL", "INFO")
 storage_path = os.environ.get("STORAGE_PATH", "/tmp")
 cache_model_path = os.environ.get("TASKMANAGER_CACHE_MODEL_PATH", "/tmp")
 
@@ -19,8 +24,11 @@ def _concurrency(key: str, default: int) -> int:
 cpu_worker_concurrency = _concurrency("N_WORKERS_CPU", 5)
 gpu_worker_concurrency = _concurrency("N_WORKERS_GPU", 1)
 
-# orchestrator API reached by task callbacks
-api_url = os.environ.get("ORCHESTRATOR_API_URL", f"http://api:{os.environ.get('API_PORT', '4000')}")
+# orchestrator API reached by task callbacks; the default matches a local
+# `python -m activetigger` (port 5000), docker sets ORCHESTRATOR_API_URL=http://api:4000
+api_url = os.environ.get(
+    "ORCHESTRATOR_API_URL", f"http://localhost:{os.environ.get('API_PORT', '5000')}"
+)
 api_task_success_route = f"{api_url}/tasks/done"
 api_task_failure_route = f"{api_url}/tasks/failed"
 
