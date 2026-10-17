@@ -7,6 +7,7 @@ import pytz
 import yaml
 from cryptography.fernet import Fernet
 from dotenv import load_dotenv
+from task_manager.config import load_or_create_task_callback_token
 
 # Previously committed dev placeholder. Kept here so we can reject it
 # explicitly — it is public on GitHub and any token signed with it is forgeable.
@@ -103,6 +104,7 @@ class Config(metaclass=_Singleton):
     user_hdd_max: float
     mode: MODE = MODE.parse(os.environ.get("MODE"))
     secret_key: str
+    task_callback_token: str
     database_url: str
     root_password: str | None = os.environ.get("ROOT_PASSWORD", None)
     # orchestrator
@@ -149,6 +151,7 @@ class Config(metaclass=_Singleton):
             f"sqlite:///{os.path.join(self.data_path, 'projects', 'activetigger.db')}",
         )
         self.secret_key = _load_or_create_secret_key(self.data_path)
+        self.task_callback_token = load_or_create_task_callback_token(self.data_path)
         self.model_path = os.environ.get("MODEL_PATH", os.path.join(self.data_path, "models"))
         self.timezone = pytz.timezone("Europe/Paris")
         if self.mail_server and self.mail_account and self.mail_password:

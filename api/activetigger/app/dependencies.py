@@ -1,9 +1,11 @@
 import asyncio
+import hmac
 from enum import Enum
 from typing import Annotated
 
 from fastapi import (
     Depends,
+    Header,
     HTTPException,
     Request,
 )
@@ -12,6 +14,7 @@ from jose import JWTError
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 
+from activetigger.config import config
 from activetigger.datamodels import (
     UserInDBModel,
 )
@@ -67,6 +70,14 @@ async def get_project(project_slug: str) -> Project:
             raise HTTPException(status_code=500, detail=str(e)) from e
 
     return orchestrator.projects[project_slug]
+
+
+def verified_task_worker(x_task_token: Annotated[str, Header()] = "") -> None:
+    """
+    Dependency for the routes called back by the celery workers: a shared secret, not a user token
+    """
+    if not hmac.compare_digest(x_task_token, config.task_callback_token):
+        raise HTTPException(status_code=401, detail="Invalid task token")
 
 
 def verified_user(request: Request, token: Annotated[str, Depends(oauth2_scheme)]) -> UserInDBModel:

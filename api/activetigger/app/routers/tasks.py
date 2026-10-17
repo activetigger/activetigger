@@ -1,11 +1,19 @@
 import logging
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Body
+from fastapi import APIRouter, Body, Depends
 from pydantic import BaseModel, ConfigDict
-
-from activetigger.tasks import all_callbacks
 from task_manager.celery import celery_app
 from task_manager.utils import TaskFailureReportForCallback
+
+from activetigger.app.dependencies import (
+    ServerAction,
+    test_rights,
+    verified_task_worker,
+    verified_user,
+)
+from activetigger.datamodels import UserInDBModel
+from activetigger.tasks import all_callbacks
 
 
 class GenericCallbackModel(BaseModel):
@@ -15,7 +23,7 @@ class GenericCallbackModel(BaseModel):
 
 
 class SuccessCallbackModel(GenericCallbackModel):
-    results: any  # ty:ignore[invalid-type-form]
+    results: Any
 
 
 class FailureCallbackModel(GenericCallbackModel):
@@ -26,11 +34,7 @@ router = APIRouter(tags=["tasks"])
 logger = logging.getLogger("activetigger.fastapi.tasks")
 
 
-@router.post(
-    "/tasks/done",
-    # TODO: add a Task API key verification
-    # dependencies=[Depends(verified_user)],
-)
+@router.post("/tasks/done", dependencies=[Depends(verified_task_worker)])
 def task_success_callback(body: SuccessCallbackModel = Body(...)):
     """
     Task success callback
@@ -45,11 +49,7 @@ def task_success_callback(body: SuccessCallbackModel = Body(...)):
     return True
 
 
-@router.post(
-    "/tasks/failed",
-    # TODO: add a Task API key verification
-    # dependencies=[Depends(verified_user)],
-)
+@router.post("/tasks/failed", dependencies=[Depends(verified_task_worker)])
 def task_failure_callback(body: FailureCallbackModel = Body(...)):
     """
     Task success callback
@@ -64,15 +64,12 @@ def task_failure_callback(body: FailureCallbackModel = Body(...)):
     return True
 
 
-@router.get(
-    "/tasks/monitor",
-    # TODO: add a Task API key verification
-    # dependencies=[Depends(verified_user)],
-)
-def task_monitor_callback():
+@router.get("/tasks/monitor")
+def task_monitor_callback(current_user: Annotated[UserInDBModel, Depends(verified_user)]):
     """
-    Task success callback
+    Inspect the celery workers (server managers only)
     """
+    test_rights(ServerAction.MANAGE_SERVER, current_user.username)
     logger.info("monitoring tasks")
     inspect = celery_app.control.inspect()
     return {"active": inspect.active(), "stats": inspect.stats()}

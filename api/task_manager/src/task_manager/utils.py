@@ -34,7 +34,12 @@ class FailureCallbackPayload(BaseModel):
 def _post_callback(url: str, payload: BaseModel) -> None:
     logger = get_task_logger("callback")
     logger.info(f"Sending callback {url} {payload}")
-    response = requests.post(url, json=payload.model_dump(mode="json"))
+    response = requests.post(
+        url,
+        json=payload.model_dump(mode="json"),
+        headers={config.TASK_TOKEN_HEADER: config.task_callback_token},
+        timeout=(5, 60),
+    )
     logger.info(f"Callback response: {response.status_code} - {response.text}")
 
 
