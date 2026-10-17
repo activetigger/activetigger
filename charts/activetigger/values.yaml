@@ -17,8 +17,8 @@ api:
     CPU_ONLY: "true"
     ACTIVETIGGER_USER_HDD_MAX: "20"
     MAX_LOADED_PROJECTS: "2"
-    N_WORKERS_CPU: "1"
-    N_WORKERS_GPU: "0"
+    N_WORKERS_CPU: "5"
+    N_WORKERS_GPU: "1"
     UPDATE_TIMEOUT: "1"
   persistence:
     enabled: true

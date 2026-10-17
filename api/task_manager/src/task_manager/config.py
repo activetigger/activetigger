@@ -6,8 +6,18 @@ redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
 worker_loglevel = os.environ.get("WORKER_LOGLEVEL", "DEBUG")
 storage_path = os.environ.get("STORAGE_PATH", "/tmp")
 cache_model_path = os.environ.get("TASKMANAGER_CACHE_MODEL_PATH", "/tmp")
-cpu_worker_concurrency = os.environ.get("N_WORKERS_CPU", "1")
-gpu_worker_concurrency = os.environ.get("N_WORKERS_GPU", "1")
+
+
+def _concurrency(key: str, default: int) -> int:
+    """Pool size from the env; at least 1 (celery reads 0 as "one per core")"""
+    try:
+        return max(1, int(os.environ.get(key, default)))
+    except ValueError:
+        return default
+
+
+cpu_worker_concurrency = _concurrency("N_WORKERS_CPU", 5)
+gpu_worker_concurrency = _concurrency("N_WORKERS_GPU", 1)
 
 # orchestrator API reached by task callbacks
 api_url = os.environ.get("ORCHESTRATOR_API_URL", f"http://api:{os.environ.get('API_PORT', '4000')}")
