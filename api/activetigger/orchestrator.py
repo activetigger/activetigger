@@ -493,14 +493,32 @@ class Orchestrator:
             return None
         del self.projects[project_slug]
 
+    def find_process(self, process_id: str) -> tuple[ProcessComputing, str] | None:
+        """
+        Locate a process across loaded projects and projects being created
+        """
+        for project_slug, project in [
+            *self.projects.items(),
+            *self.project_creation_ongoing.items(),
+        ]:
+            for process in project.computing:
+                if process.unique_id == process_id:
+                    return process, project_slug
+        return None
+
     def stop_process_by_process_id(self, process_id: str, username: str) -> None:
         """
-        Stop a specific process id
+        Stop a specific process id (administrator)
         """
-        print(f"killing {process_id}")
-        # TODO: we would need to know if it's abortable
-        stop_celery_task(process_id, None)
-        self.log_action(username, f"KILL PROCESS: {process_id}", "all")
+        found = self.find_process(process_id)
+        if found is None:
+            # not tracked (e.g. API restarted since): best-effort revoke only
+            print(f"killing untracked task {process_id}")
+            stop_celery_task(process_id, None)
+            self.log_action(username, f"KILL PROCESS: {process_id}", "all")
+            return
+        process, project_slug = found
+        self.stop_process(process, project_slug, username)
 
     def stop_process(self, process: ProcessComputing, project_slug: str, username: str) -> None:
         """
@@ -510,6 +528,12 @@ class Orchestrator:
         # a revoked task never calls back: drop it from the project now
         if project_slug in self.projects:
             self.projects[project_slug].clean_process(process)
+        elif project_slug in self.project_creation_ongoing:
+            # a stopped creation would otherwise stay "creating" forever
+            project = self.project_creation_ongoing[project_slug]
+            project.clean_process(process)
+            project.errors.add("Project creation stopped by user")
+            project.status = "error"
         if process.kind in ("train_bert", "train_image", "train_ner"):
             process = cast(LMComputing, process)
             self.db_manager.language_models_service.delete_model(project_slug, process.model_name)
