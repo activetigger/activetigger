@@ -16,7 +16,7 @@ from activetigger.datamodels import (
     LexicometricsStatisticsModel,
 )
 from activetigger.errors import AlreadyExistsError
-from activetigger.tasks.task_manager_client import enqueue_celery_task
+from activetigger.tasks.task_manager_client import enqueue_celery_task, new_task_id
 
 
 class Lexicometrics:
@@ -83,24 +83,25 @@ class Lexicometrics:
             raise AlreadyExistsError("Lexicometrics are already being computed")
 
         parameters = LexicometricsParametersModel(language=language)
-        (unique_id, abortable) = enqueue_celery_task(
-            compute_lexicometrics_task,
-            ComputeLexicometricsTaskInput(
-                project_slug=project_slug,
-                username=username,
-                path_data=self.path,
-                train_file=config.train_file,
-                language=parameters.language,
-                tokenizer_name=parameters.tokenizer,
-                n_most_frequent=parameters.n_most_frequent,
-                tfidf_n_words=parameters.tfidf_n_words,
-                tfidf_n_docs_per_word=parameters.tfidf_n_docs_per_word,
-                tfidf_n_words_per_doc=parameters.tfidf_n_words_per_doc,
-                tfidf_min_term_freq=parameters.tfidf_min_term_freq,
-                tfidf_max_documents=parameters.tfidf_max_documents,
-            ),
+        (unique_id, abortable) = new_task_id(compute_lexicometrics_task)
+        task_inputs = ComputeLexicometricsTaskInput(
+            project_slug=project_slug,
+            username=username,
+            path_data=self.path,
+            train_file=config.train_file,
+            language=parameters.language,
+            tokenizer_name=parameters.tokenizer,
+            n_most_frequent=parameters.n_most_frequent,
+            tfidf_n_words=parameters.tfidf_n_words,
+            tfidf_n_docs_per_word=parameters.tfidf_n_docs_per_word,
+            tfidf_n_words_per_doc=parameters.tfidf_n_words_per_doc,
+            tfidf_min_term_freq=parameters.tfidf_min_term_freq,
+            tfidf_max_documents=parameters.tfidf_max_documents,
         )
-        self.computing.append(
+        enqueue_celery_task(
+            compute_lexicometrics_task,
+            task_inputs,
+            self.computing,
             LexicometricsComputing(
                 unique_id=unique_id,
                 user=username,
@@ -108,7 +109,7 @@ class Lexicometrics:
                 kind="lexicometrics",
                 parameters=parameters,
                 abortable_celery_task=abortable,
-            )
+            ),
         )
 
     def add(self, element: LexicometricsComputing, results: dict) -> None:

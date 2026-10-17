@@ -82,7 +82,11 @@ from activetigger.projections import Projections
 from activetigger.prompts import BINDABLE_FEATURE_KINDS, Prompts
 from activetigger.quickmodels import QuickModels
 from activetigger.schemes import Schemes
-from activetigger.tasks.task_manager_client import enqueue_celery_task, stop_celery_task
+from activetigger.tasks.task_manager_client import (
+    enqueue_celery_task,
+    new_task_id,
+    stop_celery_task,
+)
 from activetigger.users import Users
 
 
@@ -377,24 +381,25 @@ class Project:
         params.dir = path.joinpath(self.project_slug)
 
         # start a create project task
-        (unique_id, abortable) = enqueue_celery_task(
-            create_project_task,
-            CreateProjectTaskInput(
-                image_project=False,
-                project_slug=self.project_slug,
-                params=params,
-                username=username,
-                data_all=config.data_all,
-                train_file=config.train_file,
-                valid_file=config.valid_file,
-                test_file=config.test_file,
-                features_file=config.features_file,
-                random_seed=params.seed,
-            ),
+        (unique_id, abortable) = new_task_id(create_project_task)
+        task_inputs = CreateProjectTaskInput(
+            image_project=False,
+            project_slug=self.project_slug,
+            params=params,
+            username=username,
+            data_all=config.data_all,
+            train_file=config.train_file,
+            valid_file=config.valid_file,
+            test_file=config.test_file,
+            features_file=config.features_file,
+            random_seed=params.seed,
         )
 
         # Update the register
-        self.computing.append(
+        enqueue_celery_task(
+            create_project_task,
+            task_inputs,
+            self.computing,
             ProjectCreatingModel(
                 user=username,
                 project_slug=self.project_slug,
@@ -403,7 +408,7 @@ class Project:
                 kind="create_project",
                 status="training",
                 abortable_celery_task=abortable,
-            )
+            ),
         )
 
     def start_project_creation_imagexp(
@@ -417,24 +422,25 @@ class Project:
         params.dir = path.joinpath(self.project_slug)
 
         # start a create project task
-        (unique_id, abortable) = enqueue_celery_task(
-            create_project_task,
-            CreateProjectTaskInput(
-                image_project=True,
-                project_slug=self.project_slug,
-                params=params,
-                username=username,
-                data_all=config.data_all,
-                train_file=config.train_file,
-                valid_file=config.valid_file,
-                test_file=config.test_file,
-                features_file=config.features_file,
-                random_seed=params.seed,
-            ),
+        (unique_id, abortable) = new_task_id(create_project_task)
+        task_inputs = CreateProjectTaskInput(
+            image_project=True,
+            project_slug=self.project_slug,
+            params=params,
+            username=username,
+            data_all=config.data_all,
+            train_file=config.train_file,
+            valid_file=config.valid_file,
+            test_file=config.test_file,
+            features_file=config.features_file,
+            random_seed=params.seed,
         )
 
         # Update the register
-        self.computing.append(
+        enqueue_celery_task(
+            create_project_task,
+            task_inputs,
+            self.computing,
             ProjectCreatingModel(
                 user=username,
                 project_slug=self.project_slug,
@@ -443,7 +449,7 @@ class Project:
                 kind="create_project",
                 status="training",
                 abortable_celery_task=abortable,
-            )
+            ),
         )
 
     def finish_project_creation(
@@ -669,21 +675,22 @@ class Project:
         index_path = self.params.dir.joinpath(f"evalset_index_{uuid.uuid4().hex}.pkl")
         pd.to_pickle(self.data.get_full_id().index, index_path)
         try:
-            (unique_id, abortable) = enqueue_celery_task(
-                add_evalset_task,
-                AddEvalsetTaskInput(
-                    project_slug=project_slug,
-                    dataset=dataset,
-                    username=username,
-                    path_project=self.params.dir,
-                    index_path=index_path,
-                    **payload,
-                ),
+            (unique_id, abortable) = new_task_id(add_evalset_task)
+            task_inputs = AddEvalsetTaskInput(
+                project_slug=project_slug,
+                dataset=dataset,
+                username=username,
+                path_project=self.params.dir,
+                index_path=index_path,
+                **payload,
             )
         except Exception:
             index_path.unlink(missing_ok=True)
             raise
-        self.computing.append(
+        enqueue_celery_task(
+            add_evalset_task,
+            task_inputs,
+            self.computing,
             ProcessComputing(
                 user=username,
                 unique_id=unique_id,
@@ -691,7 +698,7 @@ class Project:
                 kind=f"add_evalset_{dataset}",
                 abortable_celery_task=abortable,
                 temp_files=[index_path],
-            )
+            ),
         )
         if username == "root":
             return unique_id
@@ -758,25 +765,26 @@ class Project:
         new_index = eval_data.index if eval_data is not None else pd.Index([])
         indexes_path = self.features.pickle_for_task((new_index, self.data.index.index))
         try:
-            (unique_id, abortable) = enqueue_celery_task(
-                extend_features,
-                ExtendFeaturesTaskInput(
-                    project_slug=self.name,
-                    specs=specs,
-                    data_path=data_path,
-                    indexes_path=indexes_path,
-                    path_process=self.features.path_all.parent,
-                    path_models=self.features.path_models,
-                    language=self.features.lang,
-                    path_features=self.features.path_features,
-                    eval_dataset=eval_dataset,
-                ),
+            (unique_id, abortable) = new_task_id(extend_features)
+            task_inputs = ExtendFeaturesTaskInput(
+                project_slug=self.name,
+                specs=specs,
+                data_path=data_path,
+                indexes_path=indexes_path,
+                path_process=self.features.path_all.parent,
+                path_models=self.features.path_models,
+                language=self.features.lang,
+                path_features=self.features.path_features,
+                eval_dataset=eval_dataset,
             )
         except Exception:
             data_path.unlink(missing_ok=True)
             indexes_path.unlink(missing_ok=True)
             raise
-        self.computing.append(
+        enqueue_celery_task(
+            extend_features,
+            task_inputs,
+            self.computing,
             ExtendFeaturesComputing(
                 user=username,
                 unique_id=unique_id,
@@ -784,7 +792,7 @@ class Project:
                 kind="extend_features",
                 abortable_celery_task=abortable,
                 temp_files=[data_path, indexes_path],
-            )
+            ),
         )
 
     def _recover_features_after_failed_extension(self) -> None:
@@ -1990,17 +1998,18 @@ class Project:
             self.params.language = update.language
 
         # for other updates, send a task to a worker; the callback saves the params
-        (unique_id, abortable) = enqueue_celery_task(
-            update_datasets_task,
-            UpdateDatasetsTaskInput(
-                project_slug=self.name,
-                path_project=self.params.dir,
-                cols_context=self.params.cols_context,
-                cols_text=self.params.cols_text,
-                update=update,
-            ),
+        (unique_id, abortable) = new_task_id(update_datasets_task)
+        task_inputs = UpdateDatasetsTaskInput(
+            project_slug=self.name,
+            path_project=self.params.dir,
+            cols_context=self.params.cols_context,
+            cols_text=self.params.cols_text,
+            update=update,
         )
-        self.computing.append(
+        enqueue_celery_task(
+            update_datasets_task,
+            task_inputs,
+            self.computing,
             UpdateComputing(
                 unique_id=unique_id,
                 user=username,
@@ -2008,7 +2017,7 @@ class Project:
                 kind="update_datasets",
                 update=update,
                 abortable_celery_task=abortable,
-            )
+            ),
         )
 
     def start_languagemodel_training(self, bert: BertModelModel, username: str) -> None:
@@ -2479,19 +2488,17 @@ class Project:
             {"data": extract, "model": GenerationModel(**model.__dict__).model_dump()}, data_path
         )
         try:
-            (unique_id, abortable) = enqueue_celery_task(
-                generate_call_task,
-                GenerateCallTaskInput(
-                    project_slug=self.name,
-                    username=username,
-                    dataset=request.dataset,
-                    prompt_name=prompt_name,
-                    prompt=request.prompt,
-                    cols_context=self.params.cols_context,
-                    n_workers=request.n_workers,
-                    data_path=data_path,
-                    path_process=self.params.dir,
-                ),
+            (unique_id, abortable) = new_task_id(generate_call_task)
+            task_inputs = GenerateCallTaskInput(
+                project_slug=self.name,
+                username=username,
+                dataset=request.dataset,
+                prompt_name=prompt_name,
+                prompt=request.prompt,
+                cols_context=self.params.cols_context,
+                n_workers=request.n_workers,
+                data_path=data_path,
+                path_process=self.params.dir,
             )
         except Exception:
             data_path.unlink(missing_ok=True)
@@ -2506,7 +2513,10 @@ class Project:
             except Exception:
                 return None
 
-        self.computing.append(
+        enqueue_celery_task(
+            generate_call_task,
+            task_inputs,
+            self.computing,
             GenerationComputing(
                 unique_id=unique_id,
                 prompt_name=prompt_name,
@@ -2520,7 +2530,7 @@ class Project:
                 get_progress=get_progress,
                 abortable_celery_task=abortable,
                 temp_files=[data_path],
-            )
+            ),
         )
 
     def clean_process(self, e: ProcessComputing) -> None:

@@ -27,7 +27,7 @@ from activetigger.db.languagemodels import ModelsService
 from activetigger.db.manager import DatabaseManager
 from activetigger.errors import NotFoundError
 from activetigger.features import Features
-from activetigger.tasks.task_manager_client import enqueue_celery_task
+from activetigger.tasks.task_manager_client import enqueue_celery_task, new_task_id
 
 
 class Bertopic:
@@ -105,8 +105,11 @@ class Bertopic:
             force_compute_embeddings=False,
             random_seed=config.random_seed,
         )
-        unique_id, abortable = enqueue_celery_task(compute_bertopic, inputs)
-        self.computing.append(
+        unique_id, abortable = new_task_id(compute_bertopic)
+        enqueue_celery_task(
+            compute_bertopic,
+            inputs,
+            self.computing,
             BertopicComputing(
                 user=user,
                 unique_id=unique_id,
@@ -120,7 +123,7 @@ class Bertopic:
                 kind="bertopic",
                 force_compute_embeddings=False,
                 get_progress=self.get_progress(name),
-            )
+            ),
         )
         return unique_id
 

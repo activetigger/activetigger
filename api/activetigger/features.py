@@ -40,7 +40,7 @@ from activetigger.datamodels import (
 )
 from activetigger.db.projects import ProjectsService
 from activetigger.errors import AlreadyExistsError, InvalidInputError, NotFoundError
-from activetigger.tasks.task_manager_client import enqueue_celery_task
+from activetigger.tasks.task_manager_client import enqueue_celery_task, new_task_id
 
 # Experimental image projects: list of selectable image embedding models.
 # Each entry maps a UI label to (open_clip model name, pretrained tag).
@@ -765,7 +765,7 @@ class Features:
             return None
 
         # features with queue
-        unique_id = None
+        task, task_inputs = None, None
 
         if kind == "sentence-embeddings":
             model = self.__sbert_choose_model(parameters)
@@ -779,7 +779,7 @@ class Features:
             texts_path = self.data.path_project.joinpath(f"texts_{uuid.uuid4().hex}.pkl")
             df.to_pickle(texts_path)
             temp_files.append(texts_path)
-            (unique_id, abortable) = enqueue_celery_task(
+            task, task_inputs = (
                 compute_sbert,
                 ComputeSbertTaskInput(
                     feature_name=name,
@@ -821,7 +821,7 @@ class Features:
             texts_path = self.data.path_project.joinpath(f"texts_{uuid.uuid4().hex}.pkl")
             df.to_pickle(texts_path)
             temp_files.append(texts_path)
-            (unique_id, abortable) = enqueue_celery_task(
+            task, task_inputs = (
                 compute_bert_embeddings,
                 ComputeBertEmbeddingsTaskInput(
                     feature_name=name,
@@ -861,7 +861,7 @@ class Features:
             paths_path = self.data.path_project.joinpath(f"paths_{uuid.uuid4().hex}.pkl")
             df.to_pickle(paths_path)
             temp_files.append(paths_path)
-            (unique_id, abortable) = enqueue_celery_task(
+            task, task_inputs = (
                 compute_clip_imagexp,
                 ComputeClipImagexpTaskInput(
                     feature_name=name,
@@ -897,7 +897,7 @@ class Features:
             paths_path = self.data.path_project.joinpath(f"paths_{uuid.uuid4().hex}.pkl")
             df.to_pickle(paths_path)
             temp_files.append(paths_path)
-            (unique_id, abortable) = enqueue_celery_task(
+            task, task_inputs = (
                 compute_multimodal,
                 ComputeMultimodalTaskInput(
                     feature_name=name,
@@ -925,7 +925,7 @@ class Features:
             texts_path = self.data.path_project.joinpath(f"texts_{uuid.uuid4().hex}.pkl")
             df.to_pickle(texts_path)
             temp_files.append(texts_path)
-            (unique_id, abortable) = enqueue_celery_task(
+            task, task_inputs = (
                 compute_fasttext,
                 ComputeFasttextTaskInput(
                     feature_name=name,
@@ -963,7 +963,7 @@ class Features:
             df.to_pickle(texts_path)
             temp_files.append(texts_path)
             # NOTE: as before, the dfm_* UI values are recorded but the vectoriser runs with defaults
-            (unique_id, abortable) = enqueue_celery_task(
+            task, task_inputs = (
                 compute_dfm_task,
                 ComputeDfmTaskInput(
                     feature_name=name,
@@ -976,8 +976,12 @@ class Features:
                 ),
             )
 
-        if unique_id:
-            self.computing.append(
+        if task is not None and task_inputs is not None:
+            unique_id, abortable = new_task_id(task)
+            enqueue_celery_task(
+                task,
+                task_inputs,
+                self.computing,
                 FeatureComputing(
                     unique_id=unique_id,
                     kind="feature",
@@ -988,7 +992,7 @@ class Features:
                     time=datetime.now(timezone.utc),
                     abortable_celery_task=abortable,
                     temp_files=temp_files,
-                )
+                ),
             )
             return None
         raise ValueError("Error in the process")

@@ -41,7 +41,7 @@ from activetigger.datamodels import (
 )
 from activetigger.errors import InvalidInputError, NotFoundError
 from activetigger.features import Features
-from activetigger.tasks.task_manager_client import enqueue_celery_task
+from activetigger.tasks.task_manager_client import enqueue_celery_task, new_task_id
 
 # Feature kinds whose vectors live in a space we can encode a text query into.
 BINDABLE_FEATURE_KINDS = {"multimodal-embeddings", "sentence-embeddings"}
@@ -132,19 +132,20 @@ class Prompts:
         model_name, kind = self._resolve_feature(feature_name)
         prompt_id = str(uuid.uuid4())
 
-        (unique_id, abortable) = enqueue_celery_task(
-            compute_prompt_embedding,
-            ComputePromptEmbeddingTaskInput(
-                project_slug=self.project_slug,
-                prompt_id=prompt_id,
-                text=text,
-                model_name=model_name,
-                kind=kind,
-                path_process=self.path_dir,
-            ),
+        (unique_id, abortable) = new_task_id(compute_prompt_embedding)
+        task_inputs = ComputePromptEmbeddingTaskInput(
+            project_slug=self.project_slug,
+            prompt_id=prompt_id,
+            text=text,
+            model_name=model_name,
+            kind=kind,
+            path_process=self.path_dir,
         )
 
-        self.computing.append(
+        enqueue_celery_task(
+            compute_prompt_embedding,
+            task_inputs,
+            self.computing,
             PromptComputing(
                 user=user,
                 unique_id=unique_id,
@@ -155,7 +156,7 @@ class Prompts:
                 feature_name=feature_name,
                 hf_name=model_name,
                 abortable_celery_task=abortable,
-            )
+            ),
         )
         return unique_id
 
@@ -375,21 +376,19 @@ class Prompts:
         data = self._dataset_series(dataset)
         specs, data_path = self.features.build_compute_specs([feature_name], data)
 
-        (unique_id, abortable) = enqueue_celery_task(
-            compute_similarity_with_features,
-            ComputeSimilarityWithFeaturesTaskInput(
-                project_slug=self.project_slug,
-                prompt_id=prompt_id,
-                dataset=dataset,
-                specs=specs,
-                data_path=data_path,
-                path_process=self.features.path_all.parent,
-                path_models=self.features.path_models,
-                language=self.features.lang,
-                prompt_vector=[float(x) for x in np.asarray(prompt_vec).reshape(-1)],
-                path_output=self._similarity_dir(prompt_id),
-                file_name=f"similarity_{dataset}.parquet",
-            ),
+        (unique_id, abortable) = new_task_id(compute_similarity_with_features)
+        task_inputs = ComputeSimilarityWithFeaturesTaskInput(
+            project_slug=self.project_slug,
+            prompt_id=prompt_id,
+            dataset=dataset,
+            specs=specs,
+            data_path=data_path,
+            path_process=self.features.path_all.parent,
+            path_models=self.features.path_models,
+            language=self.features.lang,
+            prompt_vector=[float(x) for x in np.asarray(prompt_vec).reshape(-1)],
+            path_output=self._similarity_dir(prompt_id),
+            file_name=f"similarity_{dataset}.parquet",
         )
 
         progress_path = self.features.path_all.parent.joinpath(unique_id)
@@ -403,7 +402,10 @@ class Prompts:
             except (OSError, ValueError):
                 return None
 
-        self.computing.append(
+        enqueue_celery_task(
+            compute_similarity_with_features,
+            task_inputs,
+            self.computing,
             PromptSimilarityComputing(
                 user=username,
                 unique_id=unique_id,
@@ -415,7 +417,7 @@ class Prompts:
                 feature_name=feature_name,
                 dataset=dataset,
                 get_progress=get_progress,
-            )
+            ),
         )
         return unique_id
 

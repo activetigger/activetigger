@@ -31,7 +31,7 @@ from activetigger.db.languagemodels import ModelsService
 from activetigger.db.manager import DatabaseManager
 from activetigger.errors import AlreadyExistsError, InvalidInputError, NotFoundError
 from activetigger.functions import get_model_metrics
-from activetigger.tasks.task_manager_client import enqueue_celery_task
+from activetigger.tasks.task_manager_client import enqueue_celery_task, new_task_id
 
 
 class NerModels:
@@ -188,10 +188,13 @@ class NerModels:
             test_size=test_size,
             max_length=max_length,
         )
-        (unique_id, abortable) = enqueue_celery_task(train_ner, inputs)
+        (unique_id, abortable) = new_task_id(train_ner)
         del df
         params_db = LMParametersDbModel(**params.model_dump(), exclude_labels=[])
-        self.computing.append(
+        enqueue_celery_task(
+            train_ner,
+            inputs,
+            self.computing,
             LMComputing(
                 user=user,
                 model_name=name,
@@ -205,7 +208,7 @@ class NerModels:
                 params=params_db.model_dump(),
                 get_progress=self.get_progress(name, status="training"),
                 abortable_celery_task=abortable,
-            )
+            ),
         )
         return unique_id
 
@@ -264,9 +267,12 @@ class NerModels:
             path_valid=path_valid,
             path_test=path_test,
         )
-        (unique_id, abortable) = enqueue_celery_task(predict_ner, inputs)
+        (unique_id, abortable) = new_task_id(predict_ner)
         del df
-        self.computing.append(
+        enqueue_celery_task(
+            predict_ner,
+            inputs,
+            self.computing,
             LMComputing(
                 user=user,
                 model_name=name,
@@ -278,7 +284,7 @@ class NerModels:
                 status=status,
                 get_progress=self.get_progress(name, status=status),
                 abortable_celery_task=abortable,
-            )
+            ),
         )
         return unique_id
 

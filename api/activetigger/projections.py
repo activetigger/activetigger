@@ -21,7 +21,7 @@ from activetigger.datamodels import (
 from activetigger.db.languagemodels import ModelsService
 from activetigger.db.manager import DatabaseManager
 from activetigger.errors import AlreadyExistsError, NotFoundError
-from activetigger.tasks.task_manager_client import enqueue_celery_task
+from activetigger.tasks.task_manager_client import enqueue_celery_task, new_task_id
 
 
 class Projections:
@@ -151,22 +151,23 @@ class Projections:
         with open(features_path, "wb") as f:
             pickle.dump(features, f)
         try:
-            (unique_id, abortable) = enqueue_celery_task(
-                compute_projection_task,
-                ComputeProjectionTaskInput(
-                    project_slug=project_slug,
-                    name=projection.name,
-                    features_path=features_path,
-                    path_process=self.path,
-                    method=projection.method,
-                    parameters=projection.parameters,
-                    normalize_features=normalize_features,
-                ),
+            (unique_id, abortable) = new_task_id(compute_projection_task)
+            task_inputs = ComputeProjectionTaskInput(
+                project_slug=project_slug,
+                name=projection.name,
+                features_path=features_path,
+                path_process=self.path,
+                method=projection.method,
+                parameters=projection.parameters,
+                normalize_features=normalize_features,
             )
         except Exception:
             features_path.unlink(missing_ok=True)
             raise
-        self.computing.append(
+        enqueue_celery_task(
+            compute_projection_task,
+            task_inputs,
+            self.computing,
             ProjectionComputing(
                 unique_id=unique_id,
                 name=projection.name,
@@ -177,7 +178,8 @@ class Projections:
                 params=projection,
                 normalize_features=normalize_features,
                 abortable_celery_task=abortable,
-            )
+                temp_files=[features_path],
+            ),
         )
 
     def get(self, name: str) -> ProjectionDataModel | None:

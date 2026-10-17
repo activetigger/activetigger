@@ -31,7 +31,7 @@ from activetigger.db.languagemodels import ModelsService
 from activetigger.db.manager import DatabaseManager
 from activetigger.errors import AlreadyExistsError, InvalidInputError, NotFoundError
 from activetigger.functions import get_model_metrics
-from activetigger.tasks.task_manager_client import enqueue_celery_task
+from activetigger.tasks.task_manager_client import enqueue_celery_task, new_task_id
 
 
 class LanguageModels:
@@ -290,7 +290,7 @@ class LanguageModels:
             label_for_dichotomization=label_for_dichotomization,
         )
         # queue celery task
-        (unique_id, abortable) = enqueue_celery_task(train_bert, trainBertInputs)
+        (unique_id, abortable) = new_task_id(train_bert)
 
         del df
 
@@ -298,7 +298,10 @@ class LanguageModels:
         params = LMParametersDbModel(**params.model_dump(), exclude_labels=exclude_labels or [])
 
         # Update the queue state
-        self.computing.append(
+        enqueue_celery_task(
+            train_bert,
+            trainBertInputs,
+            self.computing,
             LMComputing(
                 user=user,
                 model_name=model_name,
@@ -312,7 +315,7 @@ class LanguageModels:
                 params=params.model_dump(),
                 get_progress=self.get_progress(model_name, status="training"),
                 abortable_celery_task=abortable,
-            )
+            ),
         )
         return unique_id
 
@@ -393,9 +396,12 @@ class LanguageModels:
             path_valid=path_valid,
             path_test=path_test,
         )
-        (unique_id, abortable) = enqueue_celery_task(predict_bert, inputs)
+        (unique_id, abortable) = new_task_id(predict_bert)
         del df
-        self.computing.append(
+        enqueue_celery_task(
+            predict_bert,
+            inputs,
+            self.computing,
             LMComputing(
                 user=user,
                 model_name=name,
@@ -407,7 +413,7 @@ class LanguageModels:
                 status=status,
                 get_progress=self.get_progress(name, status=status),
                 abortable_celery_task=abortable,
-            )
+            ),
         )
         return unique_id
 

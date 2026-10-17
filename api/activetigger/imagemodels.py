@@ -30,7 +30,7 @@ from activetigger.db.languagemodels import ModelsService
 from activetigger.db.manager import DatabaseManager
 from activetigger.errors import AlreadyExistsError, InvalidInputError, NotFoundError
 from activetigger.functions import get_model_metrics
-from activetigger.tasks.task_manager_client import enqueue_celery_task
+from activetigger.tasks.task_manager_client import enqueue_celery_task, new_task_id
 
 
 class ImageModels:
@@ -233,12 +233,15 @@ class ImageModels:
             class_min_freq=class_min_freq,
             fp16=fp16,
         )
-        (unique_id, abortable) = enqueue_celery_task(train_image, inputs)
+        (unique_id, abortable) = new_task_id(train_image)
         del df
 
         params_db = LMParametersDbModel(**params.model_dump(), exclude_labels=exclude_labels or [])
 
-        self.computing.append(
+        enqueue_celery_task(
+            train_image,
+            inputs,
+            self.computing,
             LMComputing(
                 user=user,
                 model_name=model_name,
@@ -252,7 +255,7 @@ class ImageModels:
                 params=params_db.model_dump(),
                 get_progress=self.get_progress(model_name, status="training"),
                 abortable_celery_task=abortable,
-            )
+            ),
         )
         return unique_id
 
@@ -314,9 +317,12 @@ class ImageModels:
             path_valid=path_valid,
             path_test=path_test,
         )
-        (unique_id, abortable) = enqueue_celery_task(predict_image, inputs)
+        (unique_id, abortable) = new_task_id(predict_image)
         del df
-        self.computing.append(
+        enqueue_celery_task(
+            predict_image,
+            inputs,
+            self.computing,
             LMComputing(
                 user=user,
                 model_name=name,
@@ -328,7 +334,7 @@ class ImageModels:
                 status=status,
                 get_progress=self.get_progress(name, status=status),
                 abortable_celery_task=abortable,
-            )
+            ),
         )
 
     def delete(self, name: str) -> None:

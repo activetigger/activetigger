@@ -47,7 +47,7 @@ from activetigger.functions import (
     get_model_metrics,
     serve_temp_export,
 )
-from activetigger.tasks.task_manager_client import enqueue_celery_task
+from activetigger.tasks.task_manager_client import enqueue_celery_task, new_task_id
 
 if TYPE_CHECKING:
     from activetigger.features import Features
@@ -175,7 +175,7 @@ class QuickModels:
             retrain=retrain,
             random_seed=config.random_seed,
         )
-        (unique_id, abortable) = enqueue_celery_task(train_ml, inputs)
+        (unique_id, abortable) = new_task_id(train_ml)
 
         req = QuickModelComputing(
             status="training",
@@ -198,7 +198,7 @@ class QuickModels:
             dataset="train",
             abortable_celery_task=abortable,
         )
-        self.computing.append(req)
+        enqueue_celery_task(train_ml, inputs, self.computing, req)
         return unique_id
 
     def add(self, element: QuickModelComputing) -> None:
@@ -456,9 +456,12 @@ class QuickModels:
             col_text=col_text,
             exclude_labels=sm.exclude_labels,
         )
-        (unique_id, abortable) = enqueue_celery_task(predict_ml, inputs)
+        (unique_id, abortable) = new_task_id(predict_ml)
         del df
-        self.computing.append(
+        enqueue_celery_task(
+            predict_ml,
+            inputs,
+            self.computing,
             QuickModelComputing(
                 user=username,
                 unique_id=unique_id,
@@ -473,7 +476,7 @@ class QuickModels:
                 model_params=sm.model_params,
                 labels=sm.labels,
                 abortable_celery_task=abortable,
-            )
+            ),
         )
         print("Predicting process started")
 
@@ -584,20 +587,18 @@ class QuickModels:
         assert self.features is not None
         specs, data_path = self.features.build_compute_specs(sm.features, data)
 
-        (unique_id, abortable) = enqueue_celery_task(
-            predict_with_features,
-            PredictWithFeaturesTaskInput(
-                project_slug=self.project_slug,
-                name=sm.name,
-                dataset=dataset,
-                specs=specs,
-                data_path=data_path,
-                path_process=self.features.path_all.parent,
-                path_models=self.features.path_models,
-                language=self.features.lang,
-                path_quickmodel=self.path.joinpath(sm.name),
-                file_name=f"predict_{dataset}.parquet",
-            ),
+        (unique_id, abortable) = new_task_id(predict_with_features)
+        task_inputs = PredictWithFeaturesTaskInput(
+            project_slug=self.project_slug,
+            name=sm.name,
+            dataset=dataset,
+            specs=specs,
+            data_path=data_path,
+            path_process=self.features.path_all.parent,
+            path_models=self.features.path_models,
+            language=self.features.lang,
+            path_quickmodel=self.path.joinpath(sm.name),
+            file_name=f"predict_{dataset}.parquet",
         )
 
         progress_path = self.features.path_all.parent.joinpath(unique_id)
@@ -611,7 +612,10 @@ class QuickModels:
             except (OSError, ValueError):
                 return None
 
-        self.computing.append(
+        enqueue_celery_task(
+            predict_with_features,
+            task_inputs,
+            self.computing,
             QuickModelComputing(
                 user=username,
                 unique_id=unique_id,
@@ -627,7 +631,7 @@ class QuickModels:
                 model_params=sm.model_params,
                 labels=sm.labels,
                 get_progress=get_progress,
-            )
+            ),
         )
         return unique_id
 
