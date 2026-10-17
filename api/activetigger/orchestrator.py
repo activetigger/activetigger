@@ -559,6 +559,8 @@ class Orchestrator:
                 "train_quickmodel",
                 "predict_quickmodel",
                 "predict_with_features",
+                "train_ner",
+                "predict_ner"
             ]
         if kind == "bert":
             kind = ["train_bert", "predict_bert"]

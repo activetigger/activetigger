@@ -12,6 +12,10 @@ from activetigger.project import Project
 from activetigger.tasks.task_manager_client import was_stopped
 
 
+class ProjectNotTrackedError(Exception):
+    """The project of a callback is neither loaded nor being created (deleted, or API restarted)."""
+
+
 # TaskCallback is a generic class to specify task callback definitions
 class TaskCallback(ABC):
     task_name: str
@@ -29,7 +33,9 @@ class TaskCallback(ABC):
         # a project still being created is not yet in orchestrator.projects
         if project_slug in orchestrator.project_creation_ongoing:
             return orchestrator.project_creation_ongoing[project_slug]
-        raise Exception(f"Project {project_slug} not listed in orchestrator, we can't finish task")
+        raise ProjectNotTrackedError(
+            f"Project {project_slug} not listed in orchestrator, we can't finish task"
+        )
 
     @classmethod
     def on_complete(cls, task_id: str, task_result: Any) -> Any:
@@ -66,6 +72,10 @@ class TaskCallback(ABC):
         specific_message = cls.on_failure_task_specific(task_id, task_report, project_manager)
         # a stopped task is not an error (same as the in-process "cancelled" state)
         if "Process interrupted by user" in task_report.exception or was_stopped(task_id):
+            # except for a creation: the loop only cleans a creating project on "error"
+            if project_slug in get_orchestrator().project_creation_ongoing:
+                project_manager.errors.add("Project creation stopped by user")
+                project_manager.status = "error"
             return
         project_manager.status = "error"
         if specific_message:

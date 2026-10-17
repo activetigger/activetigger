@@ -28,7 +28,7 @@ from activetigger.functions import (
 )
 from activetigger.monitoring import TaskTimer
 from activetigger.tasks.utils import length_after_tokenizing, retrieve_model_max_length
-from openai import BaseModel
+from pydantic import BaseModel
 from torch import nn
 from torch.utils.data import Dataset as TorchDataset
 from transformers import (

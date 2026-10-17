@@ -1,7 +1,7 @@
 import logging
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Body, Depends
+from fastapi import APIRouter, Body, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
 from task_manager.celery import celery_app
 from task_manager.utils import TaskFailureReportForCallback
@@ -14,6 +14,7 @@ from activetigger.app.dependencies import (
 )
 from activetigger.datamodels import UserInDBModel
 from activetigger.tasks import all_callbacks
+from activetigger.tasks.task_callback import ProjectNotTrackedError
 
 
 class GenericCallbackModel(BaseModel):
@@ -41,26 +42,34 @@ def task_success_callback(body: SuccessCallbackModel = Body(...)):
     """
     logger.info(f"task {body.task_id} succeed with result {body.results} {body.task_name}")
 
-    # check if a completion callback is available
-    callback = all_callbacks.task_callbacks[body.task_name]
-    if callback:
-        logger.info(f"execute callback for task {body.task_name} {body.task_id}")
+    callback = all_callbacks.task_callbacks.get(body.task_name)
+    if callback is None:
+        raise HTTPException(status_code=404, detail=f"No callback for task {body.task_name}")
+    logger.info(f"execute callback for task {body.task_name} {body.task_id}")
+    try:
         callback.on_complete(body.task_id, body.results)
+    except ProjectNotTrackedError as e:
+        logger.warning(f"task {body.task_id} result dropped: {e}")
+        raise HTTPException(status_code=404, detail=str(e)) from e
     return True
 
 
 @router.post("/tasks/failed", dependencies=[Depends(verified_task_worker)])
 def task_failure_callback(body: FailureCallbackModel = Body(...)):
     """
-    Task success callback
+    Task failure callback
     """
     logger.info(f"task {body.task_id} failed with report {body.report} {body.task_name}")
 
-    # check if a completion callback is available
-    callback = all_callbacks.task_callbacks[body.task_name]
-    if callback:
-        logger.info(f"execute callback for task {body.task_name} {body.task_id}")
+    callback = all_callbacks.task_callbacks.get(body.task_name)
+    if callback is None:
+        raise HTTPException(status_code=404, detail=f"No callback for task {body.task_name}")
+    logger.info(f"execute callback for task {body.task_name} {body.task_id}")
+    try:
         callback.on_failure(body.task_id, body.report)
+    except ProjectNotTrackedError as e:
+        logger.warning(f"task {body.task_id} failure dropped: {e}")
+        raise HTTPException(status_code=404, detail=str(e)) from e
     return True
 
 
