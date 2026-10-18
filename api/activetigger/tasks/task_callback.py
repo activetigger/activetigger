@@ -26,13 +26,16 @@ class TaskCallback(ABC):
         return str(task_result["project_slug"])
 
     @staticmethod
-    def get_project_manager(project_slug: str) -> Project:
+    def get_project_manager(project_slug: str, task_id: str | None = None) -> Project:
         orchestrator = get_orchestrator()
         if project_slug in orchestrator.projects:
             return orchestrator.projects[project_slug]
         # a project still being created is not yet in orchestrator.projects
         if project_slug in orchestrator.project_creation_ongoing:
             return orchestrator.project_creation_ongoing[project_slug]
+        # the entry outlives the Project object: do not leave it stale
+        if task_id is not None:
+            orchestrator.drop_process(task_id)
         raise ProjectNotTrackedError(
             f"Project {project_slug} not listed in orchestrator, we can't finish task"
         )
@@ -41,7 +44,7 @@ class TaskCallback(ABC):
     def on_complete(cls, task_id: str, task_result: Any) -> Any:
         """Callback called by the orchestrator once the task succeeds."""
         print(f"Completion of {cls.task_name} task {task_id} in orchestrator {task_result}")
-        project_manager = cls.get_project_manager(cls.get_project_slug(task_result))
+        project_manager = cls.get_project_manager(cls.get_project_slug(task_result), task_id)
         # copy: clean_process mutates the list
         for process in list(project_manager.computing):
             if process.unique_id == task_id:
@@ -65,7 +68,7 @@ class TaskCallback(ABC):
         # cast first args as Task Input type
         task_input = task_report.task_args[0]
         project_slug = task_input["project_slug"]
-        project_manager = cls.get_project_manager(project_slug)
+        project_manager = cls.get_project_manager(project_slug, task_id)
         for e in list(project_manager.computing):
             if e.unique_id == task_id:
                 project_manager.clean_process(e)

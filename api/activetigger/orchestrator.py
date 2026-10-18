@@ -73,6 +73,7 @@ class Orchestrator:
     messages: Messages
     max_projects: int
     project_creation_ongoing: dict[str, Project]
+    computing: dict[str, list[ProcessComputing]]
     monitoring: Monitoring
     toolbox: Toolbox
 
@@ -117,6 +118,9 @@ class Orchestrator:
 
         # projects in creation
         self.project_creation_ongoing = {}
+
+        # processes in flight per project slug; shared by reference with the Project
+        self.computing = {}
 
         # projects being duplicated (copy on a celery worker, DB clone in the callback)
         self.project_duplication_ongoing: dict[str, dict[str, Any]] = {}
@@ -175,6 +179,29 @@ class Orchestrator:
         self.projects = {}
         self.project_creation_ongoing = {}
         self.project_duplication_ongoing = {}
+        self.computing = {}
+
+    def _new_project(self, project_slug: str) -> Project:
+        """
+        Instantiate a project on its orchestrator-owned computing list
+        """
+        return Project(
+            project_slug,
+            self.db_manager,
+            path_models=self.path_models,
+            users=self.users,
+            messages=self.messages,
+            computing=self.computing.setdefault(project_slug, []),
+        )
+
+    def drop_process(self, process_id: str) -> None:
+        """
+        Forget a process whose project is no longer tracked
+        """
+        for processes in self.computing.values():
+            for process in list(processes):
+                if process.unique_id == process_id:
+                    processes.remove(process)
 
     def starting_project_creation(self, project: ProjectBaseModel, username: str) -> str:
         """
@@ -187,13 +214,7 @@ class Orchestrator:
         # client-provided name to the same form or the task won't find the file
         if project.filename is not None:
             project.filename = sanitize_uploaded_filename(project.filename)
-        self.project_creation_ongoing[project_slug] = Project(
-            project_slug,
-            self.db_manager,
-            path_models=self.path_models,
-            users=self.users,
-            messages=self.messages,
-        )
+        self.project_creation_ongoing[project_slug] = self._new_project(project_slug)
         # dispatch on kind before enqueuing (see docs/image-projects-strategy.md)
         if getattr(project, "kind", "text") == "image":
             self.project_creation_ongoing[project_slug].start_project_creation_imagexp(
@@ -220,7 +241,7 @@ class Orchestrator:
         to_del = []
         for p, project in list(self.projects.items()):
             if (timer - project.starting_time) > project_lifetime:
-                if project.computing:
+                if self.computing.get(p):
                     project.starting_time = timer
                 else:
                     to_del.append(p)
@@ -350,15 +371,16 @@ class Orchestrator:
         active_projects = {
             p: [
                 {"unique_id": c.unique_id, "user": c.user, "kind": c.kind, "time": c.time}
-                for c in self.projects[p].computing
+                for c in processes
             ]
-            for p in self.projects
+            for p, processes in self.computing.items()
+            if processes
         }
-        # every process in flight on the celery workers, across loaded projects
+        # every process in flight on the celery workers
         queue = {
             c.unique_id: {"unique_id": c.unique_id, "kind": c.kind, "state": "running"}
-            for p in self.projects
-            for c in self.projects[p].computing
+            for processes in self.computing.values()
+            for c in processes
         }
 
         # use cached heavy stats
@@ -450,7 +472,7 @@ class Orchestrator:
                 [
                     (p, self.projects[p].starting_time)
                     for p in self.projects
-                    if not self.projects[p].computing
+                    if not self.computing.get(p)
                 ],
                 key=lambda x: x[1],
             )
@@ -473,13 +495,7 @@ class Orchestrator:
             raise NotFoundError("This project does not exist")
 
         try:
-            self.projects[project_slug] = Project(
-                project_slug,
-                self.db_manager,
-                path_models=self.path_models,
-                users=self.users,
-                messages=self.messages,
-            )
+            self.projects[project_slug] = self._new_project(project_slug)
         except Exception as e:
             raise Exception(
                 f"Error while loading project {project_slug}: {e} - {traceback.format_exc()}"
@@ -495,13 +511,10 @@ class Orchestrator:
 
     def find_process(self, process_id: str) -> tuple[ProcessComputing, str] | None:
         """
-        Locate a process across loaded projects and projects being created
+        Locate a process across tracked projects
         """
-        for project_slug, project in [
-            *self.projects.items(),
-            *self.project_creation_ongoing.items(),
-        ]:
-            for process in project.computing:
+        for project_slug, processes in self.computing.items():
+            for process in processes:
                 if process.unique_id == process_id:
                     return process, project_slug
         return None
@@ -619,6 +632,7 @@ class Orchestrator:
         # clean current memory
         if project_slug in self.projects:
             del self.projects[project_slug]
+        self.computing.pop(project_slug, None)
 
     def duplicate_project(self, source_slug: str, username: str) -> str:
         """
@@ -725,6 +739,7 @@ class Orchestrator:
         # remove from memory
         if project_slug_verif in self.project_creation_ongoing:
             del self.project_creation_ongoing[project_slug_verif]
+        self.computing.pop(project_slug_verif, None)
 
     def create_demo_project(self, project_name: str, username: str) -> None:
         """

@@ -201,14 +201,16 @@ class Project:
         path_models: Path,
         users: Users,
         messages: Messages,
+        computing: list[ProcessComputing],
     ) -> None:
         """
         Initialize the project
         - load if it exits in database
+        - computing is owned by the orchestrator so it outlives this object
         """
         self.status = "initialize"
         self.starting_time = time.time()
-        self.computing = []
+        self.computing = computing
         self.db_manager = db_manager
         self.path_models = path_models
         self.name = project_slug
@@ -359,11 +361,12 @@ class Project:
         )
 
         # Persist any generation checkpoints left behind by a crashed worker or
-        # a previous server restart. At load time self.computing is empty, so
-        # every gen_*.jsonl file in the project dir is an orphan.
+        # a previous server restart; a gen_<task_id>.jsonl still in flight is kept.
         if self.params.dir is not None:
+            running = {c.unique_id for c in self.computing}
             for jsonl_path in self.params.dir.glob("gen_*.jsonl"):
-                self._recover_generations_from_jsonl(jsonl_path)
+                if jsonl_path.stem.removeprefix("gen_") not in running:
+                    self._recover_generations_from_jsonl(jsonl_path)
 
     def start_project_creation(self, params: ProjectBaseModel, username: str, path: Path) -> None:
         """
