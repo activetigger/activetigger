@@ -8,6 +8,7 @@ services:
               count: 1
               capabilities: [gpu]
     environment:
+      - GPU=true
       - DATA_PATH=/data
       - CPU_ONLY=false
       - USER_ID=${USER_ID}
