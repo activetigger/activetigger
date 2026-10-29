@@ -31,13 +31,16 @@ def start_gpu_worker_pool():
     Start the worker for the GPU queue.
 
     Heavy tasks (training, embeddings, prediction) are routed to this queue
-    whether or not a GPU exists and run one at a time (concurrency 1 by
-    default), which bounds memory use. Without a GPU they simply run on CPU.
+    whether or not a GPU exists and run one at a time in the worker process
+    itself (solo pool), which bounds memory use. Without a GPU they simply
+    run on CPU.
 
-    Each task runs in a fresh forked child that exits afterwards: a solo pool
-    would keep the model memory (allocator arenas, CUDA context) in the long-
-    lived worker process. CUDA must therefore never be initialised in the
-    parent, i.e. at import time of a task module.
+    Solo pool caveats: the model memory (allocator arenas, CUDA context) stays
+    in the long-lived worker process between tasks, so each task must release
+    what it allocated; max-tasks-per-child is ignored; a task killed by the
+    kernel (OOM) takes the worker down without a failure callback and
+    watchmedo restarts it; a non-abortable revoke cannot terminate a running
+    task, so every task on this queue must be abortable.
     """
     args = [
         "worker",
@@ -45,7 +48,6 @@ def start_gpu_worker_pool():
         # we might need to create one queue by GPU device
         f"--concurrency={config.gpu_worker_concurrency}",
         "--pool=solo",
-        "--max-tasks-per-child=1",
         f"--queues={QueueName.GPU}",
         "--hostname=worker_gpu@%h",
         # "--purge",

@@ -50,6 +50,18 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- printf "%s-postgresql" (include "activetigger.fullname" .) }}
 {{- end }}
 
+{{- define "activetigger.redisServiceName" -}}
+{{- printf "%s-redis" (include "activetigger.fullname" .) }}
+{{- end }}
+
+{{- define "activetigger.redisUrl" -}}
+{{- if .Values.redis.enabled }}
+{{- printf "redis://%s:%v" (include "activetigger.redisServiceName" .) .Values.redis.port }}
+{{- else }}
+{{- required "redis.enabled is false: set redis.externalUrl to the URL of the Celery broker (redis://host:port)" .Values.redis.externalUrl }}
+{{- end }}
+{{- end }}
+
 {{- define "activetigger.databaseUrl" -}}
 {{- if .Values.postgresql.trustAuth }}
 {{- printf "postgresql://%s@%s:%v/%s" .Values.postgresql.username (include "activetigger.postgresqlServiceName" .) .Values.postgresql.port .Values.postgresql.database }}

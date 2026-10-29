@@ -22,8 +22,10 @@ class ComputeProjectionCallback(TaskCallback):
         cls, task_id: str, task_result: ComputeProjectionTaskResult, project_manager, process
     ):
         coordinates_path = Path(task_result["coordinates_path"])
-        coordinates = pd.read_parquet(coordinates_path)
-        # restore the integer axis column names expected by Projections.add
-        coordinates.columns = [int(c) if c.isdigit() else c for c in coordinates.columns]
-        project_manager.projections.add(process, coordinates)
-        coordinates_path.unlink(missing_ok=True)
+        try:
+            coordinates = pd.read_parquet(coordinates_path)
+            # restore the integer axis column names expected by Projections.add
+            coordinates.columns = [int(c) if c.isdigit() else c for c in coordinates.columns]
+            project_manager.projections.add(process, coordinates)
+        finally:
+            coordinates_path.unlink(missing_ok=True)

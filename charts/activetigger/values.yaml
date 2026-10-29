@@ -90,6 +90,27 @@ postgresql:
     fsGroup: 999
     fsGroupChangePolicy: OnRootMismatch
 
+# Celery broker and result backend for the task workers (required)
+redis:
+  enabled: true
+  # used only when enabled is false
+  externalUrl: ""
+  image:
+    repository: redis
+    tag: "8"
+    pullPolicy: IfNotPresent
+  port: 6379
+  resources:
+    requests:
+      cpu: "100m"
+      memory: 128Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  podSecurityContext:
+    fsGroup: 999
+    fsGroupChangePolicy: OnRootMismatch
+
 secrets:
   create: true
   existingSecret: ""

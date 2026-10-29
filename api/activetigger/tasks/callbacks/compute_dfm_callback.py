@@ -1,4 +1,4 @@
-from os import unlink
+from pathlib import Path
 
 import pandas as pd
 
@@ -20,12 +20,15 @@ class ComputeDfmCallback(TaskCallback):
         cls, task_id: str, task_result: ComputeDfmTaskResult, project_manager, process
     ):
         # load the matrix written by the worker and register it as a feature
-        results = pd.read_parquet(task_result["features_path"])
-        project_manager.features.add(
-            name=task_result["parameters"]["name"],
-            kind="dfm",
-            username=task_result["username"],
-            parameters=task_result["parameters"],
-            new_content=results,
-        )
-        unlink(task_result["features_path"])
+        output_path = Path(task_result["features_path"])
+        try:
+            results = pd.read_parquet(output_path)
+            project_manager.features.add(
+                name=task_result["parameters"]["name"],
+                kind="dfm",
+                username=task_result["username"],
+                parameters=task_result["parameters"],
+                new_content=results,
+            )
+        finally:
+            output_path.unlink(missing_ok=True)

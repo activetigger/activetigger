@@ -52,7 +52,7 @@ class CreateProjectCallback(TaskCallback):
         )
 
         project_manager.finish_project_creation(
-            task_result["username"], project, trainset_import, testset_import, validset_import
+            task_result["username"], project, trainset_import, validset_import, testset_import
         )
         # clean filesystem
         if task_result["import_trainset_path"]:

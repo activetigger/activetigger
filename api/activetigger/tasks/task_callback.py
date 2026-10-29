@@ -44,13 +44,21 @@ class TaskCallback(ABC):
     def on_complete(cls, task_id: str, task_result: Any) -> Any:
         """Callback called by the orchestrator once the task succeeds."""
         print(f"Completion of {cls.task_name} task {task_id} in orchestrator {task_result}")
-        project_manager = cls.get_project_manager(cls.get_project_slug(task_result), task_id)
+        project_slug = cls.get_project_slug(task_result)
+        project_manager = cls.get_project_manager(project_slug, task_id)
         # copy: clean_process mutates the list
         for process in list(project_manager.computing):
             if process.unique_id == task_id:
                 # always drop the entry, a raising hook must not leave a stale process
                 try:
                     cls.on_complete_task_specific(task_id, task_result, project_manager, process)
+                except Exception as ex:
+                    # surface the error to the user instead of a 500 the worker would retry
+                    print(f"Error in {process.kind} callback {task_id}: {ex}")
+                    project_manager.errors.add(f"Error in {process.kind} : {ex}")
+                    # a creation is only cleaned by the orchestrator loop on "error"
+                    if project_slug in get_orchestrator().project_creation_ongoing:
+                        project_manager.status = "error"
                 finally:
                     project_manager.clean_process(process)
 

@@ -21,7 +21,9 @@ class ComputeLexicometricsCallback(TaskCallback):
         cls, task_id: str, task_result: ComputeLexicometricsTaskResult, project_manager, process
     ):
         statistics_path = Path(task_result["statistics_path"])
-        with open(statistics_path) as f:
-            results = json.load(f)
-        project_manager.lexicometrics.add(process, results)
-        statistics_path.unlink(missing_ok=True)
+        try:
+            with open(statistics_path) as f:
+                results = json.load(f)
+            project_manager.lexicometrics.add(process, results)
+        finally:
+            statistics_path.unlink(missing_ok=True)

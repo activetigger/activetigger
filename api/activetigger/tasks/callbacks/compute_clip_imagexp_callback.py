@@ -1,4 +1,4 @@
-from os import unlink
+from pathlib import Path
 
 import pandas as pd
 
@@ -23,12 +23,15 @@ class ComputeClipImagexpCallback(TaskCallback):
         cls, task_id: str, task_result: ComputeClipImagexpTaskResult, project_manager, process
     ):
         # load the embeddings written by the worker and register them as a feature
-        results = pd.read_parquet(task_result["embeddings_path"])
-        project_manager.features.add(
-            name=task_result["parameters"]["name"],
-            kind="image-embeddings",
-            username=task_result["username"],
-            parameters=task_result["parameters"],
-            new_content=results,
-        )
-        unlink(task_result["embeddings_path"])
+        output_path = Path(task_result["embeddings_path"])
+        try:
+            results = pd.read_parquet(output_path)
+            project_manager.features.add(
+                name=task_result["parameters"]["name"],
+                kind="image-embeddings",
+                username=task_result["username"],
+                parameters=task_result["parameters"],
+                new_content=results,
+            )
+        finally:
+            output_path.unlink(missing_ok=True)
