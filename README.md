@@ -1,7 +1,7 @@
 # Active Tigger
 
 [![License](https://img.shields.io/badge/license-EUPL1.2-blue.svg)](https://github.com/activetigger/activetigger/blob/main/LICENSE.md)
-[![Python Version](https://img.shields.io/badge/python-3.11+-blue)](https://www.python.org/downloads/)
+[![Python Version](https://img.shields.io/badge/python-3.13+-blue)](https://www.python.org/downloads/)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688)
 ![React](https://img.shields.io/badge/React-18.3-blue)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.4-3178C6)

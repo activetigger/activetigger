@@ -25,7 +25,7 @@ Validates the Kubernetes deployment chart in `charts/activetigger`:
 Runs in the `./api` directory.
 
 1. **Install uv** — Sets up the [uv](https://docs.astral.sh/uv/) package manager with caching enabled.
-2. **Set up Python 3.13** — Pinned to stay within the `>= 3.11, < 3.14` constraint.
+2. **Set up Python 3.13** — The only version the `>=3.13,<3.14` constraint allows.
 3. **Install the project** — `make ci` (installs all dependencies from the lockfile).
 4. **Format check** — `make format` (ruff formatting).
 5. **Lint check** — `make lint` ([ruff](https://docs.astral.sh/ruff/)).
