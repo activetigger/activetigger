@@ -165,7 +165,7 @@ def visualize_documents(
                 # hovertemplate = "%{text}",
                 # text = hovertext[indexes],
                 marker={"opacity": 0.75},
-                name=topic_info.loc[topic == topic_info.Topic, "Name"].item(),  # ty: ignore[unresolved-attribute]
+                name=topic_info.loc[topic == topic_info.Topic, "Name"].item(),
             )
         )
     return fig
@@ -350,13 +350,14 @@ class ComputeBertopic:
         if path_embeddings.exists():
             path_embeddings.unlink()
 
-        if self.parameters.embedding_model not in config.models_embeddings:
-            raise ValueError(f"Model {self.parameters.embedding_model} not supported.")
+        embedding_model = self.parameters.embedding_model
+        if embedding_model is None or embedding_model not in config.models_embeddings:
+            raise ValueError(f"Model {embedding_model} not supported.")
         self.update_progress(10)
         path_sbert_progress = self.path_run.joinpath("progress_sbert")
         computed = encode_sbert(
             df[self.col_text],
-            model=self.parameters.embedding_model,
+            model=embedding_model,
             path_progress=path_sbert_progress,
             batch_size=self.parameters.embedding_batch_size,
             min_gpu=1,
@@ -667,6 +668,9 @@ class ComputeBertopic:
             compulsory_steps=["setup", "fit", "save_files"],
             optional_steps=["reduce-outliers", "generate-embeddings"],
         )
+        # released in finally even if an early step fails
+        df = df_embeddings = embeddings = None
+        topic_model = umap_model = hdbscan_model = vectorizer_model = None
         try:
             task_timer.start("setup")
             path_embeddings, path_projection = self.__init_paths()
@@ -697,7 +701,7 @@ class ComputeBertopic:
                     "Something went wrong when checking the embeddings. Please check the logs."
                 )
 
-            embeddings: np.ndarray = df_embeddings_t.values
+            embeddings = df_embeddings_t.values
             self.update_progress(65)
             self.__create_projection(df_embeddings_t, path_projection)
 
@@ -776,7 +780,8 @@ class ComputeBertopic:
                         f"{str(e)}"
                         "\n"
                         f"[Found array with 0 sample(s)] errors are likely due to"
-                        f"your dataset being to small ({len(df)}). We advise you "  # ty: ignore[possibly-unresolved-reference]
+                        f"your dataset being to small ({len(df) if df is not None else 0}). "
+                        "We advise you "
                         f"to add more elements to your dataset."
                     )
                 )
@@ -784,18 +789,15 @@ class ComputeBertopic:
             raise e
         finally:
             print("Cleaning GPU memory (bertopic)")
-            try:
-                del (
-                    df,
-                    df_embeddings,
-                    embeddings,
-                    topic_model,
-                    umap_model,
-                    hdbscan_model,
-                    vectorizer_model,
-                )
-            except NameError:
-                pass
+            del (
+                df,
+                df_embeddings,
+                embeddings,
+                topic_model,
+                umap_model,
+                hdbscan_model,
+                vectorizer_model,
+            )
             gc.collect()
             release_device_memory()
 

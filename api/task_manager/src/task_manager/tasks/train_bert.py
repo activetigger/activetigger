@@ -33,7 +33,7 @@ from torch import nn
 from torch.utils.data import Dataset as TorchDataset
 from transformers import (
     AutoModelForSequenceClassification,
-    AutoTokenizer,
+    AutoTokenizer,  # ty: ignore[possibly-missing-import]
     Trainer,
     TrainerCallback,
     TrainerControl,

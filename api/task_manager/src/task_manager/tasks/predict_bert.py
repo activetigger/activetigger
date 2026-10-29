@@ -32,7 +32,7 @@ from scipy.stats import entropy
 from tqdm import tqdm
 from transformers import (
     AutoModelForSequenceClassification,
-    AutoTokenizer,
+    AutoTokenizer,  # ty: ignore[possibly-missing-import]
 )
 
 

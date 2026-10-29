@@ -1,12 +1,12 @@
 from typing import cast
 
+# use task specification to ensure name and return are in sync with task_manager
+from task_manager.tasks.train_ml_task import TrainMLTask, TrainMLTaskResult
+
 from activetigger.datamodels import EventsModel, QuickModelComputing
 
 # ensure the callback definition is what we expect by using the TaskCallback abstraction
 from activetigger.tasks.task_callback import TaskCallback
-
-# use task specification to ensure name and return are in sync with task_manager
-from task_manager.tasks.train_ml_task import TrainMLTask, TrainMLTaskResult
 
 
 class TrainMLCallback(TaskCallback):

@@ -94,6 +94,8 @@ dev = [
 line-length = 100
 
 [tool.ruff.lint]
+# explicit base set: ruff 0.16 widened its defaults
+select = ["E4", "E7", "E9", "F"]
 extend-select = [
 #  "B",           # flake8-bugbear
   "I",           # isort
@@ -136,6 +138,10 @@ exclude = ["migrations/"]
 
 [tool.ty.rules]
 all = "error"
+# style-only rules introduced by recent ty versions
+missing-type-argument = "ignore"
+missing-override-decorator = "ignore"
+unsound-return-statement = "ignore"
 
 [tool.uv]
 environments = [

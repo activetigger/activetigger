@@ -31,6 +31,7 @@ from activetigger.db.languagemodels import ModelsService
 from activetigger.db.manager import DatabaseManager
 from activetigger.errors import AlreadyExistsError, InvalidInputError, NotFoundError
 from activetigger.functions import get_model_metrics
+from activetigger.monitoring import Monitoring
 from activetigger.tasks.task_manager_client import enqueue_celery_task, new_task_id
 
 
@@ -64,6 +65,7 @@ class NerModels:
     ) -> None:
         self.params_default = LMParametersModel()
         self.project_slug = project_slug
+        self.monitoring = Monitoring(db_manager, project_slug)
         self.computing = computing
         self.models_service = db_manager.language_models_service
         self.path = Path(path).joinpath("ner")
@@ -191,6 +193,10 @@ class NerModels:
         (unique_id, abortable) = new_task_id(train_ner)
         del df
         params_db = LMParametersDbModel(**params.model_dump(), exclude_labels=[])
+        # registered before the send: a fast task calls back at once
+        self.monitoring.register_process(
+            process_name=unique_id, kind="train_ner", parameters={}, user_name=user
+        )
         enqueue_celery_task(
             train_ner,
             inputs,
@@ -270,6 +276,10 @@ class NerModels:
         )
         (unique_id, abortable) = new_task_id(predict_ner)
         del df
+        # registered before the send: a fast task calls back at once
+        self.monitoring.register_process(
+            process_name=unique_id, kind="predict_ner", parameters={}, user_name=user
+        )
         enqueue_celery_task(
             predict_ner,
             inputs,

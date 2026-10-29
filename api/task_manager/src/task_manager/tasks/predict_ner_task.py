@@ -24,5 +24,9 @@ class PredictNerTask(AbortableAutoCallbackTask):
 def predict_ner(self: PredictNerTask, inputs: PredictNerTaskInput) -> PredictNerTaskResult:
     predict_ner = PredictNer(self.request.id, inputs, is_aborted=self.is_aborted)
     r = predict_ner.run()
-    return {"project_slug": inputs.project_slug, "path":r["path"],
-     "metrics":r["metrics"], "events":r["events"]}
+    return {
+        "project_slug": inputs.project_slug,
+        "path": r["path"],
+        "metrics": r["metrics"],
+        "events": r["events"],
+    }

@@ -31,6 +31,7 @@ from activetigger.db.languagemodels import ModelsService
 from activetigger.db.manager import DatabaseManager
 from activetigger.errors import AlreadyExistsError, InvalidInputError, NotFoundError
 from activetigger.functions import get_model_metrics
+from activetigger.monitoring import Monitoring
 from activetigger.tasks.task_manager_client import enqueue_celery_task, new_task_id
 
 
@@ -58,6 +59,7 @@ class LanguageModels:
     ) -> None:
         self.params_default = LMParametersModel()
         self.project_slug = project_slug
+        self.monitoring = Monitoring(db_manager, project_slug)
         self.computing = computing
         self.language_models_service = db_manager.language_models_service
         self.path: Path = Path(path).joinpath("bert")
@@ -297,7 +299,10 @@ class LanguageModels:
         # add flags in params
         params = LMParametersDbModel(**params.model_dump(), exclude_labels=exclude_labels or [])
 
-        # Update the queue state
+        # registered before the send: a fast task calls back at once
+        self.monitoring.register_process(
+            process_name=unique_id, kind="train_languagemodel", parameters={}, user_name=user
+        )
         enqueue_celery_task(
             train_bert,
             trainBertInputs,
@@ -399,6 +404,10 @@ class LanguageModels:
         )
         (unique_id, abortable) = new_task_id(predict_bert)
         del df
+        # registered before the send: a fast task calls back at once
+        self.monitoring.register_process(
+            process_name=unique_id, kind="predict_languagemodel", parameters={}, user_name=user
+        )
         enqueue_celery_task(
             predict_bert,
             inputs,

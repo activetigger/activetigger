@@ -315,7 +315,7 @@ def add_evalset_image(
                 raise Exception(f"Label column '{col_label}' not in labels file")
 
             # match on filename stem (same convention as CreateProjectImagexp)
-            labels_df[col_id] = labels_df[col_id].astype(str).map(lambda s: Path(s).stem)
+            labels_df[col_id] = labels_df[col_id].astype(str).map(lambda s: Path(str(s)).stem)
             cols = [col_id] + ([col_label] if col_label else [])
             labels_df = labels_df[cols].rename(columns={col_id: "id"})
             if col_label:

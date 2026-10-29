@@ -30,6 +30,7 @@ from activetigger.db.languagemodels import ModelsService
 from activetigger.db.manager import DatabaseManager
 from activetigger.errors import AlreadyExistsError, InvalidInputError, NotFoundError
 from activetigger.functions import get_model_metrics
+from activetigger.monitoring import Monitoring
 from activetigger.tasks.task_manager_client import enqueue_celery_task, new_task_id
 
 
@@ -73,6 +74,7 @@ class ImageModels:
             adapt=False,
         )
         self.project_slug = project_slug
+        self.monitoring = Monitoring(db_manager, project_slug)
         self.computing = computing
         self.models_service = db_manager.language_models_service
         self.path: Path = Path(path).joinpath("image").absolute()
@@ -237,7 +239,10 @@ class ImageModels:
         del df
 
         params_db = LMParametersDbModel(**params.model_dump(), exclude_labels=exclude_labels or [])
-
+        # registered before the send: a fast task calls back at once
+        self.monitoring.register_process(
+            process_name=unique_id, kind="train_imagemodel", parameters={}, user_name=user
+        )
         enqueue_celery_task(
             train_image,
             inputs,

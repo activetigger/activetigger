@@ -1,15 +1,15 @@
 from typing import cast
 
-from activetigger.datamodels import EventsModel, LMComputing
-
-# ensure the callback definition is what we expect by using the TaskCallback abstraction
-from activetigger.tasks.task_callback import TaskCallback
-
 # use task specification to ensure name and return are in sync with task_manager
 from task_manager.tasks.train_bert_task import (
     TrainBertTask,
     TrainBertTaskResult,
 )
+
+from activetigger.datamodels import EventsModel, LMComputing
+
+# ensure the callback definition is what we expect by using the TaskCallback abstraction
+from activetigger.tasks.task_callback import TaskCallback
 
 
 class TrainBertCallback(TaskCallback):

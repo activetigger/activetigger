@@ -32,7 +32,7 @@ from pydantic import BaseModel
 from torch.utils.data import Dataset as TorchDataset
 from transformers import (
     AutoImageProcessor,
-    AutoModelForImageClassification,
+    AutoModelForImageClassification,  # ty: ignore[possibly-missing-import]
     Trainer,
     TrainerCallback,
     TrainerControl,

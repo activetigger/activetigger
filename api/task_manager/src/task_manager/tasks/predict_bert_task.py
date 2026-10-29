@@ -28,7 +28,9 @@ class PredictBertTask(AbortableAutoCallbackTask):
 def predict_bert(self: PredictBertTask, inputs: PredictBertTaskInput) -> PredictBertTaskResult:
     predict_bert = PredictBertMultiClass(self.request.id, inputs, is_aborted=self.is_aborted)
     r = predict_bert.run()
-    return {"project_slug": inputs.project_slug, 
-            "path": r["path"], 
-            "events": r["events"],
-            "metrics":r["metrics"]}
+    return {
+        "project_slug": inputs.project_slug,
+        "path": r["path"],
+        "events": r["events"],
+        "metrics": r["metrics"],
+    }

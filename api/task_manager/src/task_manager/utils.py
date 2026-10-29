@@ -1,5 +1,5 @@
 import time
-from typing import Any
+from typing import Any, Generic, TypeVar
 
 import requests
 from celery.utils.log import get_task_logger
@@ -7,8 +7,10 @@ from pydantic import BaseModel
 
 from task_manager import config
 
+R = TypeVar("R")
 
-class TaskResultForCallback[R](BaseModel):
+
+class TaskResultForCallback(BaseModel, Generic[R]):
     results: R
     task_name: str
 

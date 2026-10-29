@@ -47,6 +47,7 @@ from activetigger.functions import (
     get_model_metrics,
     serve_temp_export,
 )
+from activetigger.monitoring import Monitoring
 from activetigger.tasks.task_manager_client import enqueue_celery_task, new_task_id
 
 if TYPE_CHECKING:
@@ -88,6 +89,7 @@ class QuickModels:
         if not self.path.exists():
             os.mkdir(self.path)
         self.project_slug = project_slug
+        self.monitoring = Monitoring(db_manager, project_slug)
         self.language_models_service = db_manager.language_models_service
         self.computing = computing
         self.features = features
@@ -198,6 +200,10 @@ class QuickModels:
             dataset="train",
             abortable_celery_task=abortable,
             temp_files=[path_df],
+        )
+        # registered before the send: a fast task calls back at once
+        self.monitoring.register_process(
+            process_name=unique_id, kind="train_quickmodel", parameters={}, user_name=user
         )
         enqueue_celery_task(train_ml, inputs, self.computing, req)
         return unique_id

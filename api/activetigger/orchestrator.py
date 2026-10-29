@@ -158,9 +158,11 @@ class Orchestrator:
         if self._update_task is not None and not self._update_task.done():
             return
         try:
-            self._update_task = asyncio.create_task(self._update(timeout=config.update_timeout))
+            loop = asyncio.get_running_loop()
         except RuntimeError:
             self._update_task = None
+            return
+        self._update_task = loop.create_task(self._update(timeout=config.update_timeout))
 
     def __del__(self):
         """
@@ -573,7 +575,7 @@ class Orchestrator:
                 "predict_quickmodel",
                 "predict_with_features",
                 "train_ner",
-                "predict_ner"
+                "predict_ner",
             ]
         if kind == "bert":
             kind = ["train_bert", "predict_bert"]

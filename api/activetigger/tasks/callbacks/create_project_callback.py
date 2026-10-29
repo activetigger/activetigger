@@ -1,18 +1,18 @@
 from os import unlink
 
 import pandas as pd
-from typing_extensions import override
-
-from activetigger.datamodels import ProjectModel
-
-# ensure the callback definition is what we expect by using the TaskCallback abstraction
-from activetigger.tasks.task_callback import TaskCallback
 
 # use task specification to ensure name and return are in sync with task_manager
 from task_manager.tasks.create_project_task import (
     CreateProjectTask,
     CreateProjectTaskResult,
 )
+from typing_extensions import override
+
+from activetigger.datamodels import ProjectModel
+
+# ensure the callback definition is what we expect by using the TaskCallback abstraction
+from activetigger.tasks.task_callback import TaskCallback
 
 
 class CreateProjectCallback(TaskCallback):

@@ -483,7 +483,7 @@ class CreateProjectTask(AutoCallbackTask):
         if metadata_df is not None and len(metadata_df) > 0:
             # match on filename stem; first column of metadata is assumed to be the id
             id_col = metadata_df.columns[0]
-            metadata_df[id_col] = metadata_df[id_col].astype(str).map(lambda s: Path(s).stem)
+            metadata_df[id_col] = metadata_df[id_col].astype(str).map(lambda s: Path(str(s)).stem)
             metadata_df = metadata_df.rename(columns={id_col: "id"})
             content = content.merge(metadata_df, on="id", how="left")
 

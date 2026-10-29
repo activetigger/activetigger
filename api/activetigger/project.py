@@ -1,6 +1,7 @@
 import json
 import math
 import os
+import pickle
 import shutil
 import time
 import uuid
@@ -664,6 +665,7 @@ class Project:
         if any(c.kind == f"add_evalset_{dataset}" for c in self.computing):
             raise Exception("this set is already being added")
 
+        payload: dict[str, Any]
         if isinstance(evalset, EvalSetImageModel):
             scheme_labels = (
                 self.schemes.available()[evalset.scheme].labels if evalset.scheme else None
@@ -676,7 +678,7 @@ class Project:
 
         # the worker checks id collisions against every id already in the project
         index_path = self.params.dir.joinpath(f"evalset_index_{uuid.uuid4().hex}.pkl")
-        pd.to_pickle(self.data.get_full_id().index, index_path)
+        index_path.write_bytes(pickle.dumps(self.data.get_full_id().index))
         try:
             (unique_id, abortable) = new_task_id(add_evalset_task)
             task_inputs = AddEvalsetTaskInput(
@@ -888,12 +890,6 @@ class Project:
             test_size=quickmodel.test_size,
             retrain=retrain,
             texts=self.data.train["text"] if self.data.train is not None else None,
-        )
-        self.monitoring.register_process(
-            process_name=process_id,
-            kind="train_quickmodel",
-            parameters={},
-            user_name=username,
         )
         return process_id
 
@@ -1107,13 +1103,13 @@ class Project:
             raise ValueError(
                 "No element available with this selection mode and history. Clear the history to access previous elements."
             )
-        n_sample = f.sum()  # use len(ss) for adding history
+        n_sample = int(f.sum())  # use len(ss) for adding history
 
         n = min(max(1, next.n), 100)
         element_ids: list = []
         indicators: dict = {}
         similarities: dict = {}
-        ranks: dict = {}
+        ranks: dict[str, int] = {}
 
         # validate selection method
         valid_selections = {"fixed", "random", "maxprob", "active", "prompt"}
@@ -1207,7 +1203,7 @@ class Project:
                     raise ValueError(
                         f"Expected unique position for {eid} in prompt ranking, got {type(loc).__name__}"
                     )
-                ranks[eid] = loc + 1
+                ranks[eid] = int(loc) + 1
                 indicators[eid] = f"similarity: {round(similarities[eid], 3)}"
         if len(element_ids) == 0:
             raise NotFoundError("No element available with this selection mode.")
@@ -2076,7 +2072,7 @@ class Project:
             df = df.groupby("labels").sample(n=min_freq)
 
         # launch training process
-        process_id = self.languagemodels.start_training_process(
+        self.languagemodels.start_training_process(
             name=bert.name,
             project=self.name,
             user=username,
@@ -2097,12 +2093,6 @@ class Project:
             use_dichotomization=use_dichotomization,
             label_for_dichotomization=bert.dichotomize if use_dichotomization else None,
             exclude_labels=bert.exclude_labels,
-        )
-        self.monitoring.register_process(
-            process_name=process_id,
-            kind="train_languagemodel",
-            parameters={},
-            user_name=username,
         )
 
     def start_ner_training(self, ner: NerModelModel, username: str) -> None:
@@ -2134,7 +2124,7 @@ class Project:
         if scheme.kind != "span":
             raise Exception(f"NER training requires a span scheme (got kind: {scheme.kind})")
 
-        process_id = self.nermodels.start_training_process(
+        self.nermodels.start_training_process(
             name=ner.name,
             project=self.name,
             user=username,
@@ -2147,12 +2137,6 @@ class Project:
             params=ner.params,
             test_size=ner.test_size,
             max_length=ner.max_length,
-        )
-        self.monitoring.register_process(
-            process_name=process_id,
-            kind="train_ner",
-            parameters={},
-            user_name=username,
         )
 
     def start_ner_prediction(
@@ -2206,7 +2190,7 @@ class Project:
         if scheme.kind != "span":
             raise Exception(f"NER prediction requires a span scheme (got kind: {scheme.kind})")
 
-        process_id = self.nermodels.start_predicting_process(
+        self.nermodels.start_predicting_process(
             project_slug=self.name,
             name=model_name,
             user=username,
@@ -2221,12 +2205,6 @@ class Project:
             path_train=path_train,
             path_valid=path_valid,
             path_test=path_test,
-        )
-        self.monitoring.register_process(
-            process_name=process_id,
-            kind="predict_ner",
-            parameters={},
-            user_name=username,
         )
 
     def start_image_model_training(self, image: ImageModelModel, username: str) -> None:
@@ -2271,7 +2249,7 @@ class Project:
             min_freq = df["labels"].value_counts().sort_values().min()
             df = df.groupby("labels").sample(n=min_freq)
 
-        process_id = self.imagemodels.start_training_process(
+        self.imagemodels.start_training_process(
             name=image.name,
             project=self.name,
             user=username,
@@ -2289,12 +2267,6 @@ class Project:
             class_min_freq=image.class_min_freq,
             exclude_labels=image.exclude_labels,
             fp16=image.fp16,
-        )
-        self.monitoring.register_process(
-            process_name=process_id,
-            kind="train_imagemodel",
-            parameters={},
-            user_name=username,
         )
 
     def start_image_model_prediction(
@@ -2413,7 +2385,7 @@ class Project:
                 f"Prediction does not support this type of scheme (kind: {training_kind})"
             )
         scheme_labels = scheme_.labels
-        process_id = self.languagemodels.start_predicting_process(
+        self.languagemodels.start_predicting_process(
             project_slug=self.name,
             name=model_name,
             user=username,
@@ -2429,12 +2401,6 @@ class Project:
             path_train=path_train,
             path_valid=path_valid,
             path_test=path_test,
-        )
-        self.monitoring.register_process(
-            process_name=process_id,
-            kind="predict_languagemodel",
-            parameters={},
-            user_name=username,
         )
 
     def start_quick_model_prediction(
@@ -2485,10 +2451,12 @@ class Project:
             raise Exception("No elements available for generation")
         model = self.generations.generations_service.get_gen_model(request.model_id)
         prompt_name = request.prompt_name if request.prompt_name else ""
+        if self.params.dir is None:
+            raise Exception
         # sample and model (with decrypted credentials) go to the worker through a pickle
         data_path = self.params.dir.joinpath(f"gen_{uuid.uuid4().hex}.pkl")
-        pd.to_pickle(
-            {"data": extract, "model": GenerationModel(**model.__dict__).model_dump()}, data_path
+        data_path.write_bytes(
+            pickle.dumps({"data": extract, "model": GenerationModel(**model.__dict__).model_dump()})
         )
         try:
             (unique_id, abortable) = new_task_id(generate_call_task)
@@ -2506,8 +2474,6 @@ class Project:
         except Exception:
             data_path.unlink(missing_ok=True)
             raise
-        if self.params.dir is None:
-            raise Exception
         progress_path = self.params.dir.joinpath(unique_id)
 
         def get_progress() -> float | None:

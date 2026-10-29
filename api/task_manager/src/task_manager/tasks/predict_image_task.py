@@ -24,5 +24,8 @@ class PredictImageTask(AbortableAutoCallbackTask):
 def predict_image(self: PredictImageTask, inputs: PredictImageTaskInput) -> PredictImageTaskResult:
     predict_image = PredictImage(self.request.id, inputs, is_aborted=self.is_aborted)
     r = predict_image.run()
-    return {"project_slug": inputs.project_slug, "metrics":r["metrics"],"path":r["path"],}
-
+    return {
+        "project_slug": inputs.project_slug,
+        "metrics": r["metrics"],
+        "path": r["path"],
+    }

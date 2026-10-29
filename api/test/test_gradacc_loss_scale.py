@@ -60,8 +60,8 @@ def _train_tiny_bert(tmp_path, gradacc: int) -> Trainer:
         num_attention_heads=2,
         intermediate_size=64,
         max_position_embeddings=32,
-        num_labels=NUM_LABELS,
     )
+    config.num_labels = NUM_LABELS
     model = BertForSequenceClassification(config)
     args = TrainingArguments(
         output_dir=str(tmp_path / "out"),
@@ -79,7 +79,7 @@ def _train_tiny_bert(tmp_path, gradacc: int) -> Trainer:
         disable_tqdm=True,
     )
     callback = CustomLoggingCallback(
-        is_aborted=None, logger=logging.getLogger("test"), current_path=tmp_path
+        is_aborted=lambda: False, logger=logging.getLogger("test"), current_path=tmp_path
     )
     ds = _TinyDataset()
     trainer = Trainer(

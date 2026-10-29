@@ -24,5 +24,9 @@ class PredictMLTask(AbortableAutoCallbackTask):
 def predict_ml(self: PredictMLTask, inputs: PredictMLTaskInput) -> PredictMLTaskResult:
     predict_ml = PredictMLMultiClass(self.request.id, inputs, is_aborted=self.is_aborted)
     r = predict_ml.run()
-    return {"project_slug": inputs.project_slug, "path":r["path"],
-     "metrics":r["metrics"], "events":r["events"]}
+    return {
+        "project_slug": inputs.project_slug,
+        "path": r["path"],
+        "metrics": r["metrics"],
+        "events": r["events"],
+    }

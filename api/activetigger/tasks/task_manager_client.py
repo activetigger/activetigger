@@ -40,7 +40,7 @@ def enqueue_celery_task(
     try:
         task.s(inputs.model_dump(mode="json")).apply_async(task_id=task_id, **options)
     except Exception:
-        if process is not None and computing is not None:
+        if process is not None and computing is not None and process in computing:
             computing.remove(process)
             for f in process.temp_files:
                 Path(f).unlink(missing_ok=True)

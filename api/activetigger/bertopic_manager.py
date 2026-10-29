@@ -27,6 +27,7 @@ from activetigger.db.languagemodels import ModelsService
 from activetigger.db.manager import DatabaseManager
 from activetigger.errors import NotFoundError
 from activetigger.features import Features
+from activetigger.monitoring import Monitoring
 from activetigger.tasks.task_manager_client import enqueue_celery_task, new_task_id
 
 
@@ -51,6 +52,7 @@ class Bertopic:
         db_manager: DatabaseManager,
     ) -> None:
         self.project_slug = project_slug
+        self.monitoring = Monitoring(db_manager, project_slug)
         self.computing = computing
         self.path: Path = path.joinpath("bertopic")
         self.path.mkdir(parents=True, exist_ok=True)
@@ -106,6 +108,10 @@ class Bertopic:
             random_seed=config.random_seed,
         )
         unique_id, abortable = new_task_id(compute_bertopic)
+        # registered before the send: a fast task calls back at once
+        self.monitoring.register_process(
+            process_name=unique_id, kind="fit_bertopic", parameters={}, user_name=user
+        )
         enqueue_celery_task(
             compute_bertopic,
             inputs,

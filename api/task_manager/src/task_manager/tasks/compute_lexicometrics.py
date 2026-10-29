@@ -73,7 +73,7 @@ def compute_lexicometrics(
     """
     texts = load_texts(path_data, train_file, col_text)
 
-    words_per_doc = texts.str.split().str.len()
+    words_per_doc = texts.str.count(r"\S+")  # whitespace-separated words
     _check_aborted(is_aborted)
 
     tokens_per_doc = count_tokens(texts, tokenizer_name, is_aborted=is_aborted)
