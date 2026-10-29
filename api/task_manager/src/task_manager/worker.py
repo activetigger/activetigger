@@ -44,7 +44,7 @@ def start_gpu_worker_pool():
         f"--loglevel={config.worker_loglevel}",
         # we might need to create one queue by GPU device
         f"--concurrency={config.gpu_worker_concurrency}",
-        "--pool=prefork",
+        "--pool=solo",
         "--max-tasks-per-child=1",
         f"--queues={QueueName.GPU}",
         "--hostname=worker_gpu@%h",

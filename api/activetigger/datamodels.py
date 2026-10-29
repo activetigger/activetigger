@@ -1441,7 +1441,7 @@ class TopicsOutModel(BaseModel):
 
 
 class BertopicOutModelParameters(BaseModel):
-    bertopic_params: ComputeBertopicModel
+    bertopic_params: BertopicParamsModel
     col_text: str
     col_id: str | None
     name: str

@@ -2853,7 +2853,7 @@ export interface components {
         };
         /** BertopicOutModelParameters */
         BertopicOutModelParameters: {
-            bertopic_params: components["schemas"]["ComputeBertopicModel"];
+            bertopic_params: components["schemas"]["BertopicParamsModel"];
             /** Col Text */
             col_text: string;
             /** Col Id */
