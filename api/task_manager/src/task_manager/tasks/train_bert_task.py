@@ -26,6 +26,8 @@ class TrainBertTask(AbortableAutoCallbackTask):
     pydantic=True,
 )
 def train_bert(self: TrainBertTask, inputs: TrainBertTaskInput) -> TrainBertTaskResult:
-    train_bert = TrainBert(self.request.id, inputs, is_aborted=self.is_aborted)
+    train_bert = TrainBert(
+        self.request.id, inputs, is_aborted=self.is_aborted, update_progress=self.update_progress
+    )
     r = train_bert.run()
     return {"events": r["events"], "project_slug": inputs.project_slug}

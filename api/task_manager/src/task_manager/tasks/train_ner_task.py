@@ -24,6 +24,8 @@ class TrainNerTask(AbortableAutoCallbackTask):
     pydantic=True,
 )
 def train_ner(self: TrainNerTask, inputs: TrainNerTaskInput) -> TrainNerTaskResult:
-    train_ner = TrainNer(self.request.id, inputs, is_aborted=self.is_aborted)
+    train_ner = TrainNer(
+        self.request.id, inputs, is_aborted=self.is_aborted, update_progress=self.update_progress
+    )
     r = train_ner.run()
     return {"events": r["events"], "project_slug": inputs.project_slug}

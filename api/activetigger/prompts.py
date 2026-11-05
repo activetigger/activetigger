@@ -20,7 +20,7 @@ import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -41,7 +41,11 @@ from activetigger.datamodels import (
 )
 from activetigger.errors import InvalidInputError, NotFoundError
 from activetigger.features import Features
-from activetigger.tasks.task_manager_client import enqueue_celery_task, new_task_id
+from activetigger.tasks.task_manager_client import (
+    enqueue_celery_task,
+    get_celery_task_progress,
+    new_task_id,
+)
 
 # Feature kinds whose vectors live in a space we can encode a text query into.
 BINDABLE_FEATURE_KINDS = {"multimodal-embeddings", "sentence-embeddings"}
@@ -376,6 +380,9 @@ class Prompts:
         data = self._dataset_series(dataset)
         specs, data_path = self.features.build_compute_specs([feature_name], data)
 
+        # TODO: create a group of task for each spec in specs
+
+        # add a chord to the group to handle results
         (unique_id, abortable) = new_task_id(compute_similarity_with_features)
         task_inputs = ComputeSimilarityWithFeaturesTaskInput(
             project_slug=self.project_slug,
@@ -390,17 +397,6 @@ class Prompts:
             path_output=self._similarity_dir(prompt_id),
             file_name=f"similarity_{dataset}.parquet",
         )
-
-        progress_path = self.features.path_all.parent.joinpath(unique_id)
-
-        def get_progress() -> float | None:
-            try:
-                if not progress_path.exists():
-                    return None
-                raw = progress_path.read_text().strip()
-                return float(raw) if raw else 0.0
-            except (OSError, ValueError):
-                return None
 
         enqueue_celery_task(
             compute_similarity_with_features,
@@ -417,7 +413,6 @@ class Prompts:
                 text=str(prompt_row["text"]),
                 feature_name=feature_name,
                 dataset=dataset,
-                get_progress=get_progress,
             ),
         )
         return unique_id
@@ -477,13 +472,13 @@ class Prompts:
         for e in self.computing:
             if e.kind != "prompt_similarity":
                 continue
-            progress = e.get_progress() if e.get_progress is not None else None
+            progress = get_celery_task_progress(e.unique_id)
             out[e.prompt_id] = {
                 "prompt_id": e.prompt_id,
                 "text": e.text,
                 "feature_name": e.feature_name,
                 "dataset": e.dataset,
-                "progress": str(progress) if progress is not None else None,
+                "progress": str(progress["progress"]) if progress is not None else None,
             }
         return out
 
@@ -492,19 +487,13 @@ class Prompts:
         for e in self.computing:
             if e.kind != "prompt":
                 continue
-            e = e  # type: PromptComputing
-            progress_file = self.path_dir.joinpath(e.unique_id)
-            progress: str | None = None
-            try:
-                if progress_file.exists():
-                    progress = progress_file.read_text().strip()
-            except OSError:
-                progress = None
+            e = cast(PromptComputing, e)
+            progress = get_celery_task_progress(e.unique_id)
             out[e.prompt_id] = {
                 "prompt_id": e.prompt_id,
                 "text": e.text,
                 "feature_name": e.feature_name,
-                "progress": progress,
+                "progress": str(progress["progress"]) if progress else None,
             }
         return out
 

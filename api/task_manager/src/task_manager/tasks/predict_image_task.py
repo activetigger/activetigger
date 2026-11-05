@@ -22,7 +22,9 @@ class PredictImageTask(AbortableAutoCallbackTask):
     pydantic=True,
 )
 def predict_image(self: PredictImageTask, inputs: PredictImageTaskInput) -> PredictImageTaskResult:
-    predict_image = PredictImage(self.request.id, inputs, is_aborted=self.is_aborted)
+    predict_image = PredictImage(
+        self.request.id, inputs, is_aborted=self.is_aborted, update_progress=self.update_progress
+    )
     r = predict_image.run()
     return {
         "project_slug": inputs.project_slug,

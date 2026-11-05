@@ -48,7 +48,11 @@ from activetigger.functions import (
     serve_temp_export,
 )
 from activetigger.monitoring import Monitoring
-from activetigger.tasks.task_manager_client import enqueue_celery_task, new_task_id
+from activetigger.tasks.task_manager_client import (
+    enqueue_celery_task,
+    get_celery_task_progress,
+    new_task_id,
+)
 
 if TYPE_CHECKING:
     from activetigger.features import Features
@@ -293,11 +297,10 @@ class QuickModels:
         for e in self.computing:
             if getattr(e, "kind", None) not in kinds:
                 continue
-            get_progress = getattr(e, "get_progress", None)
             r[e.user] = LMComputingOutModel(
                 name=getattr(e, "name", ""),
                 status=getattr(e, "status", "training"),
-                progress=get_progress() if get_progress else None,
+                progress=get_celery_task_progress(e.unique_id),
             )
         return r
 
@@ -609,17 +612,6 @@ class QuickModels:
             file_name=f"predict_{dataset}.parquet",
         )
 
-        progress_path = self.features.path_all.parent.joinpath(unique_id)
-
-        def get_progress() -> float | None:
-            try:
-                if not progress_path.exists():
-                    return None
-                raw = progress_path.read_text().strip()
-                return float(raw) if raw else 0.0
-            except (OSError, ValueError):
-                return None
-
         enqueue_celery_task(
             predict_with_features,
             task_inputs,
@@ -639,7 +631,6 @@ class QuickModels:
                 model_type=sm.model_type,
                 model_params=sm.model_params,
                 labels=sm.labels,
-                get_progress=get_progress,
             ),
         )
         return unique_id

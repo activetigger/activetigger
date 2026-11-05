@@ -14,6 +14,8 @@ from transformers import (
     AutoTokenizer,  # ty: ignore[possibly-missing-import]
 )
 
+from task_manager.auto_callback_task import UpdateProgressMethod
+
 
 def _load_base_model_name(model_path: Path) -> str:
     params_file = model_path.joinpath("parameters.json")
@@ -28,7 +30,7 @@ def _load_base_model_name(model_path: Path) -> str:
 def encode_bert_embeddings(
     texts: Series,
     model_path: Path,
-    path_progress: Path,
+    update_progress: UpdateProgressMethod,
     pooling: str = "mean",
     batch_size: int = 32,
     max_tokens: int = 512,
@@ -77,8 +79,7 @@ def encode_bert_embeddings(
 
     try:
         print("start computation")
-        with open(path_progress, "w") as f:
-            f.write("0")
+        update_progress(0)
         embeddings: list[np.ndarray] = []
         total_batches = math.ceil(len(texts) / batch_size)
         for i, start in enumerate(range(0, len(texts), batch_size), 1):
@@ -113,9 +114,7 @@ def encode_bert_embeddings(
             embeddings.append(pooled.cpu().numpy())
 
             progress_percent = (i / total_batches) * 100
-            with open(path_progress, "w") as f:
-                f.write(str(round(progress_percent, 1)))
-            print(progress_percent)
+            update_progress(progress_percent)
 
         stacked = np.vstack(embeddings)
         return DataFrame(

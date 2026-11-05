@@ -41,7 +41,12 @@ def prepare_dataset_task(
     self: PrepareDatasetTask, inputs: PrepareDatasetTaskInput
 ) -> PrepareDatasetTaskResult:
     # progress lives at <session>/progress, read by Toolbox.status
-    result_path = prepare_dataset(inputs.path_session, inputs.params, is_aborted=self.is_aborted)
+    result_path = prepare_dataset(
+        inputs.path_session,
+        inputs.params,
+        is_aborted=self.is_aborted,
+        update_progress=self.update_progress,
+    )
     return {
         "username": inputs.username,
         "session_id": inputs.session_id,

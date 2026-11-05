@@ -41,18 +41,15 @@ class ComputePromptEmbeddingTask(AbortableAutoCallbackTask):
 def compute_prompt_embedding(
     self: ComputePromptEmbeddingTask, inputs: ComputePromptEmbeddingTaskInput
 ) -> ComputePromptEmbeddingTaskResult:
-    # the API reads the progress file named after the task id
-    path_progress = inputs.path_process.joinpath(self.request.id)
-    try:
-        vec = encode_prompt(
-            inputs.text,
-            model_name=inputs.model_name,
-            kind=inputs.kind,
-            path_progress=path_progress,
-            is_aborted=self.is_aborted,
-        )
-    finally:
-        path_progress.unlink(missing_ok=True)
+
+    vec = encode_prompt(
+        inputs.text,
+        model_name=inputs.model_name,
+        kind=inputs.kind,
+        is_aborted=self.is_aborted,
+        update_progress=self.update_progress,
+    )
+
     return {
         "project_slug": inputs.project_slug,
         "prompt_id": inputs.prompt_id,

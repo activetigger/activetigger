@@ -44,21 +44,19 @@ class ComputeSbertTask(AbortableAutoCallbackTask):
     pydantic=True,
 )
 def compute_sbert(self: ComputeSbertTask, inputs: ComputeSbertTaskInput) -> ComputeSbertTaskResult:
-    # the API reads the progress file named after the task id
-    path_progress = inputs.path_process.joinpath(self.request.id)
+
     texts = pd.read_pickle(inputs.texts_path)
     try:
         emb = encode_sbert(
             texts,
             model=inputs.model,
-            path_progress=path_progress,
+            update_progress=self.update_progress,
             batch_size=inputs.batch_size,
             min_gpu=inputs.min_gpu,
             max_tokens=inputs.max_tokens,
             is_aborted=self.is_aborted,
         )
     finally:
-        path_progress.unlink(missing_ok=True)
         unlink(inputs.texts_path)
     embeddings_path = inputs.path_process.joinpath(f"sbert_{self.request.id}.parquet")
     emb.to_parquet(embeddings_path)

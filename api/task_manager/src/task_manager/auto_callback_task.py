@@ -1,4 +1,5 @@
 from enum import StrEnum
+from typing import Protocol, TypedDict
 
 from celery import Task
 from celery.contrib.abortable import ABORTED, AbortableTask
@@ -16,6 +17,16 @@ from task_manager.utils import (
 class QueueName(StrEnum):
     CPU = "CPU"
     GPU = "GPU"
+
+
+# typehint for UpdateProgressMethod methods
+class UpdateProgressMethod(Protocol):
+    def __call__(self, progress: float, label: str | None = None) -> None: ...
+
+
+class TaskProgressState(TypedDict):
+    progress: float
+    progress_label: str | None
 
 
 class AutoCallbackTask(Task):
@@ -46,6 +57,10 @@ class AutoCallbackTask(Task):
         )
         task_failure_callback(task_id, report)
         return super().on_failure(exc, task_id, args, kwargs, einfo)
+
+    # Progress state is used to monitor state in orchestrator
+    def update_progress(self, progress: float, label: str | None = None):
+        self.update_state(state="PROGRESS", meta={"progress": progress, "progress_label": label})
 
 
 class AbortableAutoCallbackTask(AutoCallbackTask, AbortableTask):

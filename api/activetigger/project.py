@@ -2474,13 +2474,6 @@ class Project:
         except Exception:
             data_path.unlink(missing_ok=True)
             raise
-        progress_path = self.params.dir.joinpath(unique_id)
-
-        def get_progress() -> float | None:
-            try:
-                return int(progress_path.read_text())
-            except Exception:
-                return None
 
         enqueue_celery_task(
             generate_call_task,
@@ -2496,7 +2489,6 @@ class Project:
                 dataset=request.dataset,
                 time=datetime.now(timezone.utc),
                 kind="generation",
-                get_progress=get_progress,
                 abortable_celery_task=abortable,
                 temp_files=[data_path],
             ),

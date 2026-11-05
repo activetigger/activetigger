@@ -10,11 +10,13 @@ from activetigger.functions import get_device, release_device_memory
 from pandas import DataFrame, Series
 from sentence_transformers import SentenceTransformer
 
+from task_manager.auto_callback_task import UpdateProgressMethod
+
 
 def encode_sbert(
     texts: Series,
     model: str,
-    path_progress: Path,
+    update_progress: UpdateProgressMethod,
     batch_size: int = 32,
     min_gpu: int = 6,
     max_tokens: int = 1024,
@@ -71,9 +73,7 @@ def encode_sbert(
             )
 
             progress_percent = (i / total_batches) * 100
-            with open(path_progress, "w") as f:
-                f.write(str(round(progress_percent, 1)))
-            print(progress_percent)
+            update_progress(progress_percent, "sbert")
 
         return DataFrame(
             np.vstack(embeddings),

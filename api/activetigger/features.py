@@ -40,7 +40,11 @@ from activetigger.datamodels import (
 )
 from activetigger.db.projects import ProjectsService
 from activetigger.errors import AlreadyExistsError, InvalidInputError, NotFoundError
-from activetigger.tasks.task_manager_client import enqueue_celery_task, new_task_id
+from activetigger.tasks.task_manager_client import (
+    enqueue_celery_task,
+    get_celery_task_progress,
+    new_task_id,
+)
 
 # Experimental image projects: list of selectable image embedding models.
 # Each entry maps a UI label to (open_clip model name, pretrained tag).
@@ -585,8 +589,9 @@ class Features:
         return [e for e in self.computing if getattr(e, "user", None) == user]
 
     def current_computing(self) -> dict[str, dict[str, str | None]]:
+        progress = get_celery_task_progress(e.unique_id)
         computing = {
-            e.name: {"progress": self.computing_progress(e.unique_id), "name": e.name}
+            e.name: {"progress": str(progress["progress"]) if progress else None, "name": e.name}
             for e in self.computing
             if e.kind == "feature"
         }
@@ -595,8 +600,9 @@ class Features:
         # lets the frontend render this entry differently.
         for e in self.computing:
             if e.kind == "extend_features":
+                progress = get_celery_task_progress(e.unique_id)
                 computing["extending features"] = {
-                    "progress": self.computing_progress(e.unique_id),
+                    "progress": str(progress["progress"]) if progress else None,
                     "name": "extending features",
                     "kind": "extend_features",
                 }
@@ -1070,18 +1076,6 @@ class Features:
         if self.data.test is not None:
             parts.append(self.data.test[column])
         return pd.concat(parts)
-
-    def computing_progress(self, unique_id: str) -> str | None:
-        """
-        Get the progress of a computing feature
-        """
-        try:
-            with open(self.path_all.parent.joinpath(unique_id), "r") as f:
-                r = f.read()
-            return r
-        except Exception as e:
-            print(e)
-            return None
 
     def state(self) -> FeaturesProjectStateModel:
         # Refresh trained-BERT list each call: models are trained out-of-band

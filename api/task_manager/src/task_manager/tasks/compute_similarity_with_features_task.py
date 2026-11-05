@@ -11,7 +11,6 @@ from task_manager.celery import celery_app
 from task_manager.tasks.compute_features_from_specs import (
     FeatureSpec,
     compute_features_from_specs,
-    write_progress,
 )
 
 
@@ -74,8 +73,6 @@ def cosine_similarity_ranking(features: DataFrame, prompt_vector: np.ndarray) ->
 def compute_similarity_with_features(
     self: ComputeSimilarityWithFeaturesTask, inputs: ComputeSimilarityWithFeaturesTaskInput
 ) -> ComputeSimilarityWithFeaturesTaskResult:
-    # the API reads the progress file named after the task id
-    path_progress = inputs.path_process.joinpath(self.request.id)
     try:
         data = pd.read_pickle(inputs.data_path)
         # one extra progress unit for the final similarity step
@@ -85,7 +82,7 @@ def compute_similarity_with_features(
             path_process=inputs.path_process,
             path_models=inputs.path_models,
             language=inputs.language,
-            path_progress=path_progress,
+            update_progress=self.update_progress,
             is_aborted=self.is_aborted,
             total=len(inputs.specs) + 1,
         )
@@ -94,9 +91,8 @@ def compute_similarity_with_features(
         inputs.path_output.mkdir(parents=True, exist_ok=True)
         output_path = inputs.path_output.joinpath(inputs.file_name)
         similarity.to_parquet(output_path, index=True)
-        write_progress(path_progress, 100.0)
+        self.update_progress(100)
     finally:
-        path_progress.unlink(missing_ok=True)
         inputs.data_path.unlink(missing_ok=True)
     return {
         "project_slug": inputs.project_slug,

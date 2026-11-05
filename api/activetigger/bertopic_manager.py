@@ -27,8 +27,12 @@ from activetigger.db.languagemodels import ModelsService
 from activetigger.db.manager import DatabaseManager
 from activetigger.errors import NotFoundError
 from activetigger.features import Features
-from activetigger.monitoring import Monitoring
-from activetigger.tasks.task_manager_client import enqueue_celery_task, new_task_id
+from activetigger.monitoring import Monitoring, TrainingState
+from activetigger.tasks.task_manager_client import (
+    enqueue_celery_task,
+    get_celery_task_progress,
+    new_task_id,
+)
 
 
 class Bertopic:
@@ -128,7 +132,6 @@ class Bertopic:
                 time=datetime.now(timezone.utc),
                 kind="bertopic",
                 force_compute_embeddings=False,
-                get_progress=self.get_progress(name),
             ),
         )
         return unique_id
@@ -156,16 +159,18 @@ class Bertopic:
             path=str(model_path),
         )
 
-    def training(self) -> dict[str, dict[str, str | int | float | None]]:
+    def training(self) -> dict[str, TrainingState]:
         """
         Get available BERTopic models in the current process
         """
         return {
-            e.user: {
-                "name": e.name,
-                "status": "training",
-                "progress": e.get_progress() if e.get_progress else None,
-            }
+            e.user: TrainingState(
+                {
+                    "name": e.name,
+                    "status": "training",
+                    "progress": get_celery_task_progress(e.unique_id),
+                }
+            )
             for e in self.computing
             if e.kind == "bertopic"
         }
@@ -272,33 +277,6 @@ class Bertopic:
         Get current user processes
         """
         return [e for e in self.computing if e.user == user]
-
-    def get_progress(self, name) -> Callable[[], float | None]:
-        """
-        Access the log progress.
-        During embedding computation, reads from a separate SBERT progress file
-        and scales it to the 10-60% range of the overall BERTopic progress.
-        """
-        path_run = self.path.joinpath("runs").joinpath(name)
-        path_progress = path_run.joinpath("progress")
-        path_sbert_progress = path_run.joinpath("progress_sbert")
-
-        def progress():
-            # If SBERT is computing embeddings, scale its 0-100 to 10-60
-            if path_sbert_progress.exists():
-                try:
-                    sbert_val = float(path_sbert_progress.read_text().strip())
-                    return 10 + (sbert_val / 100) * 50
-                except (ValueError, OSError):
-                    pass
-            if path_progress.exists():
-                try:
-                    return float(path_progress.read_text().strip())
-                except (ValueError, OSError):
-                    pass
-            return None
-
-        return progress
 
     def delete(self, name: str) -> None:
         """

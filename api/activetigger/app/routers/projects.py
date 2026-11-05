@@ -28,6 +28,7 @@ from activetigger.datamodels import (
     LexicometricsModel,
     ProjectAuthsModel,
     ProjectBaseModel,
+    ProjectCreatingModel,
     ProjectDescriptionModel,
     ProjectStateModel,
     ProjectUpdateModel,
@@ -38,6 +39,7 @@ from activetigger.errors import APIError
 from activetigger.functions import slugify
 from activetigger.orchestrator import get_orchestrator
 from activetigger.project import Project
+from activetigger.tasks.task_manager_client import get_celery_task_progress
 from activetigger.uploads import get_upload_staging
 
 router = APIRouter(tags=["projects"])
@@ -314,15 +316,14 @@ def get_project_status(
         if slug in orchestrator.project_creation_ongoing:
             # Try to read creation progress for image projects
             project = orchestrator.project_creation_ongoing[slug]
-            try:
-                proj_dir = getattr(project, "params", None) and project.params.dir
-                if proj_dir is not None:
-                    progress_file = Path(proj_dir) / "creation_progress"
-                    if progress_file.exists():
-                        return f"creating:{progress_file.read_text().strip()}"
-            except Exception:
-                pass
-            return "creating"
+            creation_tasks = [t for t in project.computing if isinstance(t, ProjectCreatingModel)]
+            if len(creation_tasks) > 0:
+                # normally we should only have one
+                creation_task = creation_tasks[0]
+                creation_progress = get_celery_task_progress(creation_task.unique_id)
+                if creation_progress:
+                    return f"creating:{creation_progress['progress']}"
+                return "creating"
         # if creation failed, return the error (consumed once)
         if slug in orchestrator.creation_errors:
             error_msg = orchestrator.creation_errors.pop(slug)

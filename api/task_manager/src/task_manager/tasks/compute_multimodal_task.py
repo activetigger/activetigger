@@ -47,19 +47,16 @@ class ComputeMultimodalTask(AbortableAutoCallbackTask):
 def compute_multimodal(
     self: ComputeMultimodalTask, inputs: ComputeMultimodalTaskInput
 ) -> ComputeMultimodalTaskResult:
-    # the API reads the progress file named after the task id
-    path_progress = inputs.path_process.joinpath(self.request.id)
     paths = pd.read_pickle(inputs.paths_path)
     try:
         emb = encode_multimodal(
             paths,
             model_name=inputs.hf_name,
-            path_progress=path_progress,
+            update_progress=self.update_progress,
             batch_size=inputs.batch_size,
             is_aborted=self.is_aborted,
         )
     finally:
-        path_progress.unlink(missing_ok=True)
         unlink(inputs.paths_path)
     embeddings_path = inputs.path_process.joinpath(f"multimodal_{self.request.id}.parquet")
     emb.to_parquet(embeddings_path)

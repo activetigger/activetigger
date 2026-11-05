@@ -12,6 +12,8 @@ from activetigger.generation.openapi import OpenAPI
 from activetigger.generation.openrouter import OpenRouter
 from pandas import DataFrame, Series
 
+from task_manager.auto_callback_task import UpdateProgressMethod
+
 # Flush in-memory results to a recovery file every N rows so a crash loses at
 # most FLUSH_EVERY - 1 paid generations instead of the whole batch.
 FLUSH_EVERY = 10
@@ -40,12 +42,6 @@ def make_client(model: GenerationModel) -> GenerationModelClient:
     raise Exception(f"Unknown model API: {model.api}")
 
 
-def _write_progress(path_progress: Path, progress: int) -> None:
-    with open(path_progress, "w") as f:
-        f.write(f"{progress}")
-    print(f"Progress: {progress}")
-
-
 def _flush_to_jsonl(path_jsonl: Path, chunk: list[GenerationResult], batch: str) -> None:
     with open(path_jsonl, "a") as f:
         for r in chunk:
@@ -62,8 +58,8 @@ def generate_call(
     username: str,
     project_slug: str,
     batch: str,
-    path_progress: Path,
     path_jsonl: Path,
+    update_progress: UpdateProgressMethod,
     n_workers: int = 1,
     is_aborted: Callable[[], bool] | None = None,
 ) -> tuple[int, int]:
@@ -93,48 +89,45 @@ def generate_call(
             answer=response,
         )
 
-    try:
-        _write_progress(path_progress, 0)
-        completed = 0
-        interrupted = False
-        with ThreadPoolExecutor(max_workers=n_workers) as executor:
-            futures = [executor.submit(process_row, idx, row) for idx, row in rows]
-            try:
-                for future in as_completed(futures):
-                    if is_aborted is not None and is_aborted():
-                        interrupted = True
-                        for f in futures:
-                            f.cancel()
-                        break
-                    try:
-                        results.append(future.result())
-                    except Exception as e:
-                        errors.append(e)
-                    completed += 1
-                    _write_progress(path_progress, int((completed / total) * 100))
-                    if len(results) - last_flushed >= FLUSH_EVERY:
-                        _flush_to_jsonl(path_jsonl, results[last_flushed:], batch)
-                        last_flushed = len(results)
-            except Exception:
-                for f in futures:
-                    f.cancel()
-                raise
+    update_progress(0)
+    completed = 0
+    interrupted = False
+    with ThreadPoolExecutor(max_workers=n_workers) as executor:
+        futures = [executor.submit(process_row, idx, row) for idx, row in rows]
+        try:
+            for future in as_completed(futures):
+                if is_aborted is not None and is_aborted():
+                    interrupted = True
+                    for f in futures:
+                        f.cancel()
+                    break
+                try:
+                    results.append(future.result())
+                except Exception as e:
+                    errors.append(e)
+                completed += 1
+                update_progress(int((completed / total) * 100))
+                if len(results) - last_flushed >= FLUSH_EVERY:
+                    _flush_to_jsonl(path_jsonl, results[last_flushed:], batch)
+                    last_flushed = len(results)
+        except Exception:
+            for f in futures:
+                f.cancel()
+            raise
 
-        if len(results) > last_flushed:
-            _flush_to_jsonl(path_jsonl, results[last_flushed:], batch)
+    if len(results) > last_flushed:
+        _flush_to_jsonl(path_jsonl, results[last_flushed:], batch)
 
-        if interrupted:
-            raise Exception("Process interrupted by user")
+    if interrupted:
+        raise Exception("Process interrupted by user")
 
-        # surface failures instead of silently returning a partial/empty batch
-        if errors and not results:
-            raise Exception(f"All {len(errors)} generation calls failed: {errors[0]}")
-        if errors:
-            print(f"Generation batch {batch}: {len(errors)}/{total} calls failed: {errors[0]}")
+    # surface failures instead of silently returning a partial/empty batch
+    if errors and not results:
+        raise Exception(f"All {len(errors)} generation calls failed: {errors[0]}")
+    if errors:
+        print(f"Generation batch {batch}: {len(errors)}/{total} calls failed: {errors[0]}")
 
-        return len(results), len(errors)
-    finally:
-        path_progress.unlink(missing_ok=True)
+    return len(results), len(errors)
 
 
 def replace_tags_with_text(row: Series, prompt: str, context_columns: list[str]) -> str:

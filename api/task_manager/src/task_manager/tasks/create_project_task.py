@@ -23,7 +23,7 @@ from celery import Task
 # from celery.utils.log import get_task_logger
 from pydantic import BaseModel
 
-from task_manager.auto_callback_task import AutoCallbackTask, QueueName
+from task_manager.auto_callback_task import AutoCallbackTask, QueueName, UpdateProgressMethod
 from task_manager.celery import celery_app
 
 # TODO: is that necessary? we don't use csv lib in this code
@@ -357,7 +357,9 @@ class CreateProjectTask(AutoCallbackTask):
         return result
 
     # TODO: refacto those two sibblings method by factoring code between image/normal project
-    def create_image_project(self: Task, props: CreateProjectTaskInput) -> CreateProjectTaskResult:
+    def create_image_project(
+        self: Task, props: CreateProjectTaskInput, update_progress: UpdateProgressMethod
+    ) -> CreateProjectTaskResult:
         """
         Experimental task for creating an "image" project.
         Accepts a .zip upload containing png/jpg files and an optional metadata
@@ -412,7 +414,7 @@ class CreateProjectTask(AutoCallbackTask):
             ]
 
             total_images = len(image_infos)
-            progress_file = props.params.dir.joinpath("creation_progress")
+
             for idx, info in enumerate(image_infos, 1):
                 src_name = Path(info.filename).name
                 element_id = Path(info.filename).stem
@@ -428,17 +430,7 @@ class CreateProjectTask(AutoCallbackTask):
 
                 # Write progress
                 progress_pct = round((idx / total_images) * 100, 1)
-                try:
-                    with open(progress_file, "w") as pf:
-                        pf.write(str(progress_pct))
-                except OSError:
-                    pass
-
-            # Clean up progress file
-            try:
-                progress_file.unlink()
-            except OSError:
-                pass
+                update_progress(progress_pct)
 
             metadata_df = None
             if metadata_infos:
@@ -599,6 +591,8 @@ class CreateProjectTask(AutoCallbackTask):
 )
 def create_project_task(self, props: CreateProjectTaskInput):
     if props.image_project:
-        return CreateProjectTask.create_image_project(self=self, props=props)
+        return CreateProjectTask.create_image_project(
+            self=self, props=props, update_progress=self.update_progress
+        )
     else:
         return CreateProjectTask.create_project(self=self, props=props)

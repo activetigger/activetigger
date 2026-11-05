@@ -35,6 +35,8 @@ from transformers import (
     AutoTokenizer,  # ty: ignore[possibly-missing-import]
 )
 
+from task_manager.auto_callback_task import UpdateProgressMethod
+
 
 class PredictBertTaskInput(BaseModel):
     path: Path
@@ -75,7 +77,11 @@ class PredictBertMultiClass:
     default_max_length = 512
 
     def __init__(
-        self, unique_id: str, inputs: PredictBertTaskInput, is_aborted: Callable[[], bool]
+        self,
+        unique_id: str,
+        inputs: PredictBertTaskInput,
+        is_aborted: Callable[[], bool],
+        update_progress: UpdateProgressMethod,
     ):
         self.path = inputs.path
         self.path_df = inputs.path_df
@@ -93,7 +99,7 @@ class PredictBertMultiClass:
         self.path_train = inputs.path_train
         self.path_valid = inputs.path_valid
         self.path_test = inputs.path_test
-        self.progress_path = self.path / "progress_predict"
+        self.update_progress = update_progress
         # for external datasets, remember the original id column so the export
         # can use it instead of the project's internal col_id (issue #1033)
         self.external_id_col = (
@@ -197,13 +203,6 @@ class PredictBertMultiClass:
                 df = pd.concat([df, *extra_frames])
 
         return df
-
-    def __write_progress(self, progress: float) -> None:
-        """
-        Write progress to the progress file
-        """
-        with open(self.progress_path, "w") as f:
-            f.write(str(progress))
 
     def __load_model(self) -> tuple:
         """
@@ -434,7 +433,7 @@ class PredictBertMultiClass:
                 logits = outputs[0].detach().cpu().numpy()
                 proba = logits_to_probs(logits, kind=self.training_kind)
                 proba_predictions = np.append(proba_predictions, proba, axis=0)
-                self.__write_progress(100 * (i + self.batch) / n_rows)
+                self.update_progress(100 * (i + self.batch) / n_rows)
             task_timer.stop("predict")
 
             task_timer.start("save_files")
@@ -458,9 +457,6 @@ class PredictBertMultiClass:
             print("Error in prediction", e)
             raise e
         finally:
-            # delete the temporary logs
-            if self.progress_path.exists():
-                os.remove(self.progress_path)
             # clean memory
             self.df = None
             try:

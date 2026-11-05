@@ -33,6 +33,8 @@ from transformers import (
     AutoModelForImageClassification,  # ty: ignore[possibly-missing-import]
 )
 
+from task_manager.auto_callback_task import UpdateProgressMethod
+
 # Cap PIL's maximum decoded pixel count to ~64 megapixels. Without this a
 # small attacker-supplied JPEG can decompress to several GB and OOM the
 # prediction worker. Matches the cap in train_image.py for consistency.
@@ -151,7 +153,11 @@ class PredictImage:
     kind = "predict_image"
 
     def __init__(
-        self, unique_id: str, inputs: PredictImageTaskInput, is_aborted: Callable[[], bool]
+        self,
+        unique_id: str,
+        inputs: PredictImageTaskInput,
+        is_aborted: Callable[[], bool],
+        update_progress: UpdateProgressMethod,
     ):
         self.path = inputs.path
         self.path_df = inputs.path_df
@@ -170,7 +176,7 @@ class PredictImage:
         self.path_train = inputs.path_train
         self.path_valid = inputs.path_valid
         self.path_test = inputs.path_test
-        self.progress_path = self.path / "progress_predict"
+        self.update_progress = update_progress
 
         if inputs.dataset == "external":
             raise ValueError("External-dataset prediction is not supported for image models yet.")
@@ -249,10 +255,6 @@ class PredictImage:
             if extra_frames:
                 df = pd.concat([df, *extra_frames])
         return df
-
-    def __write_progress(self, progress: float) -> None:
-        with open(self.progress_path, "w") as f:
-            f.write(str(progress))
 
     def __load_model(self):
         # backend="torchvision" picks the fast (tensor-native) image processor
@@ -424,7 +426,7 @@ class PredictImage:
                     logits = outputs.logits.float().detach().cpu().numpy()
                     proba_chunks.append(logits_to_probs(logits, kind=self.training_kind))
                     processed += batch_tensor.shape[0]
-                    self.__write_progress(100 * processed / n)
+                    self.update_progress(100 * processed / n)
                 # ensure persistent worker processes are torn down (and the
                 # restored start method actually takes effect on next use)
                 # before we exit the context manager.
@@ -443,8 +445,6 @@ class PredictImage:
             print("Error in image-classification prediction", e)
             raise e
         finally:
-            if self.progress_path.exists():
-                os.remove(self.progress_path)
             self.df = None
             try:
                 del model, image_processor

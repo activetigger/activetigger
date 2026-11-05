@@ -7,11 +7,7 @@ from pydantic import BaseModel
 
 from task_manager.auto_callback_task import AbortableAutoCallbackTask, QueueName
 from task_manager.celery import celery_app
-from task_manager.tasks.compute_features_from_specs import (
-    FeatureSpec,
-    compute_features_from_specs,
-    write_progress,
-)
+from task_manager.tasks.compute_features_from_specs import FeatureSpec, compute_features_from_specs
 
 
 class ExtendFeaturesTaskInput(BaseModel):
@@ -54,7 +50,6 @@ def extend_features(
     existing features for the new rows and append them) or dropped (empty
     specs: the set's rows are filtered out).
     """
-    path_progress = inputs.path_process.joinpath(self.request.id)
     try:
         data = pd.read_pickle(inputs.data_path)
         new_index, full_index = pd.read_pickle(inputs.indexes_path)
@@ -65,7 +60,7 @@ def extend_features(
             path_process=inputs.path_process,
             path_models=inputs.path_models,
             language=inputs.language,
-            path_progress=path_progress,
+            update_progress=self.update_progress,
             is_aborted=self.is_aborted,
             total=len(inputs.specs) + 1,
         )
@@ -93,9 +88,8 @@ def extend_features(
         tmp = inputs.path_features.with_suffix(".parquet.tmp")
         merged.to_parquet(tmp, index=True)
         tmp.replace(inputs.path_features)
-        write_progress(path_progress, 100.0)
+        self.update_progress(100.0)
     finally:
-        path_progress.unlink(missing_ok=True)
         inputs.data_path.unlink(missing_ok=True)
         inputs.indexes_path.unlink(missing_ok=True)
     return {"project_slug": inputs.project_slug, "eval_dataset": inputs.eval_dataset}

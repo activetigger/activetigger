@@ -26,7 +26,9 @@ class PredictBertTask(AbortableAutoCallbackTask):
     pydantic=True,
 )
 def predict_bert(self: PredictBertTask, inputs: PredictBertTaskInput) -> PredictBertTaskResult:
-    predict_bert = PredictBertMultiClass(self.request.id, inputs, is_aborted=self.is_aborted)
+    predict_bert = PredictBertMultiClass(
+        self.request.id, inputs, is_aborted=self.is_aborted, update_progress=self.update_progress
+    )
     r = predict_bert.run()
     return {
         "project_slug": inputs.project_slug,

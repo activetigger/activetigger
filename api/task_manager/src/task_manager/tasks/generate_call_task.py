@@ -63,10 +63,10 @@ def generate_call_task(
             inputs.username,
             inputs.project_slug,
             batch,
-            path_progress=inputs.path_process.joinpath(task_id),
             path_jsonl=path_jsonl,
             n_workers=inputs.n_workers,
             is_aborted=self.is_aborted,
+            update_progress=self.update_progress,
         )
     finally:
         inputs.data_path.unlink(missing_ok=True)

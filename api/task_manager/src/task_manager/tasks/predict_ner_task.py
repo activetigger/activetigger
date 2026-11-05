@@ -22,7 +22,9 @@ class PredictNerTask(AbortableAutoCallbackTask):
     pydantic=True,
 )
 def predict_ner(self: PredictNerTask, inputs: PredictNerTaskInput) -> PredictNerTaskResult:
-    predict_ner = PredictNer(self.request.id, inputs, is_aborted=self.is_aborted)
+    predict_ner = PredictNer(
+        self.request.id, inputs, is_aborted=self.is_aborted, update_progress=self.update_progress
+    )
     r = predict_ner.run()
     return {
         "project_slug": inputs.project_slug,

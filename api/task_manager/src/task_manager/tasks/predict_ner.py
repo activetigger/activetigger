@@ -29,6 +29,7 @@ from transformers import (
     AutoTokenizer,  # ty: ignore[possibly-missing-import]
 )
 
+from task_manager.auto_callback_task import UpdateProgressMethod
 from task_manager.tasks.train_ner import decode_spans, parse_spans
 
 
@@ -74,7 +75,13 @@ class PredictNer:
     kind = "predict_ner"
     default_max_length = 512
 
-    def __init__(self, unique_id: str, inputs: PredictNerTaskInput, is_aborted: Callable[[], bool]):
+    def __init__(
+        self,
+        unique_id: str,
+        inputs: PredictNerTaskInput,
+        is_aborted: Callable[[], bool],
+        update_progress: UpdateProgressMethod,
+    ):
         self.path = inputs.path
         self.path_df = inputs.path_df
         self.df: DataFrame | None = None
@@ -91,7 +98,7 @@ class PredictNer:
         self.path_train = inputs.path_train
         self.path_valid = inputs.path_valid
         self.path_test = inputs.path_test
-        self.progress_path = self.path / "progress_predict"
+        self.update_progress = update_progress
         self.external_id_col = (
             inputs.external_dataset.id
             if inputs.dataset == "external" and inputs.external_dataset
@@ -163,10 +170,6 @@ class PredictNer:
             if extra_frames:
                 df = pd.concat([df, *extra_frames])
         return df
-
-    def __write_progress(self, progress: float) -> None:
-        with open(self.progress_path, "w") as f:
-            f.write(str(progress))
 
     def __listen_stop_event(self):
         if self.is_aborted():
@@ -281,7 +284,7 @@ class PredictNer:
                         text=batch_texts[j],
                     )
                     predictions_json.append(json.dumps(spans))
-                self.__write_progress(100 * (i + self.batch) / n_rows)
+                self.update_progress(100 * (i + self.batch) / n_rows)
             task_timer.stop("predict")
 
             task_timer.start("save_files")
@@ -309,8 +312,6 @@ class PredictNer:
             print("Error in NER prediction", e)
             raise
         finally:
-            if self.progress_path.exists():
-                os.remove(self.progress_path)
             self.df = None
             try:
                 del model, tokenizer

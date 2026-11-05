@@ -9,6 +9,8 @@ from activetigger.datamodels import PrepareSplitModel
 from activetigger.functions import concat_text_columns, get_device
 from wtpsplit import SaT
 
+from task_manager.auto_callback_task import UpdateProgressMethod
+
 WTPSPLIT_MODEL = "sat-3l-sm"
 WTPSPLIT_BATCH_CHARS = 500_000
 WTPSPLIT_BATCH_SIZE = 8
@@ -44,14 +46,6 @@ def split_by_regex(text: str, pattern: str) -> list[str]:
     return [s.strip() for s in re.split(pattern, text) if s and s.strip()]
 
 
-def _write_progress(path_progress: Path, done: int, total: int) -> None:
-    try:
-        with open(path_progress, "w") as f:
-            f.write(str(round((done / max(total, 1)) * 100, 1)))
-    except OSError:
-        pass
-
-
 def _check_interrupt(is_aborted: Callable[[], bool] | None) -> None:
     if is_aborted is not None and is_aborted():
         raise Exception("Process interrupted by user")
@@ -67,7 +61,7 @@ def _empty_device_cache(device: torch.device) -> None:
 def split_wtpsplit(
     texts: list[str],
     granularity: str | None,
-    path_progress: Path,
+    update_progress: UpdateProgressMethod,
     is_aborted: Callable[[], bool] | None = None,
 ) -> list[list[str]]:
     device = get_device()
@@ -101,7 +95,7 @@ def split_wtpsplit(
                     chunks = [s.strip() for s in element]
                 all_chunks.append([c for c in chunks if c])
             start = end
-            _write_progress(path_progress, start, total)
+            update_progress(round((start / max(total, 1)) * 100, 1))
             _empty_device_cache(device)
     finally:
         del sat
@@ -113,7 +107,7 @@ def split_wtpsplit(
 def prepare_dataset(
     path_session: Path,
     params: PrepareSplitModel,
-    path_progress: Path | None = None,
+    update_progress: UpdateProgressMethod,
     is_aborted: Callable[[], bool] | None = None,
 ) -> Path:
     """
@@ -124,8 +118,7 @@ def prepare_dataset(
     """
     path_raw = path_session.joinpath("raw.parquet")
     path_result = path_session.joinpath("result.parquet")
-    if path_progress is None:
-        path_progress = path_session.joinpath("progress")
+
     if not path_raw.exists():
         raise Exception("Uploaded data not found, please upload the file again")
 
@@ -177,7 +170,7 @@ def prepare_dataset(
                 _check_interrupt(is_aborted)
                 all_chunks.append(split_by_chars(text, params.chunk_size))
                 if i % 1000 == 0:
-                    _write_progress(path_progress, i, len(texts))
+                    update_progress(round((i / max(len(texts), 1)) * 100, 1))
         elif params.method == "regex":
             if not params.regex_pattern:
                 raise Exception("A regex pattern is required")
@@ -186,9 +179,10 @@ def prepare_dataset(
                 _check_interrupt(is_aborted)
                 all_chunks.append(split_by_regex(text, params.regex_pattern))
                 if i % 1000 == 0:
-                    _write_progress(path_progress, i, len(texts))
+                    update_progress(round((i / max(len(texts), 1)) * 100, 1))
+
         elif params.method == "wtpsplit":
-            all_chunks = split_wtpsplit(texts, params.granularity, path_progress, is_aborted)
+            all_chunks = split_wtpsplit(texts, params.granularity, update_progress, is_aborted)
         elif params.method == "none":
             all_chunks = [[c for c in [text.strip()] if c] for text in texts]
         else:
@@ -224,7 +218,6 @@ def prepare_dataset(
         result.to_parquet(path_result, index=False)
         return path_result
     finally:
-        path_progress.unlink(missing_ok=True)
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()

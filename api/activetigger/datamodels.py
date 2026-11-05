@@ -6,6 +6,7 @@ from typing import Annotated, Any, Callable, Literal, Optional, TypedDict
 from pandas import DataFrame
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field  # for dataframe
 from sklearn.base import BaseEstimator
+from task_manager.auto_callback_task import TaskProgressState
 
 # Data model to use of the API
 
@@ -710,9 +711,8 @@ class UpdateComputing(ProcessComputing):
 class LMComputing(ProcessComputing):
     model_name: str
     status: str
-    scheme: Optional[str] = None
-    dataset: Optional[str] = None
-    get_progress: Callable[[], float | None] | None = None
+    scheme: str | None = None
+    dataset: str | None = None
     params: dict[str, Any] | None = None
     training_kind: str
 
@@ -720,7 +720,7 @@ class LMComputing(ProcessComputing):
 class LMComputingOutModel(BaseModel):
     name: str
     status: str
-    progress: float | None = None
+    progress: TaskProgressState | None = None
     loss: dict[str, dict] | None = None
     epochs: float | None = None
 
@@ -770,7 +770,6 @@ class PromptSimilarityComputing(ProcessComputing):
     text: str
     feature_name: str
     dataset: str
-    get_progress: Callable[[], float | None] | None = None
 
 
 class PromptInModel(BaseModel):
@@ -794,7 +793,6 @@ class GenerationComputing(ProcessComputing):
     number: int
     model_id: int
     dataset: str = "train"
-    get_progress: Callable[[], float | None] | None = None
     prompt_name: str | None = None
 
 
@@ -806,7 +804,6 @@ class BertopicComputing(ProcessComputing):
     col_text: str | None
     parameters: BertopicParamsModel
     force_compute_embeddings: bool
-    get_progress: Callable[[], str | float | None] | None = None
 
 
 class QuickModelInModel(BaseModel):
@@ -847,7 +844,6 @@ class QuickModelComputing(ProcessComputing):
     exclude_labels: list[str] = []
     test_size: float = 0.2
     retrain: bool = False
-    get_progress: Callable[[], float | None] | None = None
 
 
 class QuickModelComputed(BaseModel):
@@ -906,7 +902,7 @@ class GenerationComputingOut(BaseModel):
     """
 
     model_id: int
-    progress: float | None
+    progress: TaskProgressState | None
 
 
 class TableOutModel(BaseModel):
@@ -1428,7 +1424,7 @@ class ProjectCreatingModel(ProcessComputing):
     project_slug: str
     unique_id: str
     time: datetime.datetime
-    kind: str
+    kind: Literal["create_project"]
     status: str
 
 

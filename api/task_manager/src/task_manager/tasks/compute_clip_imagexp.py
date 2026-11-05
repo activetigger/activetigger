@@ -17,12 +17,14 @@ import numpy as np
 from activetigger.functions import get_device, release_device_memory
 from pandas import DataFrame, Series
 
+from task_manager.auto_callback_task import UpdateProgressMethod
+
 
 def encode_clip(
     paths: Series,
     model: str,
     pretrained: str,
-    path_progress: Path,
+    update_progress: UpdateProgressMethod,
     batch_size: int = 16,
     is_aborted: Callable[[], bool] | None = None,
 ) -> DataFrame:
@@ -87,8 +89,7 @@ def encode_clip(
                     kept_ids.extend(valid_ids)
 
                 progress_percent = (i / total_batches) * 100
-                with open(path_progress, "w") as f:
-                    f.write(str(round(progress_percent, 1)))
+                update_progress(progress_percent)
 
         if not vectors:
             raise RuntimeError("No image embeddings could be computed")

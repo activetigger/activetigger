@@ -7,6 +7,7 @@ from collections import Counter
 from collections.abc import Callable
 from logging import Logger
 from pathlib import Path
+from turtle import update
 from typing import Any, cast
 
 import datasets
@@ -42,6 +43,8 @@ from transformers import (
     set_seed,
 )
 
+from task_manager.auto_callback_task import UpdateProgressMethod
+
 pd.set_option("future.no_silent_downcasting", True)
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -52,11 +55,12 @@ class CustomLoggingCallback(TrainerCallback):
     current_path: Path
     logger: Logger
 
-    def __init__(self, is_aborted, logger, current_path):
+    def __init__(self, is_aborted, logger, current_path, update_progress: UpdateProgressMethod):
         super().__init__()
         self.is_aborted = is_aborted
         self.current_path = current_path
         self.logger = logger
+        self.update_progress = update_progress
         # Set from trainer.model_accepts_loss_kwargs after the Trainer is built
         # (see __load_trainer). When the model's forward accepts **kwargs, the
         # Trainer assumes the loss is normalized via num_items_in_batch and
@@ -77,8 +81,7 @@ class CustomLoggingCallback(TrainerCallback):
     ):
         self.logger.info(f"Step {state.global_step}")
         progress_percentage = (state.global_step / state.max_steps) * 100
-        with open(self.current_path.joinpath("progress_train"), "w") as f:
-            f.write(str(progress_percentage))
+        self.update_progress(progress_percentage)
         gradacc = args.gradient_accumulation_steps if self.needs_gradacc_correction else 1
         adjusted_history = []
         for entry in state.log_history:
@@ -195,7 +198,13 @@ class TrainBert:
 
     kind = "train_bert"
 
-    def __init__(self, unique_id: str, inputs: TrainBertTaskInput, is_aborted: Callable[[], bool]):
+    def __init__(
+        self,
+        unique_id: str,
+        inputs: TrainBertTaskInput,
+        is_aborted: Callable[[], bool],
+        update_progress: UpdateProgressMethod,
+    ):
         self.path = inputs.path
         self.project_slug = inputs.project_slug
         self.name = inputs.model_name
@@ -233,6 +242,7 @@ class TrainBert:
         self.class_min_freq = inputs.class_min_freq
         self.is_aborted = is_aborted
         self.path_df = inputs.path_df
+        self.update_progress = update_progress
 
     def __init_paths(self) -> tuple[Path, Path]:
         """Initiate the current path (directory for the model) and for the logger"""
@@ -475,7 +485,10 @@ class TrainBert:
         )
 
         callback = CustomLoggingCallback(
-            self.is_aborted, current_path=current_path, logger=self.logger
+            self.is_aborted,
+            current_path=current_path,
+            logger=self.logger,
+            update_progress=self.update_progress,
         )
         eval_dataset = ds["test"] if has_test else None
         if loss == "cross_entropy":

@@ -45,20 +45,17 @@ class ComputeFasttextTask(AbortableAutoCallbackTask):
 def compute_fasttext(
     self: ComputeFasttextTask, inputs: ComputeFasttextTaskInput
 ) -> ComputeFasttextTaskResult:
-    # the API reads the progress file named after the task id
-    path_progress = inputs.path_process.joinpath(self.request.id)
     texts = pd.read_pickle(inputs.texts_path)
     try:
         emb = encode_fasttext(
             texts,
             language=inputs.language,
             path_models=inputs.path_models,
-            path_progress=path_progress,
+            update_progress=self.update_progress,
             model=inputs.model,
             is_aborted=self.is_aborted,
         )
     finally:
-        path_progress.unlink(missing_ok=True)
         unlink(inputs.texts_path)
     features_path = inputs.path_process.joinpath(f"fasttext_{self.request.id}.parquet")
     emb.to_parquet(features_path)

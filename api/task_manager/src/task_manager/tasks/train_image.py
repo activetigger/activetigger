@@ -41,6 +41,7 @@ from transformers import (
     set_seed,
 )
 
+from task_manager.auto_callback_task import UpdateProgressMethod
 from task_manager.tasks.train_bert import (
     CustomTrainer,
     compute_class_weights,
@@ -69,10 +70,17 @@ class ImageLoggingCallback(TrainerCallback):
     current_path: Path
     logger: Logger
 
-    def __init__(self, is_aborted, logger, current_path):
+    def __init__(
+        self,
+        is_aborted: Callable[[], bool],
+        logger: Logger,
+        current_path: Path,
+        update_progress: UpdateProgressMethod,
+    ):
         super().__init__()
         self.is_aborted = is_aborted
         self.current_path = current_path
+        self.update_progress = update_progress
         self.logger = logger
 
     def on_step_end(
@@ -87,8 +95,7 @@ class ImageLoggingCallback(TrainerCallback):
             progress_percentage = (state.global_step / state.max_steps) * 100
         else:
             progress_percentage = 0.0
-        with open(self.current_path.joinpath("progress_train"), "w") as f:
-            f.write(str(progress_percentage))
+        self.update_progress(progress_percentage)
         with open(self.current_path.joinpath("log_history.txt"), "w") as f:
             json.dump(state.log_history, f)
         if self.is_aborted():
@@ -143,7 +150,13 @@ class TrainImage:
 
     kind = "train_image"
 
-    def __init__(self, unique_id: str, inputs: TrainImageTaskInput, is_aborted: Callable[[], bool]):
+    def __init__(
+        self,
+        unique_id: str,
+        inputs: TrainImageTaskInput,
+        is_aborted: Callable[[], bool],
+        update_progress: UpdateProgressMethod,
+    ):
         self.path = inputs.path
         self.path_df = inputs.path_df
         self.project_slug = inputs.project_slug
@@ -169,6 +182,7 @@ class TrainImage:
         self.class_min_freq = inputs.class_min_freq
         self.fp16 = inputs.fp16
         self.is_aborted = is_aborted
+        self.update_progress = update_progress
 
     # --- setup helpers ---------------------------------------------------
 
@@ -384,7 +398,10 @@ class TrainImage:
         )
 
         callback = ImageLoggingCallback(
-            self.is_aborted, current_path=current_path, logger=self.logger
+            self.is_aborted,
+            current_path=current_path,
+            logger=self.logger,
+            update_progress=self.update_progress,
         )
         eval_dataset = ds["test"] if has_test else None
         if loss == "cross_entropy":

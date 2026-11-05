@@ -31,7 +31,11 @@ from activetigger.db.manager import DatabaseManager
 from activetigger.errors import AlreadyExistsError, InvalidInputError, NotFoundError
 from activetigger.functions import get_model_metrics
 from activetigger.monitoring import Monitoring
-from activetigger.tasks.task_manager_client import enqueue_celery_task, new_task_id
+from activetigger.tasks.task_manager_client import (
+    enqueue_celery_task,
+    get_celery_task_progress,
+    new_task_id,
+)
 
 
 class ImageModels:
@@ -136,7 +140,7 @@ class ImageModels:
             e.user: LMComputingOutModel(
                 name=e.model_name,
                 status=e.status,
-                progress=e.get_progress() if e.get_progress else None,
+                progress=get_celery_task_progress(e.unique_id),
                 loss=self.get_loss(e.model_name),
                 epochs=e.params["epochs"] if e.params else None,
             )
@@ -258,7 +262,6 @@ class ImageModels:
                 scheme=scheme,
                 dataset=None,
                 params=params_db.model_dump(),
-                get_progress=self.get_progress(model_name, status="training"),
                 abortable_celery_task=abortable,
                 temp_files=[path_df],
             ),
@@ -338,7 +341,6 @@ class ImageModels:
                 training_kind=training_kind,
                 dataset=dataset,
                 status=status,
-                get_progress=self.get_progress(name, status=status),
                 abortable_celery_task=abortable,
                 temp_files=[path_df] if path_df else [],
             ),
@@ -465,24 +467,6 @@ class ImageModels:
         with open(self.path.joinpath(model_name).joinpath("config.json"), "r") as f:
             r = json.load(f)
         return list(r["id2label"].values())
-
-    def get_progress(self, model_name, status: str) -> Callable[[], Optional[float]]:
-        if status == "training":
-            path_model = self.path.joinpath(model_name).joinpath("progress_train")
-        elif status == "predicting":
-            path_model = self.path.joinpath(model_name).joinpath("progress_predict")
-        else:
-            raise InvalidInputError("Status not recognized")
-
-        def progress():
-            if path_model.exists():
-                r = path_model.read_text()
-                if r.strip() == "":
-                    r = 0
-                return float(r)
-            return None
-
-        return progress
 
     def get_loss(self, model_name) -> dict | None:
         now = time.time()

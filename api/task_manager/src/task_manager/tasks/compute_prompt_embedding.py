@@ -7,12 +7,14 @@ import torch
 from activetigger.config import config
 from activetigger.functions import get_device, release_device_memory
 
+from task_manager.auto_callback_task import UpdateProgressMethod
+
 
 def encode_prompt(
     text: str,
     model_name: str,
     kind: str,
-    path_progress: Path,
+    update_progress: UpdateProgressMethod,
     is_aborted: Callable[[], bool] | None = None,
 ) -> np.ndarray:
     """
@@ -32,8 +34,7 @@ def encode_prompt(
     device = get_device()
     model = None
     try:
-        with open(path_progress, "w") as f:
-            f.write("10.0")
+        update_progress(10.0)
 
         if kind == "sentence-embeddings":
             # same loading as encode_sbert: bf16 checkpoints are slow on CPU
@@ -62,8 +63,7 @@ def encode_prompt(
             emb = model.encode([text], show_progress_bar=False, convert_to_numpy=True)
         vec = np.asarray(emb).reshape(-1)
 
-        with open(path_progress, "w") as f:
-            f.write("100.0")
+        update_progress(100.0)
         return vec
     finally:
         if model is not None:

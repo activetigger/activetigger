@@ -24,6 +24,8 @@ class TrainImageTask(AbortableAutoCallbackTask):
     pydantic=True,
 )
 def train_image(self: TrainImageTask, inputs: TrainImageTaskInput) -> TrainImageTaskResult:
-    train_image = TrainImage(self.request.id, inputs, is_aborted=self.is_aborted)
+    train_image = TrainImage(
+        self.request.id, inputs, is_aborted=self.is_aborted, update_progress=self.update_progress
+    )
     r = train_image.run()
     return {"events": r["events"], "project_slug": inputs.project_slug}

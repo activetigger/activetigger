@@ -24,7 +24,11 @@ from activetigger.datamodels import (
     PrepareTaskModel,
 )
 from activetigger.functions import safe_upload_path, slugify
-from activetigger.tasks.task_manager_client import enqueue_celery_task, stop_celery_task
+from activetigger.tasks.task_manager_client import (
+    enqueue_celery_task,
+    get_celery_task_progress,
+    stop_celery_task,
+)
 
 
 class Toolbox:
@@ -216,7 +220,6 @@ class Toolbox:
 
         # remove results of a previous run
         session_dir.joinpath("result.parquet").unlink(missing_ok=True)
-        session_dir.joinpath("progress").unlink(missing_ok=True)
 
         try:
             (task_id, _) = enqueue_celery_task(
@@ -273,13 +276,11 @@ class Toolbox:
             return PrepareStatusModel(status="failed", error=error)
 
         # queued or running: the worker writes the progress file once it starts
-        progress = None
-        try:
-            progress = float(session_dir.joinpath("progress").read_text())
-        except (OSError, ValueError):
-            pass
-        status = "running" if progress is not None else "pending"
-        return PrepareStatusModel(status=status, progress=progress)
+        progress_report = get_celery_task_progress(task_id)
+        status = "running" if progress_report is not None else "pending"
+        return PrepareStatusModel(
+            status=status, progress=progress_report["progress"] if progress_report else None
+        )
 
     def export(self, username: str, session_id: str, format: str) -> FileResponse:
         """

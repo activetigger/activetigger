@@ -8,12 +8,14 @@ from activetigger.functions import tokenize
 from fasttext.util import download_model
 from pandas import DataFrame, Series
 
+from task_manager.auto_callback_task import UpdateProgressMethod
+
 
 def encode_fasttext(
     texts: Series,
     language: str,
     path_models: Path,
-    path_progress: Path,
+    update_progress: UpdateProgressMethod,
     model: str | None = "",
     is_aborted: Callable[[], bool] | None = None,
 ) -> DataFrame:
@@ -48,9 +50,7 @@ def encode_fasttext(
         # every 100 texts: write progress and poll the abort flag (a redis round trip)
         if len(emb) % 100 == 0:
             progress_percent = len(emb) / len(texts_tk) * 100
-            with open(path_progress, "w") as f:
-                f.write(str(round(progress_percent, 1)))
-            print(progress_percent)
+            update_progress(progress_percent)
             if is_aborted is not None and is_aborted():
                 raise Exception("Process interrupted by user")
 

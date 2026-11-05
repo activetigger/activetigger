@@ -3,6 +3,8 @@ from pathlib import Path
 
 from celery import uuid
 from celery.contrib.abortable import AbortableAsyncResult, AbortableTask
+from celery.result import AsyncResult
+from task_manager.auto_callback_task import TaskProgressState
 from task_manager.celery import celery_app
 
 from activetigger.datamodels import ProcessComputing
@@ -73,3 +75,10 @@ def stop_celery_task(task_id: str, abortable: bool | None):
     else:
         print(f"Revoke task {task_id}")
         celery_app.control.revoke(task_id, terminate=True, signal="SIGKILL")
+
+
+def get_celery_task_progress(task_id: str) -> TaskProgressState | None:
+    r = AsyncResult(task_id, app=celery_app)
+    if r.state == "PROGRESS":
+        return r.info
+    return None

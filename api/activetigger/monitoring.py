@@ -1,7 +1,9 @@
 import threading
 from datetime import datetime, timedelta, timezone
+from typing import Literal, TypedDict
 
 import pandas as pd
+from task_manager.auto_callback_task import TaskProgressState
 
 from activetigger.datamodels import (
     EventsModel,
@@ -548,3 +550,9 @@ class Monitoring:
             for i in range(total_hours)
         ]
         return MonitoringActivityModel(activity=activity)
+
+
+class TrainingState(TypedDict):
+    name: str
+    status: Literal["training"]
+    progress: TaskProgressState | None

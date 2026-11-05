@@ -25,6 +25,7 @@ from simplemma import lemmatize
 from sklearn.feature_extraction.text import CountVectorizer
 from slugify import slugify
 
+from task_manager.auto_callback_task import UpdateProgressMethod
 from task_manager.tasks.compute_sbert import encode_sbert
 
 nltk.download("stopwords", quiet=True)
@@ -226,9 +227,11 @@ class ComputeBertopic:
         unique_id: str,
         inputs: ComputeBertopicTaskInput,
         is_aborted: Callable[[], bool],
+        update_progress: UpdateProgressMethod,
     ):
         self.unique_id = unique_id
         self.is_aborted = is_aborted
+        self.update_progress = update_progress
         if inputs.existing_embeddings and not inputs.existing_embeddings.suffix == ".parquet":
             raise ValueError("Embeddings file must be a parquet file.")
 
@@ -354,17 +357,19 @@ class ComputeBertopic:
         if embedding_model is None or embedding_model not in config.models_embeddings:
             raise ValueError(f"Model {embedding_model} not supported.")
         self.update_progress(10)
-        path_sbert_progress = self.path_run.joinpath("progress_sbert")
+
         computed = encode_sbert(
             df[self.col_text],
             model=embedding_model,
-            path_progress=path_sbert_progress,
+            # If SBERT is computing embeddings, scale its 0-100 to 10-60
+            update_progress=lambda progress, label=None: self.update_progress(
+                50 * progress / 100 + 10, label
+            ),
             batch_size=self.parameters.embedding_batch_size,
             min_gpu=1,
             is_aborted=self.is_aborted,
         )
-        # clean up SBERT progress file
-        path_sbert_progress.unlink(missing_ok=True)
+
         # save the embeddings to a file
         computed.to_parquet(path_embeddings)
 
@@ -766,7 +771,6 @@ class ComputeBertopic:
             )
             task_timer.stop("save_files")
 
-            self.path_run.joinpath("progress").unlink(missing_ok=True)
             return EventsDict({"events": task_timer.get_events()})
 
         except Exception as e:
@@ -800,10 +804,3 @@ class ComputeBertopic:
             )
             gc.collect()
             release_device_memory()
-
-    def update_progress(self, value: float) -> None:
-        """
-        Update the progress of the task (0-100 percentage)
-        """
-        with open(self.path_run.joinpath("progress"), "w") as f:
-            f.write(str(round(value, 1)))

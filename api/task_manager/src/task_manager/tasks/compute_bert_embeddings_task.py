@@ -39,7 +39,6 @@ class ComputeBertEmbeddingsTaskInput(BaseModel):
     batch_size: int = 32
     max_tokens: int = 512
     min_gpu: int = 6
-    path_progress: Path | None = None
 
 
 class ComputeBertEmbeddingsTask(AbortableAutoCallbackTask):
@@ -58,14 +57,12 @@ class ComputeBertEmbeddingsTask(AbortableAutoCallbackTask):
 def compute_bert_embeddings(
     self: ComputeBertEmbeddingsTask, props: ComputeBertEmbeddingsTaskInput
 ) -> ComputeBertEmbeddingsTaskResult:
-    # the API reads the progress file named after the task id
-    path_progress = props.path_progress or props.path_process.joinpath(self.request.id)
     try:
         texts = pd.read_pickle(props.texts_path)
         emb = encode_bert_embeddings(
             texts,
             model_path=props.model_dir.joinpath(props.model_name),
-            path_progress=path_progress,
+            update_progress=self.update_progress,
             pooling=props.pooling,
             batch_size=props.batch_size,
             max_tokens=props.max_tokens,
@@ -73,7 +70,6 @@ def compute_bert_embeddings(
             is_aborted=self.is_aborted,
         )
     finally:
-        path_progress.unlink(missing_ok=True)
         props.texts_path.unlink(missing_ok=True)
     # one file per task: several bert-embeddings features can run concurrently
     embeddings_path = props.path_process.joinpath(f"bert_{self.request.id}.parquet")

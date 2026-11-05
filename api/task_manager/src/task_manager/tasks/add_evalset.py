@@ -17,6 +17,8 @@ from activetigger.functions_image import (
     generate_thumbnail,
 )
 
+from task_manager.auto_callback_task import UpdateProgressMethod
+
 # (n_rows, [(scheme_name, [{element_id, annotation, comment}, ...]), ...])
 EvalSetResult = tuple[int, list[tuple[str, list]]]
 
@@ -180,6 +182,7 @@ def add_evalset_image(
     evalset: EvalSetImageModel,
     path_project: Path,
     index_all: pd.Index,
+    update_progress: UpdateProgressMethod,
     scheme: list[str] | None = None,
     is_aborted: Callable[[], bool] | None = None,
 ) -> EvalSetResult:
@@ -240,7 +243,6 @@ def add_evalset_image(
                 image_infos = image_infos[: evalset.n_eval]
 
             total = len(image_infos)
-            progress_file = project_dir.joinpath(f"add_evalset_{dataset}_progress")
             for idx, info in enumerate(image_infos, 1):
                 if idx % 50 == 0:
                     stop_opportunity()
@@ -256,16 +258,7 @@ def add_evalset_image(
 
                 generate_thumbnail(target, thumbs_dir.joinpath(f"{slugify(element_id)}.jpg"))
 
-                try:
-                    with open(progress_file, "w") as pf:
-                        pf.write(str(round((idx / total) * 100, 1)))
-                except OSError:
-                    pass
-
-            try:
-                progress_file.unlink()
-            except OSError:
-                pass
+                update_progress(round((idx / total) * 100, 1))
 
         # Pre-flight: drop unreadable images so the eval pool only carries
         # files the rest of the pipeline can actually load.

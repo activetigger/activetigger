@@ -43,6 +43,7 @@ from transformers import (
     set_seed,
 )
 
+from task_manager.auto_callback_task import UpdateProgressMethod
 from task_manager.tasks.train_bert import CustomLoggingCallback
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -326,7 +327,13 @@ class TrainNer:
 
     kind = "train_ner"
 
-    def __init__(self, unique_id: str, inputs: TrainNerTaskInput, is_aborted: Callable[[], bool]):
+    def __init__(
+        self,
+        unique_id: str,
+        inputs: TrainNerTaskInput,
+        is_aborted: Callable[[], bool],
+        update_progress: UpdateProgressMethod,
+    ):
         self.path = inputs.path
         self.path_df = inputs.path_df
         self.project_slug = inputs.project_slug
@@ -344,6 +351,7 @@ class TrainNer:
         self.unique_id = unique_id
         self.max_length = inputs.max_length
         self.is_aborted = is_aborted
+        self.update_progress = update_progress
 
     def __init_paths(self) -> tuple[Path, Path]:
         current_path = self.path.joinpath(self.name)
@@ -502,7 +510,10 @@ class TrainNer:
 
         collator = DataCollatorForTokenClassification(tokenizer=tokenizer)
         callback = CustomLoggingCallback(
-            self.is_aborted, current_path=current_path, logger=self.logger
+            self.is_aborted,
+            current_path=current_path,
+            logger=self.logger,
+            update_progress=self.update_progress,
         )
         return Trainer(
             model=model,

@@ -59,6 +59,7 @@ def add_evalset_task(self: AddEvalsetTask, inputs: AddEvalsetTaskInput) -> AddEv
                 index_all,
                 scheme=inputs.scheme,
                 is_aborted=self.is_aborted,
+                update_progress=self.update_progress,
             )
         elif inputs.evalset_data is not None:
             n_rows, schemes_elements = add_evalset(

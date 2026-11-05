@@ -32,7 +32,11 @@ from activetigger.db.manager import DatabaseManager
 from activetigger.errors import AlreadyExistsError, InvalidInputError, NotFoundError
 from activetigger.functions import get_model_metrics
 from activetigger.monitoring import Monitoring
-from activetigger.tasks.task_manager_client import enqueue_celery_task, new_task_id
+from activetigger.tasks.task_manager_client import (
+    enqueue_celery_task,
+    get_celery_task_progress,
+    new_task_id,
+)
 
 
 class NerModels:
@@ -122,7 +126,7 @@ class NerModels:
             e.user: LMComputingOutModel(
                 name=e.model_name,
                 status=e.status,
-                progress=e.get_progress() if e.get_progress else None,
+                progress=get_celery_task_progress(e.unique_id),
                 loss=self.get_loss(e.model_name),
                 epochs=e.params["epochs"] if e.params else None,
             )
@@ -212,7 +216,6 @@ class NerModels:
                 scheme=scheme,
                 dataset=None,
                 params=params_db.model_dump(),
-                get_progress=self.get_progress(name, status="training"),
                 abortable_celery_task=abortable,
                 temp_files=[path_df],
             ),
@@ -239,9 +242,7 @@ class NerModels:
     ) -> str:
         if not (self.path.joinpath(name)).exists():
             raise NotFoundError("The model does not exist")
-        stale_progress = self.path.joinpath(name).joinpath("progress_predict")
-        if stale_progress.exists():
-            stale_progress.unlink()
+
         if df is None and dataset not in ["all", "external"]:
             raise Exception("Dataframe is required for this dataset")
 
@@ -293,7 +294,6 @@ class NerModels:
                 training_kind="ner",
                 dataset=dataset,
                 status=status,
-                get_progress=self.get_progress(name, status=status),
                 abortable_celery_task=abortable,
                 temp_files=[path_df] if path_df else [],
             ),
@@ -408,24 +408,6 @@ class NerModels:
         if not Path(file).exists():
             raise NotFoundError("file does not exist")
         return StaticFileModel(name=f"{name}.tar.gz", path=f"{self.project_slug}/{name}.tar.gz")
-
-    def get_progress(self, model_name: str, status: str) -> Callable[[], Optional[float]]:
-        if status == "training":
-            path_model = self.path.joinpath(model_name).joinpath("progress_train")
-        elif status == "predicting":
-            path_model = self.path.joinpath(model_name).joinpath("progress_predict")
-        else:
-            raise InvalidInputError("Status not recognized")
-
-        def progress():
-            if path_model.exists():
-                r = path_model.read_text()
-                if r.strip() == "":
-                    r = 0
-                return float(r)
-            return None
-
-        return progress
 
     def get_loss(self, model_name: str) -> dict | None:
         now = time.time()

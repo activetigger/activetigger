@@ -56,7 +56,7 @@ def compute_clip_imagexp(
             paths,
             model=inputs.clip_model,
             pretrained=inputs.pretrained,
-            path_progress=path_progress,
+            update_progress=self.update_progress,
             batch_size=inputs.batch_size,
             is_aborted=self.is_aborted,
         )

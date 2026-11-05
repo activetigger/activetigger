@@ -26,6 +26,8 @@ class ComputeBertopicTask(AbortableAutoCallbackTask):
 def compute_bertopic(
     self: ComputeBertopicTask, inputs: ComputeBertopicTaskInput
 ) -> ComputeBertopicTaskResult:
-    task = ComputeBertopic(self.request.id, inputs, is_aborted=self.is_aborted)
+    task = ComputeBertopic(
+        self.request.id, inputs, is_aborted=self.is_aborted, update_progress=self.update_progress
+    )
     r = task.run()
     return {"events": r["events"], "project_slug": inputs.project_slug}
