@@ -32,7 +32,11 @@ from task_manager.tasks.compute_multimodal_task import (
 )
 from task_manager.tasks.compute_sbert_task import ComputeSbertTaskInput, compute_sbert
 
-from activetigger.config import config
+from activetigger.config import (
+    DEFAULT_EMBEDDINGS_MODEL,
+    DEFAULT_EMBEDDINGS_MODEL_CPU,
+    config,
+)
 from activetigger.data import Data
 from activetigger.datamodels import (
     FeatureComputing,
@@ -176,7 +180,9 @@ class Features:
             self.options = {
                 "sentence-embeddings": {
                     "models": config.models_embeddings,
-                    "default": "jinaai/jina-embeddings-v5-text-small",
+                    "default": DEFAULT_EMBEDDINGS_MODEL_CPU
+                    if config.cpu_only
+                    else DEFAULT_EMBEDDINGS_MODEL,
                 },
                 "bert-embeddings": {
                     "models": [],

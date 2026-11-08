@@ -76,22 +76,22 @@ class LanguageModels:
         # instead of raising (which would break every project open)
         self.base_models = [
             {
-                "name": "answerdotai/ModernBERT-base",
+                "name": "microsoft/deberta-v3-base",
                 "priority": 10,
                 "comment": "",
                 "language": "en",
             },
             {
-                "name": "camembert/camembert-base",
-                "priority": 0,
+                "name": "almanach/camembertav2-base",
+                "priority": 10,
                 "comment": "",
                 "language": "fr",
             },
             {
-                "name": "flaubert/flaubert_base_cased",
-                "priority": 7,
+                "name": "jhu-clsp/mmBERT-base",
+                "priority": 8,
                 "comment": "",
-                "language": "fr",
+                "language": "multi",
             },
         ]
         if list_models is not None and Path(list_models).exists():

@@ -76,7 +76,7 @@ export const ModelCreationForm: FC<ModelCreationFormProps> = ({
     parameters: {
       batchsize: 16,
       gradacc: 1.0,
-      epochs: 3,
+      epochs: 5,
       lrate: 3e-5,
       wdecay: 0.01,
       best: true,

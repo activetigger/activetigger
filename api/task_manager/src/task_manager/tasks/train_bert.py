@@ -434,10 +434,15 @@ class TrainBert:
 
         # Load the training arguments
         seed = int(config.random_seed)
+        # bf16 autocast (fp32 master weights) on GPUs that support it
+        use_cpu = config.cpu_only or not bool(params.gpu)
+        use_bf16 = not use_cpu and torch.cuda.is_available() and torch.cuda.is_bf16_supported()
+
         training_args = TrainingArguments(
             # Directories
             output_dir=str(current_path.joinpath("train")),
             # logging_dir=str(current_path.joinpath("logs")),
+            bf16=use_bf16,
             # Hyperparameters
             learning_rate=float(params.lrate),
             weight_decay=float(params.wdecay),
@@ -470,7 +475,7 @@ class TrainBert:
             do_eval=has_test,
             greater_is_better=False if has_test else None,
             load_best_model_at_end=params.best if has_test else False,
-            use_cpu=config.cpu_only or not bool(params.gpu),  # deactivate gpu
+            use_cpu=use_cpu,
             # Reproducibility: seed Trainer's model init / DataLoader shuffling
             # and dataset shuffling. config.random_seed defaults to 42.
             seed=seed,

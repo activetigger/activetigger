@@ -368,10 +368,10 @@ class LMParametersModel(BaseModel):
     Parameters for bertmodel training
     """
 
-    batchsize: int = 4
+    batchsize: int = 16
     gradacc: float = 1
-    epochs: int = 3
-    lrate: float = 5e-05
+    epochs: int = 5
+    lrate: float = 3e-05
     wdecay: float = 0.01
     best: bool = True
     eval: int = 10

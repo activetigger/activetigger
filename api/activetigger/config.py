@@ -88,14 +88,18 @@ def parse_environ(key: str, parse_method: Callable[[str], int | float], default:
         return default
 
 
+# per-model options are forwarded as kwargs to SentenceTransformer.encode
+# (task / prompt_name); permissive licences first, jina is CC BY-NC 4.0
 DEFAULT_EMBEDDINGS_MODELS = {
-    "jinaai/jina-embeddings-v5-text-small": {
-        "task": "retrieval",
-    },
-    "all-mpnet-base-v2": {},
+    "microsoft/harrier-oss-v1-0.6b": {},
+    "microsoft/harrier-oss-v1-270m": {},
     "Qwen/Qwen3-Embedding-0.6B": {},
+    "google/embeddinggemma-2": {"prompt_name": "Classification"},
+    "jinaai/jina-embeddings-v5-text-small": {"task": "classification"},
     "Qwen/Qwen3-Embedding-8B": {},
 }
+DEFAULT_EMBEDDINGS_MODEL = "microsoft/harrier-oss-v1-0.6b"
+DEFAULT_EMBEDDINGS_MODEL_CPU = "microsoft/harrier-oss-v1-270m"
 
 
 class Config(metaclass=_Singleton):
