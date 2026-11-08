@@ -117,7 +117,7 @@ export const PromptsPanel: FC<PromptsPanelProps> = ({ projectSlug, state, curren
             {training.map((p, i) => (
               <li key={i}>
                 <em>{p.text}</em>
-                {p.progress ? ` (${p.progress}%)` : ''}
+                {p.progress ? ` (${Math.round(Number(p.progress))}%)` : ''}
               </li>
             ))}
           </ul>
