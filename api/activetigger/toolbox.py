@@ -9,11 +9,12 @@ from pathlib import Path
 import docx
 import pandas as pd
 from celery.result import AsyncResult
-from celery.states import FAILURE, REVOKED
+from celery.states import FAILURE, PENDING, REVOKED
 from fastapi import HTTPException
 from fastapi.responses import FileResponse
 from task_manager.auto_callback_task import QueueName
 from task_manager.celery import celery_app
+from task_manager.stop_signal import stop_requested
 from task_manager.tasks.prepare_dataset_task import PrepareDatasetTaskInput, prepare_dataset_task
 
 from activetigger.config import config
@@ -42,8 +43,12 @@ class Toolbox:
     MAX_DOCUMENT_BYTES = 50 * 1024 * 1024
     SESSION_MAX_AGE_SECONDS = 24 * 3600
     PREVIEW_ROWS = 5
-    # file in the session directory holding the id of its split task
+    # file in the session directory holding the id of its split task; its
+    # modification time is when the task was launched
     TASK_FILE = "task"
+    # a task still PENDING with no progress after this delay was lost (redis
+    # flushed, state expired, worker killed before it started)
+    LOST_TASK_GRACE_SECONDS = 300
 
     def _user_dir(self, username: str) -> Path:
         return Path(config.data_path).joinpath("prepare", slugify(username))
@@ -267,7 +272,8 @@ class Toolbox:
 
         result = AsyncResult(task_id, app=celery_app)
         state = result.state
-        if state in (REVOKED, "ABORTED"):
+        # the stop key outlives the celery state (startup purge, expired result)
+        if state in (REVOKED, "ABORTED") or stop_requested(task_id):
             return PrepareStatusModel(status="failed", error="Task cancelled")
         if state == FAILURE:
             error = str(result.result) if result.result is not None else "Task failed"
@@ -275,8 +281,17 @@ class Toolbox:
                 error = "Task cancelled"
             return PrepareStatusModel(status="failed", error=error)
 
-        # queued or running: the worker writes the progress file once it starts
+        # queued or running: the worker reports progress once it starts
         progress_report = get_celery_task_progress(task_id)
+        if progress_report is None and state == PENDING:
+            # celery forgets tasks (result_expires, redis restart): without any
+            # trace after the grace period, the task is not queued, it is gone
+            launched = session_dir.joinpath(self.TASK_FILE).stat().st_mtime
+            if time.time() - launched > self.LOST_TASK_GRACE_SECONDS:
+                return PrepareStatusModel(
+                    status="failed",
+                    error="Task lost (no worker reported it), please relaunch the split",
+                )
         status = "running" if progress_report is not None else "pending"
         return PrepareStatusModel(
             status=status, progress=progress_report["progress"] if progress_report else None
