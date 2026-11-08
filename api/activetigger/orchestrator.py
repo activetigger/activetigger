@@ -50,7 +50,11 @@ from activetigger.functions import (
 from activetigger.messages import Messages
 from activetigger.monitoring import Monitoring
 from activetigger.project import Project
-from activetigger.tasks.task_manager_client import enqueue_celery_task, stop_celery_task
+from activetigger.tasks.task_manager_client import (
+    enqueue_celery_task,
+    purge_celery_tasks,
+    stop_celery_task,
+)
 from activetigger.toolbox import Toolbox
 from activetigger.uploads import get_upload_staging
 from activetigger.users import Users
@@ -139,6 +143,13 @@ class Orchestrator:
         self._running = True
         self._update_task: asyncio.Task | None = None
         self.ensure_update_task()
+
+        # drop tasks left by a previous API process
+        try:
+            counts = purge_celery_tasks()
+            print(f"Celery tasks purged at startup: {counts}")
+        except Exception as e:
+            print(f"Error while purging celery tasks at startup: {e}")
 
         # create the demo project if not existing at startup
         try:

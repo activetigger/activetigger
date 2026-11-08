@@ -3,7 +3,7 @@ from pathlib import Path
 from celery import uuid
 from celery.contrib.abortable import AbortableAsyncResult, AbortableTask
 from celery.result import AsyncResult
-from task_manager.auto_callback_task import TaskProgressState
+from task_manager.auto_callback_task import QueueName, TaskProgressState
 from task_manager.celery import celery_app
 from task_manager.stop_signal import request_stop, stop_requested
 
@@ -71,6 +71,28 @@ def stop_celery_task(task_id: str, abortable: bool | None):
     else:
         print(f"Revoke task {task_id}")
         celery_app.control.revoke(task_id, terminate=True, signal="SIGKILL")
+
+
+def purge_celery_tasks() -> dict[str, int]:
+    """
+    Drop every queued task and stop every task the workers hold. 
+    """
+    if celery_app.conf.task_always_eager:
+        return {"purged": 0, "stopped": 0}
+    purged = 0
+    with celery_app.connection_for_write() as conn:
+        for queue in QueueName:
+            purged += conn.default_channel.queue_purge(str(queue)) or 0
+    # running (active) and prefetched (reserved) tasks are no longer in the queue
+    stopped = 0
+    inspect = celery_app.control.inspect(timeout=2)
+    for report in (inspect.active() or {}, inspect.reserved() or {}):
+        for tasks in report.values():
+            for t in tasks:
+                task = celery_app.tasks.get(t["name"])
+                stop_celery_task(t["id"], isinstance(task, AbortableTask))
+                stopped += 1
+    return {"purged": purged, "stopped": stopped}
 
 
 def get_celery_task_progress(task_id: str) -> TaskProgressState | None:
