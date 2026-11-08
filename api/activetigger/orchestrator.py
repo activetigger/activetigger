@@ -19,6 +19,8 @@ import pandas as pd
 import psutil
 import pyarrow.parquet as pq
 from jose import jwt
+from task_manager.celery import celery_app
+from task_manager.stop_signal import stop_requested
 from task_manager.tasks.duplicate_project_task import (
     DuplicateProjectTaskInput,
     duplicate_project_task,
@@ -51,6 +53,8 @@ from activetigger.messages import Messages
 from activetigger.monitoring import Monitoring
 from activetigger.project import Project
 from activetigger.tasks.task_manager_client import (
+    celery_task_state,
+    celery_tasks_in_flight,
     enqueue_celery_task,
     purge_celery_tasks,
     stop_celery_task,
@@ -131,6 +135,14 @@ class Orchestrator:
 
         # store creation errors so they survive project cleanup
         self.creation_errors: dict[str, str] = {}
+
+        # reconciliation with the workers: a task whose callback never arrives
+        # (worker container restarted, redis flushed, callback abandoned) is
+        # dropped after staying finished or unaccounted for longer than the grace
+        self._reconcile_interval = 60
+        self._reconcile_grace = 120
+        self._last_reconcile = 0.0
+        self._task_lost_since: dict[str, float] = {}
 
         # cached heavy system stats (refreshed every _heavy_stats_interval seconds)
         self._heavy_stats_interval = 30
@@ -290,6 +302,78 @@ class Orchestrator:
             get_upload_staging().clean_old()
         except Exception as e:
             print(f"Error while cleaning staged uploads: {e}")
+
+        # tasks the workers no longer hold and that never called back
+        if timer - self._last_reconcile >= self._reconcile_interval:
+            self._last_reconcile = timer
+            try:
+                self._reconcile_tasks()
+            except Exception as e:
+                print(f"Error while reconciling tasks with the workers: {e}")
+
+    def _reconcile_tasks(self) -> None:
+        """
+        Compare the processes in memory with the celery side. An entry whose
+        task is finished (SUCCESS/FAILURE/REVOKED, so its callback was lost) or
+        neither queued nor held by a worker for more than the grace period is
+        dropped and reported as an error (silently if it was stopped).
+        """
+        if celery_app.conf.task_always_eager:
+            return
+        in_flight = celery_tasks_in_flight()
+        now = time.time()
+        tracked: dict[str, tuple[str, str]] = {}  # task_id -> (project_slug, kind)
+        for slug, processes in self.computing.items():
+            for process in processes:
+                tracked[process.unique_id] = (slug, process.kind)
+        for slug, dup in self.project_duplication_ongoing.items():
+            tracked[dup["task_id"]] = (slug, "duplicate_project")
+
+        for task_id, (slug, kind) in tracked.items():
+            state = celery_task_state(task_id)
+            finished = state in ("SUCCESS", "FAILURE", "REVOKED")
+            missing = in_flight is not None and task_id not in in_flight
+            if not finished and not missing:
+                self._task_lost_since.pop(task_id, None)
+                continue
+            since = self._task_lost_since.setdefault(task_id, now)
+            if now - since < self._reconcile_grace:
+                continue
+            self._task_lost_since.pop(task_id, None)
+            reason = f"celery state {state}" + (", not held by any worker" if missing else "")
+            print(f"Dropping lost task {task_id} ({kind}, {slug}): {reason}")
+            self._drop_lost_task(task_id, slug, kind, reason)
+
+        # forget ids no longer tracked
+        for task_id in [t for t in self._task_lost_since if t not in tracked]:
+            del self._task_lost_since[task_id]
+
+    def _drop_lost_task(self, task_id: str, slug: str, kind: str, reason: str) -> None:
+        """
+        Remove a lost task from memory and surface it like a failure
+        """
+        stopped = stop_requested(task_id)
+        if kind == "duplicate_project":
+            self.project_duplication_ongoing.pop(slug, None)
+            shutil.rmtree(self.path.joinpath(slug), ignore_errors=True)
+            self.creation_errors[slug] = (
+                "Duplication cancelled" if stopped else f"Duplication lost ({reason})"
+            )
+            return
+        project = self.projects.get(slug) or self.project_creation_ongoing.get(slug)
+        if project is None:
+            self.drop_process(task_id)
+            return
+        for process in list(project.computing):
+            if process.unique_id == task_id:
+                project.clean_process(process)
+        if slug in self.project_creation_ongoing:
+            project.errors.add(
+                "Project creation stopped by user" if stopped else f"Creation lost ({reason})"
+            )
+            project.status = "error"
+        elif not stopped:
+            project.errors.add(f"Task {kind} lost: no result received ({reason})")
 
     def _collect_heavy_stats(self) -> dict:
         """

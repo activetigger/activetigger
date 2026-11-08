@@ -1,10 +1,14 @@
+import json
 from pathlib import Path
+from typing import cast
 
+import redis
 from celery import uuid
 from celery.contrib.abortable import AbortableAsyncResult, AbortableTask
 from celery.result import AsyncResult
 from task_manager.auto_callback_task import QueueName, TaskProgressState
 from task_manager.celery import celery_app
+from task_manager.config import redis_url
 from task_manager.stop_signal import request_stop, stop_requested
 
 from activetigger.datamodels import ProcessComputing
@@ -75,7 +79,7 @@ def stop_celery_task(task_id: str, abortable: bool | None):
 
 def purge_celery_tasks() -> dict[str, int]:
     """
-    Drop every queued task and stop every task the workers hold. 
+    Drop every queued task and stop every task the workers hold.
     """
     if celery_app.conf.task_always_eager:
         return {"purged": 0, "stopped": 0}
@@ -93,6 +97,41 @@ def purge_celery_tasks() -> dict[str, int]:
                 stop_celery_task(t["id"], isinstance(task, AbortableTask))
                 stopped += 1
     return {"purged": purged, "stopped": stopped}
+
+
+def celery_task_state(task_id: str) -> str:
+    """
+    Backend state of a task (PENDING for an unknown or expired id)
+    """
+    return AsyncResult(task_id, app=celery_app).state
+
+
+def celery_tasks_in_flight() -> set[str] | None:
+    """
+    Ids of the tasks still queued (broker lists) or held by a worker (active,
+    reserved). None when no worker answered: nothing can be concluded then.
+    """
+    inspect = celery_app.control.inspect(timeout=2)
+    held: set[str] = set()
+    answered = False
+    for report in (inspect.active(), inspect.reserved()):
+        if report is None:
+            continue
+        answered = True
+        for tasks in report.values():
+            held.update(t["id"] for t in tasks)
+    if not answered:
+        return None
+    # queued messages: kombu redis transport stores one JSON message per list entry
+    r = redis.Redis.from_url(redis_url)
+    for queue in QueueName:
+        for raw in cast(list, r.lrange(str(queue), 0, -1)):
+            try:
+                task_id = json.loads(raw)["headers"]["id"]
+            except (ValueError, KeyError, TypeError):
+                continue
+            held.add(task_id)
+    return held
 
 
 def get_celery_task_progress(task_id: str) -> TaskProgressState | None:
