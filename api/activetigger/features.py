@@ -1,6 +1,7 @@
 import json
 import os
 import pickle
+import threading
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -134,6 +135,9 @@ class Features:
         self.path_all = data.path_data_all
         self.path_models = models_path
         self.informations = {}
+        # the features file is read-modified-written by task callbacks running
+        # concurrently in the API threadpool: serialize those writes
+        self._lock = threading.RLock()
 
         self.lang = lang
         self.computing = computing
@@ -229,19 +233,20 @@ class Features:
         Reset the features file with only the dataset information
         based on train, valid, test files
         """
-        if self.path_features.exists():
-            self.path_features.unlink()
-        self.projects_service.delete_project_features(self.project_slug)
-        self.create_features_file()
-        self.map, self.n = self.get_map()
+        with self._lock:
+            if self.path_features.exists():
+                self.path_features.unlink()
+            self.projects_service.delete_project_features(self.project_slug)
+            self.create_features_file()
+            self.map, self.n = self.get_map()
 
-        # cascade hook — every prompt/cache bound to a feature is now stale.
-        on_reset = self.on_reset
-        if on_reset is not None:
-            try:
-                on_reset()
-            except Exception as ex:
-                print(f"on_reset hook failed: {ex}")
+            # cascade hook — every prompt/cache bound to a feature is now stale.
+            on_reset = self.on_reset
+            if on_reset is not None:
+                try:
+                    on_reset()
+                except Exception as ex:
+                    print(f"on_reset hook failed: {ex}")
 
     def get_map(self) -> tuple[dict, int]:
         """
@@ -424,87 +429,89 @@ class Features:
         Add feature(s) after computing
         TODO : add in data
         """
-        self._raise_if_extending()
+        with self._lock:
+            self._raise_if_extending()
 
-        # test name
-        if name in self.map:
-            raise AlreadyExistsError("Feature already exists")
+            # test name
+            if name in self.map:
+                raise AlreadyExistsError("Feature already exists")
 
-        # test length
-        if len(new_content) != self.n:
-            raise ValueError("Features don't have the right shape")
+            # test length
+            if len(new_content) != self.n:
+                raise ValueError("Features don't have the right shape")
 
-        # change type for series
-        if type(new_content) is Series:
-            new_content = pd.DataFrame(new_content)
+            # change type for series
+            if type(new_content) is Series:
+                new_content = pd.DataFrame(new_content)
 
-        # change column name with a prefix
-        new_content.columns = [  # ty: ignore[invalid-assignment]
-            f"{name}__{i}" for i in new_content.columns
-        ]
+            # change column name with a prefix
+            new_content.columns = [  # ty: ignore[invalid-assignment]
+                f"{name}__{i}" for i in new_content.columns
+            ]
 
-        # read data, add the feature to the dataset and save
-        content = pd.read_parquet(self.path_features)
-        content = pd.concat(
-            [
-                content[[i for i in content.columns if i not in new_content.columns]],
-                new_content,
-            ],
-            axis=1,
-        )
-        content.to_parquet(self.path_features)
-        del content
+            # read data, add the feature to the dataset and save
+            content = pd.read_parquet(self.path_features)
+            content = pd.concat(
+                [
+                    content[[i for i in content.columns if i not in new_content.columns]],
+                    new_content,
+                ],
+                axis=1,
+            )
+            content.to_parquet(self.path_features)
+            del content
 
-        # add informations to database
-        self.projects_service.add_feature(
-            project_slug=self.project_slug,
-            kind=kind,
-            name=name,
-            parameters=parameters,
-            user_name=username,
-            data=list(new_content.columns),
-        )
+            # add informations to database
+            self.projects_service.add_feature(
+                project_slug=self.project_slug,
+                kind=kind,
+                name=name,
+                parameters=parameters,
+                user_name=username,
+                data=list(new_content.columns),
+            )
 
-        # refresh the map
-        self.map = self.get_map()[0]
+            # refresh the map
+            self.map = self.get_map()[0]
 
     def delete(self, name: str):
         """
         Delete feature
         """
-        self._raise_if_extending()
+        with self._lock:
+            self._raise_if_extending()
 
-        if not self.exists(name):
-            raise NotFoundError("Feature doesn't exist")
+            if not self.exists(name):
+                raise NotFoundError("Feature doesn't exist")
 
-        # remember kind before the DB row is gone, so the on_delete hook
-        # (e.g. prompts cascade) can dispatch on it.
-        kind: str | None = None
-        try:
-            kind = self.projects_service.get_feature(self.project_slug, name).kind
-        except Exception:
-            kind = None
-
-        col = self.map[name]
-        # read data, delete columns and save
-        content = pd.read_parquet(self.path_features)
-
-        content[[i for i in content.columns if i not in col]].to_parquet(self.path_features)
-        del content
-
-        # delete from database
-        self.projects_service.delete_feature(self.project_slug, name)
-
-        # refresh the map
-        self.map = self.get_map()[0]
-
-        # cascade hook (set by Project for image projects to drop dependent prompts)
-        on_delete = self.on_delete
-        if on_delete is not None:
+            # remember kind before the DB row is gone, so the on_delete hook
+            # (e.g. prompts cascade) can dispatch on it.
+            kind: str | None = None
             try:
-                on_delete(name, kind)
-            except Exception as ex:
-                print(f"on_delete hook failed for feature {name}: {ex}")
+                kind = self.projects_service.get_feature(self.project_slug, name).kind
+            except Exception:
+                kind = None
+
+            col = self.map[name]
+            # read data, delete columns and save
+            content = pd.read_parquet(self.path_features)
+
+            content[[i for i in content.columns if i not in col]].to_parquet(self.path_features)
+            del content
+
+            # delete from database
+            self.projects_service.delete_feature(self.project_slug, name)
+
+            # refresh the map
+            self.map = self.get_map()[0]
+
+            # cascade hook (set by Project for image projects to drop dependent prompts)
+            on_delete = self.on_delete
+            if on_delete is not None:
+                try:
+                    on_delete(name, kind)
+                except Exception as ex:
+                    print(f"on_delete hook failed for feature {name}: {ex}")
 
     def get(
         self, features: list | str, dataset: list | str = "all", keep_dataset_column: bool = False

@@ -17,6 +17,7 @@ embedding columns inline), separate from `features.parquet`.
 
 import builtins
 import shutil
+import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -81,6 +82,9 @@ class Prompts:
         # sorted descending. Populated lazily by get_ranking and invalidated
         # on prompt delete / feature cascade.
         self._ranking_cache: dict[str, dict[str, pd.Series]] = {}
+        # prompts.parquet is read-modified-written by task callbacks running
+        # concurrently in the API threadpool: serialize those writes
+        self._lock = threading.Lock()
 
     # ---------- helpers ----------
 
@@ -166,28 +170,29 @@ class Prompts:
 
     def receive_result(self, computing: PromptComputing, vec: np.ndarray) -> None:
         """Persist a completed prompt to prompts.parquet."""
-        # The feature might have been deleted while the task was queued.
-        if not self.features.exists(computing.feature_name):
-            return
+        with self._lock:
+            # The feature might have been deleted while the task was queued.
+            if not self.features.exists(computing.feature_name):
+                return
 
-        vec = np.asarray(vec).reshape(-1)
-        row: dict[str, Any] = {
-            "text": computing.text,
-            "feature_name": computing.feature_name,
-            "user": computing.user,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
-        for i, v in enumerate(vec):
-            row[f"dim_{i}"] = float(v)
+            vec = np.asarray(vec).reshape(-1)
+            row: dict[str, Any] = {
+                "text": computing.text,
+                "feature_name": computing.feature_name,
+                "user": computing.user,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+            for i, v in enumerate(vec):
+                row[f"dim_{i}"] = float(v)
 
-        df = self._read()
-        new_row = pd.DataFrame([row], index=pd.Index([computing.prompt_id], name="prompt_id"))
+            df = self._read()
+            new_row = pd.DataFrame([row], index=pd.Index([computing.prompt_id], name="prompt_id"))
 
-        # Align columns: existing rows may have fewer/more dim_* columns if
-        # the feature changed. Union columns, fill missing with NaN.
-        combined = pd.concat([df, new_row], axis=0)
-        combined.index.name = "prompt_id"
-        self._write(combined)
+            # Align columns: existing rows may have fewer/more dim_* columns if
+            # the feature changed. Union columns, fill missing with NaN.
+            combined = pd.concat([df, new_row], axis=0)
+            combined.index.name = "prompt_id"
+            self._write(combined)
 
     def list(self, user: str | None = None) -> list[PromptOutModel]:
         df = self._read()
@@ -221,46 +226,49 @@ class Prompts:
         return vec, str(row["feature_name"])
 
     def delete(self, prompt_id: str) -> None:
-        df = self._read()
-        if prompt_id not in df.index:
-            raise NotFoundError(f"Prompt '{prompt_id}' not found")
-        df = df.drop(index=prompt_id)
-        self._write(df)
-        self._ranking_cache.pop(prompt_id, None)
-        self._delete_similarity_files(prompt_id)
+        with self._lock:
+            df = self._read()
+            if prompt_id not in df.index:
+                raise NotFoundError(f"Prompt '{prompt_id}' not found")
+            df = df.drop(index=prompt_id)
+            self._write(df)
+            self._ranking_cache.pop(prompt_id, None)
+            self._delete_similarity_files(prompt_id)
 
     def reset_all(self) -> None:
         """
         Drop every saved prompt and clear the ranking cache.
         Called from the Features on_reset cascade when all features are wiped.
         """
-        if self.path_file.exists():
-            try:
-                self.path_file.unlink()
-            except OSError as ex:
-                print(f"Could not delete prompts file: {ex}")
-        self._ranking_cache.clear()
-        similarity_root = self.path_dir.joinpath(SIMILARITY_DIR)
-        if similarity_root.exists():
-            try:
-                shutil.rmtree(similarity_root)
-            except OSError as ex:
-                print(f"Could not delete prompt similarity files: {ex}")
+        with self._lock:
+            if self.path_file.exists():
+                try:
+                    self.path_file.unlink()
+                except OSError as ex:
+                    print(f"Could not delete prompts file: {ex}")
+            self._ranking_cache.clear()
+            similarity_root = self.path_dir.joinpath(SIMILARITY_DIR)
+            if similarity_root.exists():
+                try:
+                    shutil.rmtree(similarity_root)
+                except OSError as ex:
+                    print(f"Could not delete prompt similarity files: {ex}")
 
     def delete_by_feature(self, feature_name: str) -> int:
         """Drop every prompt bound to a feature (cascade from feature delete)."""
-        df = self._read()
-        if df.empty or "feature_name" not in df.columns:
-            return 0
-        mask = df["feature_name"] == feature_name
-        n = int(mask.sum())
-        if n:
-            dropped_ids = [str(i) for i in df.index[mask]]
-            self._write(df.loc[~mask])
-            for pid in dropped_ids:
-                self._ranking_cache.pop(pid, None)
-                self._delete_similarity_files(pid)
-        return n
+        with self._lock:
+            df = self._read()
+            if df.empty or "feature_name" not in df.columns:
+                return 0
+            mask = df["feature_name"] == feature_name
+            n = int(mask.sum())
+            if n:
+                dropped_ids = [str(i) for i in df.index[mask]]
+                self._write(df.loc[~mask])
+                for pid in dropped_ids:
+                    self._ranking_cache.pop(pid, None)
+                    self._delete_similarity_files(pid)
+            return n
 
     def get_ranking(self, prompt_id: str, dataset: str) -> pd.Series:
         """

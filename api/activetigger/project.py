@@ -2496,9 +2496,9 @@ class Project:
 
     def clean_process(self, e: ProcessComputing) -> None:
         """
-        Clean a process from computing
+        Clean a process from computing (tolerant: a stop and a callback can race)
         """
-        self.computing.remove(e)
+        self.computing[:] = [p for p in self.computing if p.unique_id != e.unique_id]
         # inputs handed to a worker that may never have started
         for f in e.temp_files:
             Path(f).unlink(missing_ok=True)
