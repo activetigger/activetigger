@@ -42,7 +42,7 @@ def compute_dfm(
     norm: Any = None,
 ) -> DataFrame:
     """
-    Document Term Matrix, shared by the celery task and the in-process callers
+    Document Term Matrix, shared by the dfm task and the other tasks that need it
     (lexicometrics, feature recomputation).
 
     Parameters are normalised because stored feature parameters come from the UI

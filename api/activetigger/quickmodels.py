@@ -590,7 +590,7 @@ class QuickModels:
         data: pd.Series,
     ) -> str:
         """
-        Shared queue-insertion path for `predict_on_dataset` and
+        Shared dispatch path for `predict_on_dataset` and
         `predict_on_external_dataset`. Builds the PredictWithFeatures
         task, wires the progress callable, and registers a
         `QuickModelComputing` entry so the frontend can render a bar.

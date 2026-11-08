@@ -227,7 +227,7 @@ def restart_queue(
     current_user: Annotated[UserInDBModel, Depends(verified_user)],
 ) -> None:
     """
-    Restart the queue & the memory
+    Stop every running task and erase the projects in memory
     """
     test_rights(ServerAction.MANAGE_SERVER, current_user.username)
     try:

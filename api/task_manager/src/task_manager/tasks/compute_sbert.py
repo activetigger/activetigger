@@ -24,8 +24,8 @@ def encode_sbert(
     """
     Compute normalised sentence-transformers embeddings by batches.
 
-    Shared by the celery task and the in-process callers (bertopic, feature
-    recomputation). Progress is written as a percentage to path_progress;
+    Shared by the sbert task and the other tasks that embed texts (bertopic,
+    feature recomputation). Progress is written as a percentage to path_progress;
     the caller owns that file.
     """
     model_args = config.models_embeddings.get(model, {})

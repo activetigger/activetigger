@@ -221,7 +221,7 @@ class PredictBertMultiClass:
 
         return tokenizer, model, self.max_length
 
-    def __listen_stop_event(self):
+    def __check_aborted(self):
         """
         Raise exception if the user requested cancellation
         """
@@ -418,7 +418,7 @@ class PredictBertMultiClass:
                 desc="Predicting",
                 unit="batch",
             ):
-                self.__listen_stop_event()
+                self.__check_aborted()
                 chunk = tokenizer(
                     list(self.df[self.col_text][i : i + self.batch]),
                     padding=True,

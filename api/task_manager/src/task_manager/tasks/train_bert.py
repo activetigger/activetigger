@@ -90,9 +90,8 @@ class CustomLoggingCallback(TrainerCallback):
             adjusted_history.append(entry)
         with open(self.current_path.joinpath("log_history.txt"), "w") as f:
             json.dump(adjusted_history, f)
-        # end if event set
         if self.is_aborted():
-            self.logger.info("Event set, stopping training.")
+            self.logger.info("Stop requested, stopping training.")
             control.should_training_stop = True
             raise Exception("Process interrupted by user")
 
@@ -188,7 +187,7 @@ class TrainBert:
     base_model (str): model to use
     params (dict) : training parameters
     test_size (dict): train/test distribution
-    event : possibility to interrupt
+    is_aborted : callable telling whether the user requested a stop
     unique_id : unique id for the current task
     loss : loss function to use (cross_entropy, weighted_cross_entropy)
 
@@ -228,7 +227,6 @@ class TrainBert:
         self.base_model = inputs.base_model
         self.params = inputs.params
         self.test_size = inputs.test_size
-        # self.event = event
         self.unique_id = unique_id
         if inputs.loss == "weighted_cross_entropy" and inputs.training_kind == "multilabel":
             raise ValueError(
@@ -774,7 +772,6 @@ class TrainBert:
             task_timer.stop("evaluate")
 
             task_timer.start("save_files")
-            # TODO:remove input dataframe from disk
             params_to_save = self.params.model_dump()
             params_to_save.update(
                 {

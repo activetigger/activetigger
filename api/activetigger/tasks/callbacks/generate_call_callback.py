@@ -16,6 +16,10 @@ class GenerateCallCallback(TaskCallback):
     def on_complete_task_specific(
         cls, task_id: str, task_result: GenerateCallTaskResult, project_manager, process
     ):
+        print(
+            f"Generation {task_result['batch']} by {task_result['username']}: "
+            f"{task_result['n_results']} results, {task_result['n_errors']} errors"
+        )
         project_manager._recover_generations_from_jsonl(Path(task_result["jsonl_path"]))
 
     # keep the answers already paid for, whether the batch failed or was stopped

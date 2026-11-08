@@ -1353,12 +1353,6 @@ class EventsDict(TypedDict):
     events: dict[str, dict[str, str | None]]
 
 
-class ReturnTaskPredictModel(BaseModel):
-    path: str
-    metrics: dict[str, MLStatisticsModel] | None = None
-    events: EventsModel | None = None
-
-
 class ModelScoresModel(BaseModel):
     internalvalid_scores: dict | None = None
     train_scores: dict | None = None
@@ -1428,10 +1422,7 @@ class ExportGenerationsParams(BaseModel):
 
 class ProjectCreatingModel(ProcessComputing):
     project_slug: str
-    unique_id: str
-    time: datetime.datetime
     kind: Literal["create_project"]
-    status: str
 
 
 class TopicsOutModel(BaseModel):

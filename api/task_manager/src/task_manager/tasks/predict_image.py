@@ -264,7 +264,7 @@ class PredictImage:
         model = AutoModelForImageClassification.from_pretrained(self.path)
         return image_processor, model
 
-    def __listen_stop_event(self):
+    def __check_aborted(self):
         if self.is_aborted():
             raise Exception("Process interrupted by user")
 
@@ -414,7 +414,7 @@ class PredictImage:
                     **loader_kwargs,
                 )
                 for batch_tensor in tqdm(loader, total=n_batches, desc="Predicting", unit="batch"):
-                    self.__listen_stop_event()
+                    self.__check_aborted()
                     batch_tensor = batch_tensor.to(device, non_blocking=use_cuda)
                     with torch.no_grad():
                         if use_cuda:

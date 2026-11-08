@@ -4,8 +4,7 @@ Multimodal image embeddings with sentence-transformers (CLIP / BGE-VL / Qwen3-VL
 Output shares the vector space of prompt embeddings from the same model, which
 enables the `prompt` selection mode in get_next.
 
-`encode_multimodal` is shared by the celery task and the in-process callers
-(feature recomputation).
+`encode_multimodal` is shared by the multimodal task and the feature recomputation task.
 """
 
 import gc

@@ -3275,13 +3275,13 @@ export function useCopyExistingData() {
 }
 
 /**
- * Restart the queue
+ * Stop every task and reset the server memory
  */
 export function useRestartQueue() {
   const { notify } = useNotifications();
   const restartQueue = useCallback(async () => {
     const res = await api.POST('/server/restart', {});
-    if (!res.error) notify({ type: 'success', message: 'Queue restarted.' });
+    if (!res.error) notify({ type: 'success', message: 'Memory reset, running tasks stopped.' });
     return true;
   }, [notify]);
   return { restartQueue };

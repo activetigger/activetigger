@@ -170,7 +170,7 @@ class PredictNer:
                 df = pd.concat([df, *extra_frames])
         return df
 
-    def __listen_stop_event(self):
+    def __check_aborted(self):
         if self.is_aborted():
             raise Exception("Process interrupted by user")
 
@@ -256,7 +256,7 @@ class PredictNer:
                 desc="Predicting",
                 unit="batch",
             ):
-                self.__listen_stop_event()
+                self.__check_aborted()
                 batch_texts = texts[i : i + self.batch]
                 enc = tokenizer(
                     batch_texts,

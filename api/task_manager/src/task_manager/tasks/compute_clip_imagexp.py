@@ -2,8 +2,7 @@
 """
 CLIP-style image embeddings for an image project.
 
-`encode_clip` is shared by the celery task and the in-process callers
-(feature recomputation). Model specs live in features.IMAGE_EMBEDDING_MODELS_IMAGEXP
+`encode_clip` is shared by the clip task and the feature recomputation task. Model specs live in features.IMAGE_EMBEDDING_MODELS_IMAGEXP
 as (model_name, pretrained_tag) consumable by `open_clip.create_model_and_transforms`.
 """
 

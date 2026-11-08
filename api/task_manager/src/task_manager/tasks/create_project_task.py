@@ -66,7 +66,7 @@ class CreateProjectTask(AutoCallbackTask):
         """
         # TODO us task logger
         # logger = get_task_logger(CreateProjectTask.name)
-        print(f"Start queue project {props.project_slug} for {props.username}")
+        print(f"Start project creation {props.project_slug} for {props.username}")
         # check if the directory already exists + file (should with the data)
         if props.params.dir is None or not props.params.dir.exists():
             print("The directory does not exist and should", props.params.dir)

@@ -133,7 +133,7 @@ uv run celery-worker-cpu
 uv run celery-worker-gpu
 ```
 
-The workers read `api/.env` like the API (see `.env.sample`): `REDIS_URL` (default `redis://localhost:6379`), `ORCHESTRATOR_API_URL` (default `http://localhost:5000`, must match the `-p` port of the API), `WORKER_LOGLEVEL` (default `INFO`), `N_WORKERS_CPU` and `N_WORKERS_GPU`.
+The workers read `api/.env` like the API (see `.env.sample`): `REDIS_URL` (default `redis://localhost:6379`), `ORCHESTRATOR_API_URL` (default `http://localhost:5000`, must match the `-p` port of the API), `WORKER_LOGLEVEL` (default `INFO`), `N_WORKERS_CPU` and `N_WORKERS_GPU`. The callback routes are protected by a shared secret, `TASK_CALLBACK_TOKEN`, generated in `$DATA_PATH/.task_callback_token` when unset.
 
 #### Check the API
 

@@ -371,7 +371,7 @@ class Project:
 
     def start_project_creation(self, params: ProjectBaseModel, username: str, path: Path) -> None:
         """
-        Manage process creation, sending the heavy process to the queue
+        Start the project creation task on a worker
         """
         self.status = "creating"
 
@@ -410,7 +410,6 @@ class Project:
                 unique_id=unique_id,
                 time=datetime.now(timezone.utc),
                 kind="create_project",
-                status="training",
                 abortable_celery_task=abortable,
             ),
         )
@@ -451,7 +450,6 @@ class Project:
                 unique_id=unique_id,
                 time=datetime.now(timezone.utc),
                 kind="create_project",
-                status="training",
                 abortable_celery_task=abortable,
             ),
         )
@@ -465,7 +463,7 @@ class Project:
         import_testset_labels: pd.DataFrame | None = None,
     ) -> None:
         """
-        Get the result of the queue and finish the creation process
+        Finish the creation from the worker result (called by the task callback)
         """
         # add the project to the database
         self.db_manager.projects_service.add_project(
@@ -1985,7 +1983,7 @@ class Project:
 
         For text/contexts/expand, it needs to draw from raw data
         - direct small modification
-        - bigger modification (texts/contexts/expand) with the queue
+        - bigger modification (texts/contexts/expand) on a worker
         """
 
         if not self.params.dir:

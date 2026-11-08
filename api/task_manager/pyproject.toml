@@ -1,7 +1,7 @@
 [project]
 name = "task-manager"
 version = "0.1.0"
-description = "Add your description here"
+description = "Celery task workers of ActiveTigger"
 readme = "README.md"
 authors = [
     { name = "Paul Girard", email = "paul@ouestware.com" }

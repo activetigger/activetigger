@@ -786,7 +786,7 @@ class Features:
             self.add(name, kind, username, parameters, column_encoded)
             return None
 
-        # features with queue
+        # features computed on a worker
         task, task_inputs = None, None
 
         if kind == "sentence-embeddings":
