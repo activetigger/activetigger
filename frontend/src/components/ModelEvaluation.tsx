@@ -184,8 +184,11 @@ export const ModelEvaluation: FC = () => {
       {isComputing && (
         <DisplayTrainingProcesses
           projectSlug={projectSlug || null}
-          processes={currentProject?.languagemodels.training}
+          processes={
+            isNer ? currentProject?.nermodels?.training : currentProject?.languagemodels.training
+          }
           displayStopButton={isComputing}
+          stopKind={isNer ? 'ner' : 'bert'}
         />
       )}
 

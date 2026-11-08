@@ -685,9 +685,16 @@ class Orchestrator:
                 "predict_with_features",
                 "train_ner",
                 "predict_ner",
+                "projection",
+                "lexicometrics",
+                "prompt",
+                "prompt_similarity",
+                "extend_features",
             ]
         if kind == "bert":
             kind = ["train_bert", "predict_bert"]
+        if kind == "ner":
+            kind = ["train_ner", "predict_ner"]
         if kind == "image":
             kind = ["train_image", "predict_image"]
         if kind in ("quick", "quickmodel"):
