@@ -1,7 +1,7 @@
 import datetime
 from enum import Enum, StrEnum
 from pathlib import Path
-from typing import Annotated, Any, Callable, Literal, Optional, TypedDict
+from typing import Annotated, Any, Literal, TypedDict
 
 from pandas import DataFrame
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field  # for dataframe
@@ -1126,9 +1126,15 @@ class BERTopicDescriptionModel(BaseModel):
     time: str
 
 
+class TrainingState(TypedDict):
+    name: str
+    status: Literal["training"]
+    progress: TaskProgressState | None
+
+
 class BertopicProjectStateModel(BaseModel):
     available: dict[str, BERTopicDescriptionModel]
-    training: dict[str, dict[str, str | int | float | None]]
+    training: dict[str, TrainingState]
     bindable_features: list[str]
 
 

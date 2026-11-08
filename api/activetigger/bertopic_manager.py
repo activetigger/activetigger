@@ -2,7 +2,6 @@ import json
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable
 
 import pandas as pd
 from fastapi.responses import FileResponse
@@ -22,12 +21,13 @@ from activetigger.datamodels import (
     BertopicProjectionNode,
     BertopicProjectStateModel,
     TopicsOutModel,
+    TrainingState,
 )
 from activetigger.db.languagemodels import ModelsService
 from activetigger.db.manager import DatabaseManager
 from activetigger.errors import NotFoundError
 from activetigger.features import Features
-from activetigger.monitoring import Monitoring, TrainingState
+from activetigger.monitoring import Monitoring
 from activetigger.tasks.task_manager_client import (
     enqueue_celery_task,
     get_celery_task_progress,

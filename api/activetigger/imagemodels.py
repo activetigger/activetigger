@@ -5,7 +5,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Optional, Tuple, cast
+from typing import Any, Tuple, cast
 
 import pandas as pd
 from fastapi.responses import FileResponse
@@ -28,7 +28,7 @@ from activetigger.datamodels import (
 )
 from activetigger.db.languagemodels import ModelsService
 from activetigger.db.manager import DatabaseManager
-from activetigger.errors import AlreadyExistsError, InvalidInputError, NotFoundError
+from activetigger.errors import AlreadyExistsError, NotFoundError
 from activetigger.functions import get_model_metrics
 from activetigger.monitoring import Monitoring
 from activetigger.tasks.task_manager_client import (

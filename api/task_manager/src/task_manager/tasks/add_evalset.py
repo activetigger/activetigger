@@ -29,15 +29,14 @@ def _eval_file(dataset: str) -> str:
 
 def _stop_opportunity(
     is_aborted: Callable[[], bool] | None,
-    path_project: Path,
-    dataset: str,
+    output_path: Path,
     images_dir: Path | None = None,
 ) -> None:
     # on stop, drop what was already written for this eval set
     if is_aborted is not None and is_aborted():
         if images_dir is not None and images_dir.exists():
             shutil.rmtree(images_dir, ignore_errors=True)
-        path_project.joinpath(_eval_file(dataset)).unlink(missing_ok=True)
+        output_path.unlink(missing_ok=True)
         raise Exception("Process interrupted by user")
 
 
@@ -79,6 +78,7 @@ def add_evalset(
     evalset: EvalSetDataModel,
     path_project: Path,
     index_all: pd.Index,
+    output_path: Path,
     schemes: dict[str, list[str]] | None = None,
     is_aborted: Callable[[], bool] | None = None,
 ) -> EvalSetResult:
@@ -89,7 +89,7 @@ def add_evalset(
     schemes = schemes or {}
 
     def stop_opportunity() -> None:
-        _stop_opportunity(is_aborted, path_project, dataset)
+        _stop_opportunity(is_aborted, output_path)
 
     try:
         stop_opportunity()
@@ -154,7 +154,7 @@ def add_evalset(
 
         # write to parquet
         if dataset in ("test", "valid") and len(df) > 0:
-            df[["id_external", "text"]].to_parquet(path_project.joinpath(_eval_file(dataset)))
+            df[["id_external", "text"]].to_parquet(output_path)
         else:
             raise Exception("Dataset should be test or valid")
         # stop Process
@@ -182,6 +182,7 @@ def add_evalset_image(
     evalset: EvalSetImageModel,
     path_project: Path,
     index_all: pd.Index,
+    output_path: Path,
     update_progress: UpdateProgressMethod,
     scheme: list[str] | None = None,
     is_aborted: Callable[[], bool] | None = None,
@@ -216,7 +217,7 @@ def add_evalset_image(
         thumbs_dir.mkdir(parents=True, exist_ok=True)
 
         def stop_opportunity() -> None:
-            _stop_opportunity(is_aborted, path_project, dataset, images_dir)
+            _stop_opportunity(is_aborted, output_path, images_dir)
 
         stop_opportunity()
 
@@ -344,7 +345,7 @@ def add_evalset_image(
 
         stop_opportunity()
 
-        df[["id_external", "text"]].to_parquet(project_dir.joinpath(_eval_file(dataset)))
+        df[["id_external", "text"]].to_parquet(output_path)
 
         schemes_elements: list[tuple[str, list]] = []
         if "label" in df.columns and evalset.scheme:

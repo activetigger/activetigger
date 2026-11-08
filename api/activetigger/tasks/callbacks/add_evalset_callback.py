@@ -6,6 +6,8 @@ from fastapi.encoders import jsonable_encoder
 # use task specification to ensure name and return are in sync with task_manager
 from task_manager.tasks.add_evalset_task import AddEvalsetTask, AddEvalsetTaskResult
 
+from activetigger.config import config
+
 # ensure the callback definition is what we expect by using the TaskCallback abstraction
 from activetigger.tasks.task_callback import TaskCallback
 
@@ -14,7 +16,8 @@ class AddEvalsetCallback(TaskCallback):
     # task_name is used to identify which callback to execute
     task_name = AddEvalsetTask.name
 
-    # the worker wrote test/valid.parquet: insert the labels, update params, reload
+    # the worker wrote a provisional eval parquet: promote it to test/valid.parquet,
+    # insert the labels, update the params and reload, all in one place
     @classmethod
     def on_complete_task_specific(
         cls, task_id: str, task_result: AddEvalsetTaskResult, project_manager, process
@@ -22,11 +25,15 @@ class AddEvalsetCallback(TaskCallback):
         eval_dataset = task_result["dataset"]
         user_name = task_result["username"]
         annotations_path = Path(task_result["annotations_path"])
+        evalset_path = Path(task_result["evalset_path"])
         try:
             with open(annotations_path) as f:
                 schemes_elements = json.load(f)
+            eval_file = config.test_file if eval_dataset == "test" else config.valid_file
+            evalset_path.replace(project_manager.params.dir.joinpath(eval_file))
         finally:
             annotations_path.unlink(missing_ok=True)
+            evalset_path.unlink(missing_ok=True)
         for scheme_name, elements in schemes_elements:
             if elements:
                 project_manager.db_manager.projects_service.add_annotations(

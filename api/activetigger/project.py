@@ -702,7 +702,12 @@ class Project:
                 time=datetime.now(timezone.utc),
                 kind=f"add_evalset_{dataset}",
                 abortable_celery_task=abortable,
-                temp_files=[index_path],
+                # worker outputs a lost callback would leave behind
+                temp_files=[
+                    index_path,
+                    self.params.dir.joinpath(f"eval_{dataset}_{unique_id}.parquet"),
+                    self.params.dir.joinpath(f"add_evalset_{unique_id}.json"),
+                ],
             ),
         )
         if username == "root":
@@ -2016,6 +2021,8 @@ class Project:
                 kind="update_datasets",
                 update=update,
                 abortable_celery_task=abortable,
+                # provisional train file a lost callback would leave behind
+                temp_files=[self.params.dir.joinpath(f"train_{unique_id}.parquet")],
             ),
         )
 

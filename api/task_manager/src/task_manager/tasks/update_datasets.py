@@ -13,6 +13,7 @@ class UpdatedFields(TypedDict):
     n_train: int | None
     # the train rows changed: features, bertopic and projections are invalid
     reset_features: bool
+    train_path: str | None
 
 
 def update_datasets(
@@ -20,10 +21,11 @@ def update_datasets(
     cols_context: list[str],
     cols_text: list[str],
     update: ProjectUpdateModel,
+    output_path: Path,
 ) -> UpdatedFields:
     """
-    Update datasets with access to the raw dataset
-    - Write new data on parquet files
+    Update the train dataset with access to the raw dataset
+    - Write the new train data to output_path (not to train.parquet)
     - Return the modified project fields
     """
     path_data_all = path_project / Path(config.data_all)
@@ -36,57 +38,65 @@ def update_datasets(
         "cols_text": cols_text,
         "n_train": None,
         "reset_features": False,
+        "train_path": None,
     }
+    df_train = pd.read_parquet(path_data_train)
+    changed = False
     if update.cols_context is not None and set(update.cols_context) != set(cols_context):
-        change_context(path_data_all, path_data_train, cols_context, update.cols_context)
+        df_train = change_context(path_data_all, df_train, cols_context, update.cols_context)
         result["cols_context"] = update.cols_context
+        changed = True
     if update.cols_text is not None and set(update.cols_text) != set(cols_text):
-        change_text_column(path_data_all, path_data_train, update.cols_text)
+        df_train = change_text_column(path_data_all, df_train, update.cols_text)
         result["cols_text"] = update.cols_text
+        changed = True
     if update.add_n_train is not None and update.add_n_train > 0:
-        result["n_train"] = change_n_train(
-            path_data_all, path_data_train, path_data_valid, path_data_test, update.add_n_train
+        df_train = change_n_train(
+            path_data_all, df_train, path_data_valid, path_data_test, update.add_n_train
         )
+        result["n_train"] = len(df_train)
         result["reset_features"] = True
+        changed = True
+    if changed:
+        df_train.to_parquet(output_path)
+        result["train_path"] = str(output_path)
     return result
 
 
 def change_context(
-    path_data_all: Path, path_data_train: Path, old_cols: list[str], new_cols: list[str]
-) -> None:
+    path_data_all: Path, df_train: pd.DataFrame, old_cols: list[str], new_cols: list[str]
+) -> pd.DataFrame:
     """
     Change context columns
     """
     df_all = pd.read_parquet(path_data_all, columns=new_cols)
-    df_train = pd.read_parquet(path_data_train)
-    df_train.drop(columns=old_cols, inplace=True)
-    df_train = pd.concat([df_train, df_all.loc[df_train.index]], axis=1)
-    df_train.to_parquet(path_data_train)
+    df_train = df_train.drop(columns=old_cols)
+    return pd.concat([df_train, df_all.loc[df_train.index]], axis=1)
 
 
-def change_text_column(path_data_all: Path, path_data_train: Path, cols_text: list[str]) -> None:
+def change_text_column(
+    path_data_all: Path, df_train: pd.DataFrame, cols_text: list[str]
+) -> pd.DataFrame:
     """
     Change text column
     """
     df_all = pd.read_parquet(path_data_all, columns=cols_text)
-    df_train = pd.read_parquet(path_data_train)
     df_sub = df_all.loc[df_train.index]
     df_sub["text"] = concat_text_columns(df_sub, cols_text)
     df_train["text"] = df_sub["text"]
-    df_train.to_parquet(path_data_train)
+    return df_train
 
 
 def change_n_train(
     path_data_all: Path,
-    path_data_train: Path,
+    df_train: pd.DataFrame,
     path_data_valid: Path,
     path_data_test: Path,
     add_n_train: int,
-) -> int:
+) -> pd.DataFrame:
     """
     Change number of training elements by adding new elements from all data
     """
-    df_train = pd.read_parquet(path_data_train)
     df_all = pd.read_parquet(path_data_all, columns=list(df_train.columns))
     elements_index = list(df_train.index)
     if path_data_valid.exists():
@@ -105,6 +115,4 @@ def change_n_train(
     # drop na elements to avoid problems
     elements_to_add = elements_to_add[elements_to_add["text"].notna()]
 
-    df_train = pd.concat([df_train, elements_to_add])
-    df_train.to_parquet(path_data_train)
-    return len(df_train)
+    return pd.concat([df_train, elements_to_add])

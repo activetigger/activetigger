@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from fastapi.encoders import jsonable_encoder
 
 # use task specification to ensure name and return are in sync with task_manager
@@ -5,6 +7,8 @@ from task_manager.tasks.update_datasets_task import (
     UpdateDatasetsTask,
     UpdateDatasetsTaskResult,
 )
+
+from activetigger.config import config
 
 # ensure the callback definition is what we expect by using the TaskCallback abstraction
 from activetigger.tasks.task_callback import TaskCallback
@@ -14,12 +18,16 @@ class UpdateDatasetsCallback(TaskCallback):
     # task_name is used to identify which callback to execute
     task_name = UpdateDatasetsTask.name
 
-    # the worker rewrote train.parquet: save the new params and reload the data
+    # the worker wrote a provisional train file: promote it, save the new
+    # params and reload the data, all in one place so they never disagree
     @classmethod
     def on_complete_task_specific(
         cls, task_id: str, task_result: UpdateDatasetsTaskResult, project_manager, process
     ):
         params = project_manager.params
+        if task_result["train_path"] is None:
+            return
+        Path(task_result["train_path"]).replace(params.dir.joinpath(config.train_file))
         params.cols_context = task_result["cols_context"]
         params.cols_text = task_result["cols_text"]
         if task_result["n_train"] is not None:

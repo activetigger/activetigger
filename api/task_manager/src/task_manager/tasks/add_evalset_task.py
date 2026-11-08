@@ -32,8 +32,8 @@ class AddEvalsetTaskResult(TypedDict):
     dataset: str
     username: str
     n_rows: int
-    # JSON file with [(scheme_name, elements), ...]
     annotations_path: str
+    evalset_path: str
 
 
 class AddEvalsetTask(AbortableAutoCallbackTask):
@@ -49,6 +49,8 @@ class AddEvalsetTask(AbortableAutoCallbackTask):
     pydantic=True,
 )
 def add_evalset_task(self: AddEvalsetTask, inputs: AddEvalsetTaskInput) -> AddEvalsetTaskResult:
+    # provisional file
+    output_path = inputs.path_project.joinpath(f"eval_{inputs.dataset}_{self.request.id}.parquet")
     try:
         index_all = pd.read_pickle(inputs.index_path)
         if inputs.evalset_image is not None:
@@ -57,6 +59,7 @@ def add_evalset_task(self: AddEvalsetTask, inputs: AddEvalsetTaskInput) -> AddEv
                 inputs.evalset_image,
                 inputs.path_project,
                 index_all,
+                output_path,
                 scheme=inputs.scheme,
                 is_aborted=self.is_aborted,
                 update_progress=self.update_progress,
@@ -67,6 +70,7 @@ def add_evalset_task(self: AddEvalsetTask, inputs: AddEvalsetTaskInput) -> AddEv
                 inputs.evalset_data,
                 inputs.path_project,
                 index_all,
+                output_path,
                 schemes=inputs.schemes,
                 is_aborted=self.is_aborted,
             )
@@ -75,6 +79,9 @@ def add_evalset_task(self: AddEvalsetTask, inputs: AddEvalsetTaskInput) -> AddEv
         annotations_path = inputs.path_project.joinpath(f"add_evalset_{self.request.id}.json")
         with open(annotations_path, "w") as f:
             json.dump(schemes_elements, f)
+    except Exception:
+        output_path.unlink(missing_ok=True)
+        raise
     finally:
         inputs.index_path.unlink(missing_ok=True)
     return {
@@ -83,4 +90,5 @@ def add_evalset_task(self: AddEvalsetTask, inputs: AddEvalsetTaskInput) -> AddEv
         "username": inputs.username,
         "n_rows": n_rows,
         "annotations_path": str(annotations_path),
+        "evalset_path": str(output_path),
     }

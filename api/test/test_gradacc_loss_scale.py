@@ -79,7 +79,10 @@ def _train_tiny_bert(tmp_path, gradacc: int) -> Trainer:
         disable_tqdm=True,
     )
     callback = CustomLoggingCallback(
-        is_aborted=lambda: False, logger=logging.getLogger("test"), current_path=tmp_path
+        is_aborted=lambda: False,
+        logger=logging.getLogger("test"),
+        current_path=tmp_path,
+        update_progress=lambda progress, label=None: None,
     )
     ds = _TinyDataset()
     trainer = Trainer(

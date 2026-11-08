@@ -1,7 +1,6 @@
 import gc
 import math
 from collections.abc import Callable
-from pathlib import Path
 
 import numpy as np
 import torch

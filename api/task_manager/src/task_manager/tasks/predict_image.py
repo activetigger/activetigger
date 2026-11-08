@@ -2,7 +2,6 @@ import contextlib
 import gc
 import json
 import multiprocessing
-import os
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
