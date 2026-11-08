@@ -588,10 +588,14 @@ class Features:
     def current_user_processes(self, user: str):
         return [e for e in self.computing if getattr(e, "user", None) == user]
 
+    @staticmethod
+    def _progress(task_id: str) -> str | None:
+        progress = get_celery_task_progress(task_id)
+        return str(progress["progress"]) if progress else None
+
     def current_computing(self) -> dict[str, dict[str, str | None]]:
-        progress = get_celery_task_progress(e.unique_id)
         computing = {
-            e.name: {"progress": str(progress["progress"]) if progress else None, "name": e.name}
+            e.name: {"progress": self._progress(e.unique_id), "name": e.name}
             for e in self.computing
             if e.kind == "feature"
         }
@@ -600,9 +604,8 @@ class Features:
         # lets the frontend render this entry differently.
         for e in self.computing:
             if e.kind == "extend_features":
-                progress = get_celery_task_progress(e.unique_id)
                 computing["extending features"] = {
-                    "progress": str(progress["progress"]) if progress else None,
+                    "progress": self._progress(e.unique_id),
                     "name": "extending features",
                     "kind": "extend_features",
                 }
