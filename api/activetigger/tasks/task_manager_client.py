@@ -2,14 +2,12 @@ import json
 from pathlib import Path
 from typing import cast
 
-import redis
 from celery import uuid
 from celery.contrib.abortable import AbortableAsyncResult, AbortableTask
 from celery.result import AsyncResult
 from task_manager.auto_callback_task import QueueName, TaskProgressState
 from task_manager.celery import celery_app
-from task_manager.config import redis_url
-from task_manager.stop_signal import request_stop, stop_requested
+from task_manager.stop_signal import redis_client, request_stop, stop_requested
 
 from activetigger.datamodels import ProcessComputing
 
@@ -123,7 +121,7 @@ def celery_tasks_in_flight() -> set[str] | None:
     if not answered:
         return None
     # queued messages: kombu redis transport stores one JSON message per list entry
-    r = redis.Redis.from_url(redis_url)
+    r = redis_client()
     for queue in QueueName:
         for raw in cast(list, r.lrange(str(queue), 0, -1)):
             try:

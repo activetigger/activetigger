@@ -48,8 +48,6 @@ class ComputeClipImagexpTask(AbortableAutoCallbackTask):
 def compute_clip_imagexp(
     self: ComputeClipImagexpTask, inputs: ComputeClipImagexpTaskInput
 ) -> ComputeClipImagexpTaskResult:
-    # the API reads the progress file named after the task id
-    path_progress = inputs.path_process.joinpath(self.request.id)
     paths = pd.read_pickle(inputs.paths_path)
     try:
         emb = encode_clip(
@@ -61,7 +59,6 @@ def compute_clip_imagexp(
             is_aborted=self.is_aborted,
         )
     finally:
-        path_progress.unlink(missing_ok=True)
         unlink(inputs.paths_path)
     embeddings_path = inputs.path_process.joinpath(f"clip_{self.request.id}.parquet")
     emb.to_parquet(embeddings_path)

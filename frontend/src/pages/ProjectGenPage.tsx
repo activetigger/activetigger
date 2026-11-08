@@ -26,6 +26,7 @@ import {
 import { useNotifications } from '../core/notifications';
 import { useAppContext } from '../core/useAppContext';
 import { useAuth } from '../core/useAuth';
+import { readProgress } from '../core/utils';
 import { GenModel, SupportedAPI } from '../types';
 
 interface Row {
@@ -436,9 +437,11 @@ export const GenPage: FC = () => {
                     >
                       <PulseLoader className="mx-2" />
                       Stop (
-                      {String(
-                        currentProject?.generations?.training?.[authenticatedUser?.username || '']
-                          ?.progress ?? 0,
+                      {Math.round(
+                        readProgress(
+                          currentProject?.generations?.training?.[authenticatedUser?.username || '']
+                            ?.progress,
+                        ).value ?? 0,
                       )}
                       % )
                     </button>

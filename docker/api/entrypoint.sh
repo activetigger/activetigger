@@ -75,7 +75,7 @@ uv run --no-sync watchmedo auto-restart \
     -- uv run --no-sync celery-worker-cpu &
 
 # Heavy tasks (training, embeddings, prediction) go to the GPU queue, consumed
-# by this single solo worker so they run one at a time. It is started even
+# by this single prefork worker (one child at a time, one task per child). It is started even
 # without a GPU: the tasks then run on CPU, still serialized.
 uv run --no-sync watchmedo auto-restart \
   --directory="./task_manager/src/task_manager/" \

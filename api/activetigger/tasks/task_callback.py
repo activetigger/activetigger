@@ -44,23 +44,31 @@ class TaskCallback(ABC):
     def on_complete(cls, task_id: str, task_result: Any) -> Any:
         """Callback called by the orchestrator once the task succeeds."""
         print(f"Completion of {cls.task_name} task {task_id} in orchestrator {task_result}")
-        project_slug = cls.get_project_slug(task_result)
-        project_manager = cls.get_project_manager(project_slug, task_id)
-        # copy: clean_process mutates the list
-        for process in list(project_manager.computing):
-            if process.unique_id == task_id:
-                # always drop the entry, a raising hook must not leave a stale process
-                try:
-                    cls.on_complete_task_specific(task_id, task_result, project_manager, process)
-                except Exception as ex:
-                    # surface the error to the user instead of a 500 the worker would retry
-                    print(f"Error in {process.kind} callback {task_id}: {ex}")
-                    project_manager.errors.add(f"Error in {process.kind} : {ex}")
-                    # a creation is only cleaned by the orchestrator loop on "error"
-                    if project_slug in get_orchestrator().project_creation_ongoing:
-                        project_manager.status = "error"
-                finally:
-                    project_manager.clean_process(process)
+        orchestrator = get_orchestrator()
+        # the reconciliation must not take a task for lost while its result is stored
+        orchestrator.callbacks_in_progress.add(task_id)
+        try:
+            project_slug = cls.get_project_slug(task_result)
+            project_manager = cls.get_project_manager(project_slug, task_id)
+            # copy: clean_process mutates the list
+            for process in list(project_manager.computing):
+                if process.unique_id == task_id:
+                    # always drop the entry, a raising hook must not leave a stale process
+                    try:
+                        cls.on_complete_task_specific(
+                            task_id, task_result, project_manager, process
+                        )
+                    except Exception as ex:
+                        # surface the error to the user instead of a 500 the worker would retry
+                        print(f"Error in {process.kind} callback {task_id}: {ex}")
+                        project_manager.errors.add(f"Error in {process.kind} : {ex}")
+                        # a creation is only cleaned by the orchestrator loop on "error"
+                        if project_slug in orchestrator.project_creation_ongoing:
+                            project_manager.status = "error"
+                    finally:
+                        project_manager.clean_process(process)
+        finally:
+            orchestrator.callbacks_in_progress.discard(task_id)
 
     @classmethod
     @abstractmethod
@@ -73,66 +81,71 @@ class TaskCallback(ABC):
     @classmethod
     def on_failure(cls, task_id: str, task_report: TaskFailureReportForCallback):
         print(f"Error on {cls.task_name} task {task_id} in orchestrator {task_report}")
-        # cast first args as Task Input type
-        task_input = task_report.task_args[0]
-        project_slug = task_input["project_slug"]
-        project_manager = cls.get_project_manager(project_slug, task_id)
-        for e in list(project_manager.computing):
-            if e.unique_id == task_id:
-                project_manager.clean_process(e)
-        specific_message = cls.on_failure_task_specific(task_id, task_report, project_manager)
-        # a stopped task is not an error (same as the in-process "cancelled" state)
-        if "Process interrupted by user" in task_report.exception or was_stopped(task_id):
-            # except for a creation: the loop only cleans a creating project on "error"
-            if project_slug in get_orchestrator().project_creation_ongoing:
-                project_manager.errors.add("Project creation stopped by user")
-                project_manager.status = "error"
-            return
-        project_manager.status = "error"
-        if specific_message:
-            project_manager.errors.add(specific_message)
-        # a pool child killed by the kernel: almost always RAM exhaustion
-        if "WorkerLostError" in task_report.exception or "SIGKILL" in task_report.exception:
-            project_manager.errors.add(
-                (
-                    f"Error for task {cls.task_name} : the worker process was killed, "
-                    "most likely because the machine ran out of memory (RAM). "
-                    "Try a smaller model, a smaller batch size or a shorter max length. "
-                    f"Details: {task_report.exception}"
+        orchestrator = get_orchestrator()
+        orchestrator.callbacks_in_progress.add(task_id)
+        try:
+            # cast first args as Task Input type
+            task_input = task_report.task_args[0]
+            project_slug = task_input["project_slug"]
+            project_manager = cls.get_project_manager(project_slug, task_id)
+            for e in list(project_manager.computing):
+                if e.unique_id == task_id:
+                    project_manager.clean_process(e)
+            specific_message = cls.on_failure_task_specific(task_id, task_report, project_manager)
+            # a stopped task is not an error (same as the in-process "cancelled" state)
+            if "Process interrupted by user" in task_report.exception or was_stopped(task_id):
+                # except for a creation: the loop only cleans a creating project on "error"
+                if project_slug in get_orchestrator().project_creation_ongoing:
+                    project_manager.errors.add("Project creation stopped by user")
+                    project_manager.status = "error"
+                return
+            project_manager.status = "error"
+            if specific_message:
+                project_manager.errors.add(specific_message)
+            # a pool child killed by the kernel: almost always RAM exhaustion
+            if "WorkerLostError" in task_report.exception or "SIGKILL" in task_report.exception:
+                project_manager.errors.add(
+                    (
+                        f"Error for task {cls.task_name} : the worker process was killed, "
+                        "most likely because the machine ran out of memory (RAM). "
+                        "Try a smaller model, a smaller batch size or a shorter max length. "
+                        f"Details: {task_report.exception}"
+                    )
                 )
-            )
-        # worker misconfiguration, not a memory problem
-        elif "Cannot re-initialize CUDA in forked subprocess" in task_report.exception:
-            project_manager.errors.add(
-                (
-                    f"Error for task {cls.task_name} : CUDA was initialised in the worker "
-                    "parent process, so GPU tasks cannot run in the prefork children. "
-                    "Check the worker logs (TASKMANAGER_TRACE_CUDA_INIT=1 shows the cause) "
-                    "or run the GPU worker with --pool=solo."
+            # worker misconfiguration, not a memory problem
+            elif "Cannot re-initialize CUDA in forked subprocess" in task_report.exception:
+                project_manager.errors.add(
+                    (
+                        f"Error for task {cls.task_name} : CUDA was initialised in the worker "
+                        "parent process, so GPU tasks cannot run in the prefork children. "
+                        "Check the worker logs (TASKMANAGER_TRACE_CUDA_INIT=1 shows the cause) "
+                        "or run the GPU worker with --pool=solo."
+                    )
                 )
-            )
-        # generic message for GPU errors
-        elif any(
-            s in task_report.exception
-            for s in [
-                "CUDA",
-                "CUDACachingAllocator",
-                "out of memory",
-                "NVML",
-                "cuda",
-            ]
-        ):
-            project_manager.errors.add(
-                (
-                    f"Error for task {cls.task_name} : GPU error — not enough GPU memory available. "
-                    "Try reducing the batch size, the max sequence length, or using a smaller model. "
-                    f"Details: {task_report.exception}"
+            # generic message for GPU errors
+            elif any(
+                s in task_report.exception
+                for s in [
+                    "CUDA",
+                    "CUDACachingAllocator",
+                    "out of memory",
+                    "NVML",
+                    "cuda",
+                ]
+            ):
+                project_manager.errors.add(
+                    (
+                        f"Error for task {cls.task_name} : GPU error — not enough GPU memory available. "
+                        "Try reducing the batch size, the max sequence length, or using a smaller model. "
+                        f"Details: {task_report.exception}"
+                    )
                 )
-            )
-        elif specific_message is None:
-            project_manager.errors.add(
-                f"Error for process {cls.task_name} : {task_report.exception}"
-            )
+            elif specific_message is None:
+                project_manager.errors.add(
+                    f"Error for process {cls.task_name} : {task_report.exception}"
+                )
+        finally:
+            orchestrator.callbacks_in_progress.discard(task_id)
 
     @classmethod
     @abstractmethod

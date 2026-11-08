@@ -9,19 +9,22 @@ from fastapi.testclient import TestClient
 from task_manager.celery import celery_app
 from task_manager.utils import TaskFailureReportForCallback
 
-from activetigger.app.main import app
-from activetigger.config import config
-from activetigger.tasks import all_callbacks
-from activetigger.tasks.task_callback import ProjectNotTrackedError
 from task_manager import utils as task_utils
 
-# tasks run synchronously in the test process: no broker, no worker
+# tasks run synchronously in the test process: no broker, no worker.
+# Must come before importing the app: building the orchestrator purges the
+# celery queues, which would hit the real redis (and the dev workers) otherwise.
 celery_app.conf.update(
     task_always_eager=True,
     task_store_eager_result=True,
     broker_url="memory://",
     result_backend="cache+memory://",
 )
+
+from activetigger.app.main import app  # noqa: E402
+from activetigger.config import config  # noqa: E402
+from activetigger.tasks import all_callbacks  # noqa: E402
+from activetigger.tasks.task_callback import ProjectNotTrackedError  # noqa: E402
 
 
 def _deliver_callback(url: str, payload: Any) -> bool:

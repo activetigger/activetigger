@@ -26,6 +26,7 @@ from activetigger.datamodels import (
 )
 from activetigger.functions import safe_upload_path, slugify
 from activetigger.tasks.task_manager_client import (
+    celery_tasks_in_flight,
     enqueue_celery_task,
     get_celery_task_progress,
     stop_celery_task,
@@ -223,6 +224,10 @@ class Toolbox:
         if params.min_chars < 0:
             raise HTTPException(status_code=400, detail="Minimum length must be positive")
 
+        # a previous split of this session must not write its result under the new one
+        previous = self._session_task_id(session_dir)
+        if previous:
+            stop_celery_task(previous, abortable=True)
         # remove results of a previous run
         session_dir.joinpath("result.parquet").unlink(missing_ok=True)
 
@@ -263,12 +268,12 @@ class Toolbox:
         session_dir = self._session_dir(username, session_id)
         path_result = session_dir.joinpath("result.parquet")
 
+        if self._session_task_id(session_dir) != task_id:
+            return PrepareStatusModel(status="not found")
         # the result is only written at the very end and removed when a new split starts
         if path_result.exists():
             df = pd.read_parquet(path_result)
             return PrepareStatusModel(status="done", n_rows=len(df), preview=self._preview(df))
-        if self._session_task_id(session_dir) != task_id:
-            return PrepareStatusModel(status="not found")
 
         result = AsyncResult(task_id, app=celery_app)
         state = result.state
@@ -284,14 +289,17 @@ class Toolbox:
         # queued or running: the worker reports progress once it starts
         progress_report = get_celery_task_progress(task_id)
         if progress_report is None and state == PENDING:
-            # celery forgets tasks (result_expires, redis restart): without any
-            # trace after the grace period, the task is not queued, it is gone
+            # celery forgets tasks (result_expires, redis restart). After the grace
+            # period, ask the broker and the workers: a task still queued behind a
+            # long GPU job is pending, one nobody holds is gone
             launched = session_dir.joinpath(self.TASK_FILE).stat().st_mtime
             if time.time() - launched > self.LOST_TASK_GRACE_SECONDS:
-                return PrepareStatusModel(
-                    status="failed",
-                    error="Task lost (no worker reported it), please relaunch the split",
-                )
+                in_flight = celery_tasks_in_flight()
+                if in_flight is not None and task_id not in in_flight:
+                    return PrepareStatusModel(
+                        status="failed",
+                        error="Task lost (no worker reported it), please relaunch the split",
+                    )
         status = "running" if progress_report is not None else "pending"
         return PrepareStatusModel(
             status=status, progress=progress_report["progress"] if progress_report else None

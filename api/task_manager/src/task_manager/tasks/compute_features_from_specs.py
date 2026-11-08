@@ -89,7 +89,9 @@ def _make_update_sub_progress(
 ) -> UpdateProgressMethod:
     def update_sub_progress(progress: float, label: str | None = None):
         # rescale sub_progress [0, 100] to the portion of its group progress
-        update_progress(((sub_task_index + 1 + progress) / nb_tasks), label or task_label or None)
+        update_progress(
+            ((sub_task_index + progress / 100.0) / nb_tasks) * 100.0, label or task_label or None
+        )
 
     return update_sub_progress
 

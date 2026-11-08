@@ -141,8 +141,14 @@ class Orchestrator:
         # dropped after staying finished or unaccounted for longer than the grace
         self._reconcile_interval = 60
         self._reconcile_grace = 120
+        # celery stores SUCCESS before the worker posts the callback (retried for
+        # minutes if the API is slow): a finished task must not be dropped before
+        # the whole delivery envelope has passed
+        self._reconcile_grace_success = 900
         self._last_reconcile = 0.0
         self._task_lost_since: dict[str, float] = {}
+        # task ids whose callback is being executed by the API right now
+        self.callbacks_in_progress: set[str] = set()
 
         # cached heavy system stats (refreshed every _heavy_stats_interval seconds)
         self._heavy_stats_interval = 30
@@ -203,6 +209,9 @@ class Orchestrator:
         """
         for project_slug in list(self.computing):
             self.stop_project_tasks(project_slug, username)
+        # duplications are tracked apart from computing
+        for dup in list(self.project_duplication_ongoing.values()):
+            stop_celery_task(dup["task_id"], True)
         self.projects = {}
         self.project_creation_ongoing = {}
         self.project_duplication_ongoing = {}
@@ -330,6 +339,10 @@ class Orchestrator:
             tracked[dup["task_id"]] = (slug, "duplicate_project")
 
         for task_id, (slug, kind) in tracked.items():
+            # its result is being stored by a callback: not lost
+            if task_id in self.callbacks_in_progress:
+                self._task_lost_since.pop(task_id, None)
+                continue
             state = celery_task_state(task_id)
             finished = state in ("SUCCESS", "FAILURE", "REVOKED")
             missing = in_flight is not None and task_id not in in_flight
@@ -337,7 +350,8 @@ class Orchestrator:
                 self._task_lost_since.pop(task_id, None)
                 continue
             since = self._task_lost_since.setdefault(task_id, now)
-            if now - since < self._reconcile_grace:
+            grace = self._reconcile_grace_success if state == "SUCCESS" else self._reconcile_grace
+            if now - since < grace:
                 continue
             self._task_lost_since.pop(task_id, None)
             reason = f"celery state {state}" + (", not held by any worker" if missing else "")

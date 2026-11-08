@@ -25,16 +25,19 @@ class UpdateDatasetsCallback(TaskCallback):
         cls, task_id: str, task_result: UpdateDatasetsTaskResult, project_manager, process
     ):
         params = project_manager.params
-        if task_result["train_path"] is None:
-            return
-        Path(task_result["train_path"]).replace(params.dir.joinpath(config.train_file))
-        params.cols_context = task_result["cols_context"]
-        params.cols_text = task_result["cols_text"]
-        if task_result["n_train"] is not None:
-            params.n_train = task_result["n_train"]
+        changed = task_result["train_path"] is not None
+        if changed:
+            Path(task_result["train_path"]).replace(params.dir.joinpath(config.train_file))
+            params.cols_context = task_result["cols_context"]
+            params.cols_text = task_result["cols_text"]
+            if task_result["n_train"] is not None:
+                params.n_train = task_result["n_train"]
+        # name/language changes were applied in memory by the dispatcher: always persist
         project_manager.db_manager.projects_service.update_project(
             params.project_slug, jsonable_encoder(params)
         )
+        if not changed:
+            return
         # reload the data in memory
         project_manager.data.load_dataset("all")
         # reset the features file and load the dataset again
