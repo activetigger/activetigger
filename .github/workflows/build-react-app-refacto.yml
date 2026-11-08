@@ -1,0 +1,50 @@
+# Build the frontend from the refacto-tasks branch and publish it at the root
+# of the gh-pages branch, REPLACING the production frontend, to test it live.
+# Manual only: run "Build the frontend (refacto-tasks)" from the Actions tab.
+# To go back to the production frontend, run "Build the frontend" (deployed branch).
+
+name: Build the frontend (refacto-tasks)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# never two deployments to gh-pages at the same time (shared with the production workflow)
+concurrency:
+  group: gh-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refacto-tasks
+
+      - name: Setup Node.js environment
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build Frontend code
+        env:
+          # same API as the production frontend unless VITE_API_URL_REFACTO is set
+          VITE_API_URL: ${{ vars.VITE_API_URL_REFACTO || vars.VITE_API_URL }}
+        run: |
+          cd frontend
+          npm ci
+          npm run build -- --base=/
+
+      - name: Deploy to gh-pages 🚀
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          branch: gh-pages
+          folder: frontend/dist
+          # keep the data folder, as the production workflow does
+          clean-exclude: data
