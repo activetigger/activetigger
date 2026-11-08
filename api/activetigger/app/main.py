@@ -231,7 +231,7 @@ def restart_queue(
     """
     test_rights(ServerAction.MANAGE_SERVER, current_user.username)
     try:
-        get_orchestrator().reset()
+        get_orchestrator().reset(current_user.username)
     except (HTTPException, APIError, OverflowError):
         raise
     except Exception as e:

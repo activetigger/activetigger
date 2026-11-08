@@ -174,10 +174,12 @@ class Orchestrator:
         self._running = False
         print("Server off")
 
-    def reset(self):
+    def reset(self, username: str = "system"):
         """
-        Erase the projects in memory
+        Stop every task and erase the projects in memory
         """
+        for project_slug in list(self.computing):
+            self.stop_project_tasks(project_slug, username)
         self.projects = {}
         self.project_creation_ongoing = {}
         self.project_duplication_ongoing = {}
@@ -505,10 +507,14 @@ class Orchestrator:
 
     def stop_project(self, project_slug: str) -> None:
         """
-        Stop a project
+        Unload a project from memory; refused while it has tasks in flight
         """
         if project_slug not in self.projects:
             return None
+        if self.computing.get(project_slug):
+            raise InvalidInputError(
+                "This project has tasks in progress, stop them before closing it"
+            )
         del self.projects[project_slug]
 
     def find_process(self, process_id: str) -> tuple[ProcessComputing, str] | None:
@@ -553,6 +559,14 @@ class Orchestrator:
             process = cast(LMComputing, process)
             self.db_manager.language_models_service.delete_model(project_slug, process.model_name)
         self.log_action(username, f"KILL PROCESS: {process.unique_id}", "all")
+
+    def stop_project_tasks(self, project_slug: str, username: str = "system") -> None:
+        """
+        Stop every task of a project (deleted, cleaned or reset)
+        """
+        # copy: stop_process removes entries from the list
+        for process in list(self.computing.get(project_slug, [])):
+            self.stop_process(process, project_slug, username)
 
     def stop_user_processes(
         self, username: str, project_slug: str | None = None, kind: str | list[str] | None = None
@@ -609,7 +623,7 @@ class Orchestrator:
         """
         return self.db_manager.projects_service.existing_projects()
 
-    def delete_project(self, project_slug: str) -> None:
+    def delete_project(self, project_slug: str, username: str = "system") -> None:
         """
         Delete a project
         """
@@ -624,6 +638,9 @@ class Orchestrator:
         else:
             self.start_project(project_slug)
             project = self.projects[project_slug]
+
+        # workers must not keep writing into the deleted directory
+        self.stop_project_tasks(project_slug, username)
 
         # delete the project
         try:
@@ -726,6 +743,8 @@ class Orchestrator:
             project_slug_verif = slugify(project_name)
         else:
             raise Exception("No project specified")
+
+        self.stop_project_tasks(project_slug_verif)
 
         # remove from database
         self.db_manager.projects_service.delete_project(project_slug_verif)

@@ -284,7 +284,7 @@ def delete_project(
     test_rights(ServerAction.DELETE_PROJECT, current_user.username, project_slug)
     try:
         orchestrator = get_orchestrator()
-        orchestrator.delete_project(project_slug)
+        orchestrator.delete_project(project_slug, current_user.username)
         orchestrator.log_action(
             current_user.username, f"DELETE PROJECT: {project_slug}", project_slug
         )
