@@ -5,16 +5,6 @@ from pandas import DataFrame
 from sklearn.manifold import TSNE
 from sklearn.preprocessing import StandardScaler
 
-# accelerate UMAP
-try:
-    import cuml  # ty: ignore[unresolved-import]
-
-    CUMl_AVAILABLE = True
-except Exception:
-    print("CuML not available")
-    cuml = None
-    CUMl_AVAILABLE = False
-
 
 def compute_projection(
     features: DataFrame, kind: str, params: dict, normalize_features: bool = False
@@ -39,9 +29,12 @@ def _scale(reduced, index) -> DataFrame:
 def compute_umap(features: DataFrame, params: dict, normalize_features: bool) -> DataFrame:
     values = StandardScaler().fit_transform(features) if normalize_features else features.values
 
-    # Check if cuML is available for GPU acceleration
+    # cuML (GPU) when available; imported here and not at module level: the
+    # prefork worker parent imports every task module and must never touch CUDA
     try:
-        reducer = cuml.UMAP(**params, metric="cosine")  # ty: ignore[unresolved-attribute]
+        import cuml  # ty: ignore[unresolved-import]
+
+        reducer = cuml.UMAP(**params, metric="cosine")
         print("Using cuML for UMAP computation")
     except Exception:
         reducer = umap.UMAP(**params, metric="cosine")
