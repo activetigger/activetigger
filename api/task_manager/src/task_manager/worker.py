@@ -2,10 +2,64 @@
 # Worker entry points
 #
 
+import os
+import traceback
 
-from task_manager import config
-from task_manager.auto_callback_task import QueueName
-from task_manager.celery import celery_app
+# torch.cuda.is_available() poisons every later fork (children cannot use CUDA)
+# unless it goes through NVML; third-party imports call it in the worker parent.
+# Must be set before torch is imported anywhere in this process.
+os.environ.setdefault("PYTORCH_NVML_BASED_CUDA_CHECK", "1")
+
+from celery.signals import worker_process_init  # noqa: E402
+
+from task_manager import config  # noqa: E402
+from task_manager.auto_callback_task import QueueName  # noqa: E402
+from task_manager.celery import celery_app  # noqa: E402
+
+
+@worker_process_init.connect
+def _check_cuda_fork(**_) -> None:
+    """
+    In a freshly forked child: warn when the parent already initialised CUDA
+    (every GPU task would then fail with "Cannot re-initialize CUDA")
+    """
+    try:
+        import torch
+    except ImportError:
+        return
+    if torch.cuda._is_in_bad_fork():
+        print(
+            "ERROR: CUDA was initialised in the worker parent, GPU tasks will fail in this child. "
+            "Set TASKMANAGER_TRACE_CUDA_INIT=1 to log where it happens."
+        )
+
+
+def _trace_cuda_init() -> None:
+    """
+    Opt-in diagnostic: print the stack of the first CUDA initialisation in this
+    process (TASKMANAGER_TRACE_CUDA_INIT=1), to find what poisons the fork
+    """
+    if os.environ.get("TASKMANAGER_TRACE_CUDA_INIT") != "1":
+        return
+    import torch
+
+    def wrap(owner, name):
+        original = getattr(owner, name, None)
+        if original is None:  # CPU-only torch build
+            return
+
+        def wrapped(*args, **kwargs):
+            print(
+                f"[cuda-trace pid {os.getpid()}] {name} first called from:\n"
+                + "".join(traceback.format_stack(limit=30))
+            )
+            setattr(owner, name, original)
+            return original(*args, **kwargs)
+
+        setattr(owner, name, wrapped)
+
+    wrap(torch._C, "_cuda_getDeviceCount")
+    wrap(torch.cuda, "_lazy_init")
 
 
 def start_cpu_worker_pool():
@@ -43,6 +97,7 @@ def start_gpu_worker_pool():
     sub-processes (DataLoader num_workers must be 0).
     Solo (--pool=solo) is the alternative if prefork causes trouble.
     """
+    _trace_cuda_init()
     args = [
         "worker",
         f"--loglevel={config.worker_loglevel}",

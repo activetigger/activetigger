@@ -101,6 +101,16 @@ class TaskCallback(ABC):
                     f"Details: {task_report.exception}"
                 )
             )
+        # worker misconfiguration, not a memory problem
+        elif "Cannot re-initialize CUDA in forked subprocess" in task_report.exception:
+            project_manager.errors.add(
+                (
+                    f"Error for task {cls.task_name} : CUDA was initialised in the worker "
+                    "parent process, so GPU tasks cannot run in the prefork children. "
+                    "Check the worker logs (TASKMANAGER_TRACE_CUDA_INIT=1 shows the cause) "
+                    "or run the GPU worker with --pool=solo."
+                )
+            )
         # generic message for GPU errors
         elif any(
             s in task_report.exception
