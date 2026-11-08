@@ -7,7 +7,6 @@ from collections import Counter
 from collections.abc import Callable
 from logging import Logger
 from pathlib import Path
-from turtle import update
 from typing import Any, cast
 
 import datasets

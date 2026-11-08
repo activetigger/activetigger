@@ -5,6 +5,7 @@ from celery import Task
 from celery.contrib.abortable import ABORTED, AbortableTask
 from celery.states import REVOKED
 
+from task_manager.stop_signal import stop_requested
 from task_manager.utils import (
     TaskFailureReportForCallback,
     TaskResultForCallback,
@@ -65,6 +66,9 @@ class AutoCallbackTask(Task):
 
 class AbortableAutoCallbackTask(AutoCallbackTask, AbortableTask):
     def is_aborted(self, **kwargs) -> bool:
-        # stop = abort() + revoke(); the revoke overwrites ABORTED with REVOKED in the backend
         task_id = kwargs.get("task_id", self.request.id)
+        # the stop key is the reference: the task state is overwritten by update_progress
+        if stop_requested(task_id):
+            return True
+        # fallback on the state set by abort()/revoke() (the revoke overwrites ABORTED)
         return self.AsyncResult(task_id).state in (ABORTED, REVOKED)

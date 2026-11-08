@@ -12,6 +12,10 @@ worker_loglevel = os.environ.get("WORKER_LOGLEVEL", "INFO")
 storage_path = os.environ.get("STORAGE_PATH", "/tmp")
 cache_model_path = os.environ.get("TASKMANAGER_CACHE_MODEL_PATH", "/tmp")
 
+# redis key flagging a task stopped by the user; must outlive the longest queue wait
+STOP_KEY_PREFIX = "activetigger:stop:"
+stop_signal_ttl = int(os.environ.get("STOP_SIGNAL_TTL", 24 * 3600))
+
 
 def _concurrency(key: str, default: int) -> int:
     """Pool size from the env; at least 1 (celery reads 0 as "one per core")"""

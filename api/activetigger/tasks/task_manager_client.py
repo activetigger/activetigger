@@ -1,4 +1,3 @@
-import time
 from pathlib import Path
 
 from celery import uuid
@@ -6,6 +5,7 @@ from celery.contrib.abortable import AbortableAsyncResult, AbortableTask
 from celery.result import AsyncResult
 from task_manager.auto_callback_task import TaskProgressState
 from task_manager.celery import celery_app
+from task_manager.stop_signal import request_stop, stop_requested
 
 from activetigger.datamodels import ProcessComputing
 
@@ -50,26 +50,22 @@ def enqueue_celery_task(
     return task_id, abortable
 
 
-# ids stopped from the API, so a failure they trigger (e.g. an input pickle
-# removed under a task that had just started) is reported as a cancellation
-_stopped: dict[str, float] = {}
-STOPPED_TTL = 3600
-
-
 def was_stopped(task_id: str) -> bool:
-    now = time.time()
-    for k in [k for k, t in _stopped.items() if now - t > STOPPED_TTL]:
-        del _stopped[k]
-    return _stopped.pop(task_id, None) is not None
+    """
+    A failure triggered by a stop (e.g. an input pickle removed under a task
+    that had just started) is reported as a cancellation, not an error
+    """
+    return stop_requested(task_id)
 
 
 def stop_celery_task(task_id: str, abortable: bool | None):
-    _stopped[task_id] = time.time()
+    # the stop key is what is_aborted() reads in the worker; it survives
+    # progress updates, result expiry and API restarts
+    request_stop(task_id)
     if abortable:
         task = AbortableAsyncResult(task_id, app=celery_app)
         print(f"Aborting {task_id} {type(task).__name__}")
-        # abort() only flags a running task; revoke drops a task still in the queue.
-        # revoke overwrites ABORTED with REVOKED, so is_aborted() accepts both states.
+        # abort() is a fallback flag; revoke drops a task still in the queue
         task.abort()
         celery_app.control.revoke(task_id)
     else:
