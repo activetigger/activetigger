@@ -15,6 +15,21 @@ import { getAuthHeaders, useAuth } from './useAuth';
 const CHUNK_SIZE = 4 * 1024 * 1024;
 const CHUNK_RETRIES = 3;
 
+// retry transient failures (the GENES proxy kills connections mid-request);
+// all upload endpoints are idempotent so a retry is safe
+async function withRetry<T>(call: () => Promise<T>): Promise<T> {
+  let attempt = 0;
+  for (;;) {
+    try {
+      return await call();
+    } catch (error) {
+      attempt += 1;
+      if (axios.isCancel(error) || attempt >= CHUNK_RETRIES) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+    }
+  }
+}
+
 export interface StagedUpload {
   uploadId: string;
   // sanitized filename under which the server stores the file
@@ -35,47 +50,42 @@ export function useChunkedUpload() {
       let uploadId: string | undefined;
       try {
         const totalChunks = Math.max(1, Math.ceil(file.size / CHUNK_SIZE));
-        const start = await axios.post(
-          `${url}/upload/start`,
-          { filename: file.name, total_size: file.size, total_chunks: totalChunks },
-          { headers, signal: ctrl.signal },
+        const start = await withRetry(() =>
+          axios.post(
+            `${url}/upload/start`,
+            { filename: file.name, total_size: file.size, total_chunks: totalChunks },
+            { headers, signal: ctrl.signal },
+          ),
         );
         uploadId = start.data.upload_id as string;
 
         for (let index = 0; index < totalChunks; index++) {
           const blob = file.slice(index * CHUNK_SIZE, (index + 1) * CHUNK_SIZE);
-          let attempt = 0;
-          for (;;) {
-            try {
-              await axios.postForm(
-                `${url}/upload/chunk`,
-                { file: new File([blob], file.name) },
-                {
-                  params: { upload_id: uploadId, index },
-                  headers,
-                  signal: ctrl.signal,
-                  onUploadProgress: ({ loaded }) =>
-                    setProgression({
-                      loaded: Math.min(index * CHUNK_SIZE + loaded, file.size),
-                      total: file.size,
-                    }),
-                },
-              );
-              break;
-            } catch (error) {
-              attempt += 1;
-              // do not retry on user cancel or after too many failures
-              if (axios.isCancel(error) || attempt >= CHUNK_RETRIES) throw error;
-              await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
-            }
-          }
+          await withRetry(() =>
+            axios.postForm(
+              `${url}/upload/chunk`,
+              { file: new File([blob], file.name) },
+              {
+                params: { upload_id: uploadId, index },
+                headers,
+                signal: ctrl.signal,
+                onUploadProgress: ({ loaded }) =>
+                  setProgression({
+                    loaded: Math.min(index * CHUNK_SIZE + loaded, file.size),
+                    total: file.size,
+                  }),
+              },
+            ),
+          );
         }
 
-        const finish = await axios.post(`${url}/upload/finish`, null, {
-          params: { upload_id: uploadId },
-          headers,
-          signal: ctrl.signal,
-        });
+        const finish = await withRetry(() =>
+          axios.post(`${url}/upload/finish`, null, {
+            params: { upload_id: uploadId },
+            headers,
+            signal: ctrl.signal,
+          }),
+        );
         return { uploadId, filename: finish.data.filename as string };
       } catch (error) {
         // drop the server-side session; ignore failures (the server

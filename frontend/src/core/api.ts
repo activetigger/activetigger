@@ -46,6 +46,22 @@ import { useChunkedUpload } from './useChunkedUpload';
  * API methods
  */
 
+// retry requests killed at the network level before any response arrived
+// (the GENES proxy resets HTTP/2 connections; Firefox surfaces them as CORS
+// errors with a null status where Chrome retries silently)
+async function fetchWithRetry(input: Request, signal?: AbortSignal): Promise<Response> {
+  let attempt = 0;
+  for (;;) {
+    try {
+      return await fetch(input.clone(), signal ? { signal } : undefined);
+    } catch (error) {
+      attempt += 1;
+      if ((error as Error).name === 'AbortError' || attempt > 2) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
+    }
+  }
+}
+
 // Add a timeout to the default fetch
 async function fetchWithTimeout(input: Request) {
   const timeout = 120000;
@@ -53,9 +69,7 @@ async function fetchWithTimeout(input: Request) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
   try {
-    const response = await fetch(input, {
-      signal: controller.signal,
-    });
+    const response = await fetchWithRetry(input, controller.signal);
     return response;
   } catch (error) {
     // on abort, it's a Timeout, generate an according Response
@@ -80,6 +94,7 @@ async function fetchWithTimeout(input: Request) {
 export const api = createClient<paths>({ baseUrl: `${config.api.url}`, fetch: fetchWithTimeout });
 export const api_withouttimeout = createClient<paths>({
   baseUrl: `${config.api.url}`,
+  fetch: fetchWithRetry,
 });
 
 // This authMiddleware injects the auth headers for each API call
