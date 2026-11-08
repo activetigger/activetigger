@@ -3184,7 +3184,11 @@ export function useDeleteImagePrompt(projectSlug: string | null) {
       const url = `${baseUrl}/prompts/delete?project_slug=${encodeURIComponent(
         projectSlug,
       )}&prompt_id=${encodeURIComponent(promptId)}`;
-      const res = await fetch(url, { method: 'POST', headers: _authHeaders() });
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ..._authHeaders() },
+        body: '{}',
+      });
       if (!res.ok) {
         notify({ type: 'error', message: `HTTP ${res.status}` });
         return false;
@@ -3210,7 +3214,11 @@ export function useComputePromptSimilarity(projectSlug: string | null) {
       const url = `${baseUrl}/prompts/similarity/compute?project_slug=${encodeURIComponent(
         projectSlug,
       )}&prompt_id=${encodeURIComponent(promptId)}&dataset=${encodeURIComponent(dataset)}`;
-      const res = await fetch(url, { method: 'POST', headers: _authHeaders() });
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ..._authHeaders() },
+        body: '{}',
+      });
       if (!res.ok) {
         const detail = await res.json().catch(() => null);
         notify({ type: 'error', message: detail?.detail || `HTTP ${res.status}` });
