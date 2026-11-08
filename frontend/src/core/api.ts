@@ -117,8 +117,23 @@ const authMiddleware: Middleware = {
   },
 };
 
+// the GENES Fortinet appliance deterministically drops Firefox's empty-body
+// POSTs over HTTP/2 (HEADERS+END_STREAM, no DATA frame); always send a body
+const emptyBodyMiddleware: Middleware = {
+  onRequest: ({ request }) => {
+    if (request.method !== 'GET' && request.method !== 'HEAD' && request.body === null) {
+      const headers = new Headers(request.headers);
+      headers.set('Content-Type', 'application/json');
+      return new Request(request, { body: '{}', headers });
+    }
+    return undefined;
+  },
+};
+
 api.use(authMiddleware);
 api_withouttimeout.use(authMiddleware);
+api.use(emptyBodyMiddleware);
+api_withouttimeout.use(emptyBodyMiddleware);
 
 /**
  * Authentication methods
@@ -465,10 +480,14 @@ export function useDuplicateProject() {
       const URL = config.api.url.replace(/\/$/, '');
       const headers = getAuthHeaders(authenticatedUser)?.headers;
       try {
-        const res = await axios.post(`${URL}/projects/duplicate`, null, {
-          params: { project_slug: projectSlug },
-          headers,
-        });
+        const res = await axios.post(
+          `${URL}/projects/duplicate`,
+          {},
+          {
+            params: { project_slug: projectSlug },
+            headers,
+          },
+        );
         notify({ type: 'success', message: 'Project duplicated.' });
         return res.data as string;
       } catch (error) {
@@ -3808,10 +3827,14 @@ export function useUploadPrepareFile() {
     async (file: File): Promise<PrepareSessionModel> => {
       const url = config.api.url.replace(/\/$/, '');
       const { uploadId } = await uploadChunked(file);
-      const res = await axios.post<PrepareSessionModel>(`${url}/toolbox/upload`, null, {
-        params: { upload_id: uploadId },
-        headers: getAuthHeaders(authenticatedUser)?.headers,
-      });
+      const res = await axios.post<PrepareSessionModel>(
+        `${url}/toolbox/upload`,
+        {},
+        {
+          params: { upload_id: uploadId },
+          headers: getAuthHeaders(authenticatedUser)?.headers,
+        },
+      );
       return res.data;
     },
     [authenticatedUser, uploadChunked],

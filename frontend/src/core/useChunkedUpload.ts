@@ -80,7 +80,7 @@ export function useChunkedUpload() {
         }
 
         const finish = await withRetry(() =>
-          axios.post(`${url}/upload/finish`, null, {
+          axios.post(`${url}/upload/finish`, {}, {
             params: { upload_id: uploadId },
             headers,
             signal: ctrl.signal,
@@ -91,7 +91,7 @@ export function useChunkedUpload() {
         // drop the server-side session; ignore failures (the server
         // garbage-collects stale sessions anyway)
         if (uploadId) {
-          axios.delete(`${url}/upload/${uploadId}`, { headers }).catch(() => undefined);
+          axios.delete(`${url}/upload/${uploadId}`, { headers, data: {} }).catch(() => undefined);
         }
         throw error;
       } finally {
