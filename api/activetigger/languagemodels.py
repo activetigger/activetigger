@@ -10,8 +10,9 @@ from typing import Any, Tuple, cast
 import pandas as pd
 from fastapi.responses import FileResponse
 from pandas import DataFrame
+from task_manager.celery import celery_app
 from task_manager.tasks.predict_bert_task import PredictBertTaskInput, predict_bert
-from task_manager.tasks.train_bert_task import TrainBertTaskInput, train_bert
+from task_manager.tasks.train_bert_task import TrainBertTask, TrainBertTaskInputs, train_bert
 
 import activetigger.functions as functions
 from activetigger.config import config
@@ -275,7 +276,7 @@ class LanguageModels:
         # launch as a independant process
         if training_kind not in ["multilabel", "multiclass"]:
             raise Exception("training_kind must be multilabel or multiclass")
-        trainBertInputs = TrainBertTaskInput(
+        trainBertInputs = TrainBertTaskInputs(
             path=self.path,
             path_df=Path(path_df),
             project_slug=project,
@@ -307,6 +308,8 @@ class LanguageModels:
         self.monitoring.register_process(
             process_name=unique_id, kind="train_languagemodel", parameters={}, user_name=user
         )
+        print(TrainBertTask.name)
+        train_bert.name
         enqueue_celery_task(
             train_bert,
             trainBertInputs,

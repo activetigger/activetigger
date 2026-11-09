@@ -18,9 +18,12 @@ from typing import Any, cast
 import pandas as pd
 import psutil
 import pyarrow.parquet as pq
+from celery import uuid
 from jose import jwt
+from task_manager.auto_callback_task import AutoCallbackTask, QueueName
 from task_manager.celery import celery_app
 from task_manager.stop_signal import stop_requested
+from task_manager.task_input import TaskInputs
 from task_manager.tasks.duplicate_project_task import (
     DuplicateProjectTaskInput,
     duplicate_project_task,
@@ -34,6 +37,7 @@ from activetigger.datamodels import (
     ProcessComputing,
     ProjectBaseModel,
     ServerStateModel,
+    TaskComputing,
 )
 from activetigger.db import DBException
 from activetigger.db.manager import DatabaseManager
@@ -82,6 +86,7 @@ class Orchestrator:
     max_projects: int
     project_creation_ongoing: dict[str, Project]
     computing: dict[str, list[ProcessComputing]]
+    computing_tasks: dict[str, dict[str, TaskComputing]]
     monitoring: Monitoring
     toolbox: Toolbox
 
@@ -625,6 +630,39 @@ class Orchestrator:
                 "This project has tasks in progress, stop them before closing it"
             )
         del self.projects[project_slug]
+
+    def create_task(self, task_name: str, inputs: TaskInputs, queue: QueueName | None = None):
+        """
+        Send a task to the workers. With a process, register it in computing first:
+        a task that fails or finishes at once calls back before the dispatcher returns.
+        """
+        if task_name not in celery_app.tasks:
+            raise Exception(
+                f"task {task_name} not registered in celery app. Possible tasks are {celery_app.tasks.keys()}"
+            )
+        # create TaskComputing from tasks input
+        task_class = cast(AutoCallbackTask, celery_app.tasks[task_name])
+        task_id = uuid()
+        task_computing = TaskComputing(
+            id=task_id,
+            kind=task_name,
+            user=inputs.user,
+            project_slug=inputs.project_slug,
+            input=inputs,
+        )
+        self.computing_tasks[inputs.project_slug][task_id] = task_computing
+
+        # queue overrides the task default (e.g. GPU for a wtpsplit preparation)
+        options = {"queue": queue} if queue else {}
+        try:
+            task_class.s(inputs=inputs.model_dump(mode="json")).apply_async(
+                task_id=task_id, **options
+            )
+        except Exception:
+            del self.computing_tasks[inputs.project_slug][task_id]
+            task_class.clean_temp_files(inputs)
+            raise
+        return task_id
 
     def find_process(self, process_id: str) -> tuple[ProcessComputing, str] | None:
         """

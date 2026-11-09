@@ -1,11 +1,13 @@
+from abc import abstractmethod
 from enum import StrEnum
-from typing import Protocol, TypedDict
+from typing import Generic, Protocol, TypedDict, TypeVar
 
 from celery import Task
 from celery.contrib.abortable import ABORTED, AbortableTask
 from celery.states import REVOKED
 
 from task_manager.stop_signal import stop_requested
+from task_manager.task_input import TaskInputs
 from task_manager.utils import (
     TaskFailureReportForCallback,
     TaskResultForCallback,
@@ -30,7 +32,10 @@ class TaskProgressState(TypedDict):
     progress_label: str | None
 
 
-class AutoCallbackTask(Task):
+TInputs = TypeVar("TInputs", bound=TaskInputs)
+
+
+class AutoCallbackTask(Task, Generic[TInputs]):
     """
     Base contract for tasks which need to callback the orchestrator.
 
@@ -63,8 +68,13 @@ class AutoCallbackTask(Task):
     def update_progress(self, progress: float, label: str | None = None):
         self.update_state(state="PROGRESS", meta={"progress": progress, "progress_label": label})
 
+    # Clean temp files is used to remove temp files used to exchange data with orchestrator
+    @classmethod
+    def clean_temp_files(cls, inputs: TInputs):
+        pass
 
-class AbortableAutoCallbackTask(AutoCallbackTask, AbortableTask):
+
+class AbortableAutoCallbackTask(AutoCallbackTask, AbortableTask, Generic[TInputs]):
     def is_aborted(self, **kwargs) -> bool:
         task_id = kwargs.get("task_id", self.request.id)
         # the stop key is the reference: the task state is overwritten by update_progress

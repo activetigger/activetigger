@@ -7,6 +7,7 @@ from pandas import DataFrame
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field  # for dataframe
 from sklearn.base import BaseEstimator
 from task_manager.auto_callback_task import TaskProgressState
+from task_manager.task_input import TaskInputs
 
 # Data model to use of the API
 
@@ -688,6 +689,17 @@ class ProjectUpdateModel(BaseModel):
 # --------------------
 # CLASS FOR COMPUTING
 # --------------------
+
+
+# ongoing Celery Task representation
+class TaskComputing(BaseModel):
+    id: str
+    kind: str  # from task name in celery
+    user: str  # duplicated from input
+    project_slug: str  # duplicated from input
+    input: TaskInputs
+    # abortable_celery_task: bool | None = None # can be deduce from name > celery_app registry > class isinstance(Abortable)
+    # temp_files should be registered in the Task class
 
 
 class ProcessComputing(BaseModel):

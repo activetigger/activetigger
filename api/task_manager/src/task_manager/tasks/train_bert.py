@@ -43,6 +43,7 @@ from transformers import (
 )
 
 from task_manager.auto_callback_task import UpdateProgressMethod
+from task_manager.task_input import TaskInputs
 
 pd.set_option("future.no_silent_downcasting", True)
 
@@ -151,10 +152,9 @@ class CustomTrainer(Trainer):
         return (loss, outputs) if return_outputs else loss
 
 
-class TrainBertTaskInput(BaseModel):
+class TrainBertTaskInputs(TaskInputs):
     path: Path
     path_df: Path
-    project_slug: str
     model_name: str
     # df: DataFrame | datasets.Dataset
     training_kind: str
@@ -199,7 +199,7 @@ class TrainBert:
     def __init__(
         self,
         unique_id: str,
-        inputs: TrainBertTaskInput,
+        inputs: TrainBertTaskInputs,
         is_aborted: Callable[[], bool],
         update_progress: UpdateProgressMethod,
     ):
