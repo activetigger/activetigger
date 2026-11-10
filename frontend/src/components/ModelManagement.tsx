@@ -347,6 +347,7 @@ export const ModelManagement: FC = () => {
             return userTraining ? { [authenticatedUser.username]: userTraining } : undefined;
           })()}
           displayStopButton={isComputing}
+          stopKind={kindScheme === 'span' ? 'ner' : 'bert'}
         />
       )}
 

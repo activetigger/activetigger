@@ -2,13 +2,16 @@ import json
 import os
 import shutil
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Optional, Tuple, cast
+from typing import Any, Tuple, cast
 
 import pandas as pd
 from fastapi.responses import FileResponse
 from pandas import DataFrame
+from task_manager.tasks.predict_ner_task import PredictNerTaskInput, predict_ner
+from task_manager.tasks.train_ner_task import TrainNerTaskInput, train_ner
 
 import activetigger.functions as functions
 from activetigger.config import config
@@ -26,11 +29,14 @@ from activetigger.datamodels import (
 )
 from activetigger.db.languagemodels import ModelsService
 from activetigger.db.manager import DatabaseManager
-from activetigger.errors import AlreadyExistsError, InvalidInputError, NotFoundError
+from activetigger.errors import AlreadyExistsError, NotFoundError
 from activetigger.functions import get_model_metrics
-from activetigger.queue_manager import Queue
-from activetigger.tasks.predict_ner import PredictNer
-from activetigger.tasks.train_ner import TrainNer
+from activetigger.monitoring import Monitoring
+from activetigger.tasks.task_manager_client import (
+    enqueue_celery_task,
+    get_celery_task_progress,
+    new_task_id,
+)
 
 
 class NerModels:
@@ -46,7 +52,6 @@ class NerModels:
 
     project_slug: str
     path: Path
-    queue: Queue
     computing: list
     models_service: ModelsService
     db_manager: DatabaseManager
@@ -58,14 +63,13 @@ class NerModels:
         self,
         project_slug: str,
         path: Path,
-        queue: Queue,
         computing: list,
         db_manager: DatabaseManager,
         list_models: str | None = None,
     ) -> None:
         self.params_default = LMParametersModel()
         self.project_slug = project_slug
-        self.queue = queue
+        self.monitoring = Monitoring(db_manager, project_slug)
         self.computing = computing
         self.models_service = db_manager.language_models_service
         self.path = Path(path).joinpath("ner")
@@ -122,7 +126,7 @@ class NerModels:
             e.user: LMComputingOutModel(
                 name=e.model_name,
                 status=e.status,
-                progress=e.get_progress() if e.get_progress else None,
+                progress=get_celery_task_progress(e.unique_id),
                 loss=self.get_loss(e.model_name),
                 epochs=e.params["epochs"] if e.params else None,
             )
@@ -172,27 +176,35 @@ class NerModels:
                 raise Exception("Not enough GPU memory available. Wait or reduce batch.")
 
         current_date = datetime.now(timezone.utc)
-        unique_id = self.queue.add_task(
-            "training",
-            project,
-            TrainNer(
-                path=self.path,
-                project_slug=project,
-                model_name=name,
-                df=df.copy(deep=True),
-                scheme_labels=scheme_labels,
-                col_label=col_label,
-                col_text=col_text,
-                base_model=base_model,
-                params=params,
-                test_size=test_size,
-                max_length=max_length,
-            ),
-            queue="gpu",
+        # write df on disk on a temporary file read by the worker
+        path_df = self.path.joinpath("train_ner_" + uuid.uuid4().hex + ".parquet")
+        df.to_parquet(path_df)
+
+        # queue celery task
+        inputs = TrainNerTaskInput(
+            path=self.path,
+            path_df=path_df,
+            project_slug=project,
+            model_name=name,
+            scheme_labels=scheme_labels,
+            col_label=col_label,
+            col_text=col_text,
+            base_model=base_model,
+            params=params,
+            test_size=test_size,
+            max_length=max_length,
         )
+        (unique_id, abortable) = new_task_id(train_ner)
         del df
         params_db = LMParametersDbModel(**params.model_dump(), exclude_labels=[])
-        self.computing.append(
+        # registered before the send: a fast task calls back at once
+        self.monitoring.register_process(
+            process_name=unique_id, kind="train_ner", parameters={}, user_name=user
+        )
+        enqueue_celery_task(
+            train_ner,
+            inputs,
+            self.computing,
             LMComputing(
                 user=user,
                 model_name=name,
@@ -204,8 +216,9 @@ class NerModels:
                 scheme=scheme,
                 dataset=None,
                 params=params_db.model_dump(),
-                get_progress=self.get_progress(name, status="training"),
-            )
+                abortable_celery_task=abortable,
+                temp_files=[path_df],
+            ),
         )
         return unique_id
 
@@ -229,37 +242,49 @@ class NerModels:
     ) -> str:
         if not (self.path.joinpath(name)).exists():
             raise NotFoundError("The model does not exist")
-        stale_progress = self.path.joinpath(name).joinpath("progress_predict")
-        if stale_progress.exists():
-            stale_progress.unlink()
+
         if df is None and dataset not in ["all", "external"]:
             raise Exception("Dataframe is required for this dataset")
 
         file_name = f"predict_{dataset}.parquet"
-        unique_id = self.queue.add_task(
-            "prediction",
-            project_slug,
-            PredictNer(
-                path=self.path.joinpath(name),
-                dataset=dataset,
-                df=df,
-                scheme_labels=scheme_labels,
-                col_text="text",
-                col_label=col_label,
-                col_id_external="id_external",
-                col_datasets="dataset",
-                file_name=file_name,
-                batch=batch_size,
-                statistics=statistics,
-                path_data=path_data,
-                external_dataset=external_dataset,
-                path_train=path_train,
-                path_valid=path_valid,
-                path_test=path_test,
-            ),
-            queue="gpu",
+
+        # write df on disk on a temporary file read by the worker
+        path_df = None
+        if df is not None:
+            path_df = self.path.joinpath(name, "predict_ner_" + uuid.uuid4().hex + ".parquet")
+            df.to_parquet(path_df)
+
+        # queue celery task
+        inputs = PredictNerTaskInput(
+            path=self.path.joinpath(name),
+            path_df=path_df,
+            project_slug=project_slug,
+            model_name=name,
+            dataset=dataset,
+            scheme_labels=scheme_labels,
+            col_text="text",
+            col_label=col_label,
+            col_id_external="id_external",
+            col_datasets="dataset",
+            file_name=file_name,
+            batch=batch_size,
+            statistics=statistics,
+            path_data=path_data,
+            external_dataset=external_dataset,
+            path_train=path_train,
+            path_valid=path_valid,
+            path_test=path_test,
         )
-        self.computing.append(
+        (unique_id, abortable) = new_task_id(predict_ner)
+        del df
+        # registered before the send: a fast task calls back at once
+        self.monitoring.register_process(
+            process_name=unique_id, kind="predict_ner", parameters={}, user_name=user
+        )
+        enqueue_celery_task(
+            predict_ner,
+            inputs,
+            self.computing,
             LMComputing(
                 user=user,
                 model_name=name,
@@ -269,8 +294,9 @@ class NerModels:
                 training_kind="ner",
                 dataset=dataset,
                 status=status,
-                get_progress=self.get_progress(name, status=status),
-            )
+                abortable_celery_task=abortable,
+                temp_files=[path_df] if path_df else [],
+            ),
         )
         return unique_id
 
@@ -382,24 +408,6 @@ class NerModels:
         if not Path(file).exists():
             raise NotFoundError("file does not exist")
         return StaticFileModel(name=f"{name}.tar.gz", path=f"{self.project_slug}/{name}.tar.gz")
-
-    def get_progress(self, model_name: str, status: str) -> Callable[[], Optional[float]]:
-        if status == "training":
-            path_model = self.path.joinpath(model_name).joinpath("progress_train")
-        elif status == "predicting":
-            path_model = self.path.joinpath(model_name).joinpath("progress_predict")
-        else:
-            raise InvalidInputError("Status not recognized")
-
-        def progress():
-            if path_model.exists():
-                r = path_model.read_text()
-                if r.strip() == "":
-                    r = 0
-                return float(r)
-            return None
-
-        return progress
 
     def get_loss(self, model_name: str) -> dict | None:
         now = time.time()

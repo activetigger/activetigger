@@ -20,6 +20,7 @@ from activetigger.datamodels import (  # ignore[import]
 from activetigger.db.generations import GenerationsService
 from activetigger.db.manager import DatabaseManager
 from activetigger.functions import remove_punctuation, replace_accented_chars
+from activetigger.tasks.task_manager_client import get_celery_task_progress
 
 # Maps the `type` key used in generative.yaml to the internal `api` identifier
 # used by the generation clients.
@@ -128,7 +129,7 @@ class Generations:
         return {
             e.user: GenerationComputingOut(
                 model_id=e.model_id,
-                progress=e.get_progress() if e.get_progress is not None else 0,
+                progress=get_celery_task_progress(e.unique_id),
             )
             for e in self.computing
             if e.kind == "generation"

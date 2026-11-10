@@ -1,11 +1,12 @@
 import datetime
 from enum import Enum, StrEnum
 from pathlib import Path
-from typing import Annotated, Any, Callable, Literal, Optional
+from typing import Annotated, Any, Literal, TypedDict
 
 from pandas import DataFrame
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field  # for dataframe
 from sklearn.base import BaseEstimator
+from task_manager.auto_callback_task import TaskProgressState
 
 # Data model to use of the API
 
@@ -48,34 +49,6 @@ class PredictedLabel(BaseModel):
     label: str | None
     proba: float | None
     entropy: float | None = None
-
-
-class QueueTaskModel(BaseModel):
-    """
-    Task in the queue
-    """
-
-    unique_id: str
-    kind: str
-    project_slug: str
-    state: str
-    future: Optional[Any] = None  # Future object from concurrent.futures
-    event: Any = None  # Event object for signaling
-    starting_time: datetime.datetime
-    running_since: Optional[datetime.datetime] = None
-    queue: str
-    task: Callable[..., Any] | None
-
-
-class QueueStateTaskModel(BaseModel):
-    """
-    Task in the queue with state
-    """
-
-    unique_id: str
-    kind: str
-    state: str
-    exception: Any = None
 
 
 class ProjectBaseModel(BaseModel):
@@ -395,10 +368,10 @@ class LMParametersModel(BaseModel):
     Parameters for bertmodel training
     """
 
-    batchsize: int = 4
+    batchsize: int = 16
     gradacc: float = 1
-    epochs: int = 3
-    lrate: float = 5e-05
+    epochs: int = 5
+    lrate: float = 3e-05
     wdecay: float = 0.01
     best: bool = True
     eval: int = 10
@@ -722,6 +695,13 @@ class ProcessComputing(BaseModel):
     unique_id: str
     time: datetime.datetime
     kind: str
+    abortable_celery_task: bool | None = None
+    # files handed to the worker, removed by the API with the process
+    temp_files: list[Path] = []
+
+
+class ExtendFeaturesComputing(ProcessComputing):
+    pass
 
 
 class UpdateComputing(ProcessComputing):
@@ -731,9 +711,8 @@ class UpdateComputing(ProcessComputing):
 class LMComputing(ProcessComputing):
     model_name: str
     status: str
-    scheme: Optional[str] = None
-    dataset: Optional[str] = None
-    get_progress: Callable[[], float | None] | None = None
+    scheme: str | None = None
+    dataset: str | None = None
     params: dict[str, Any] | None = None
     training_kind: str
 
@@ -741,7 +720,7 @@ class LMComputing(ProcessComputing):
 class LMComputingOutModel(BaseModel):
     name: str
     status: str
-    progress: float | None = None
+    progress: TaskProgressState | None = None
     loss: dict[str, dict] | None = None
     epochs: float | None = None
 
@@ -791,7 +770,6 @@ class PromptSimilarityComputing(ProcessComputing):
     text: str
     feature_name: str
     dataset: str
-    get_progress: Callable[[], float | None] | None = None
 
 
 class PromptInModel(BaseModel):
@@ -815,7 +793,6 @@ class GenerationComputing(ProcessComputing):
     number: int
     model_id: int
     dataset: str = "train"
-    get_progress: Callable[[], float | None] | None = None
     prompt_name: str | None = None
 
 
@@ -827,7 +804,6 @@ class BertopicComputing(ProcessComputing):
     col_text: str | None
     parameters: BertopicParamsModel
     force_compute_embeddings: bool
-    get_progress: Callable[[], str | float | None] | None = None
 
 
 class QuickModelInModel(BaseModel):
@@ -868,7 +844,6 @@ class QuickModelComputing(ProcessComputing):
     exclude_labels: list[str] = []
     test_size: float = 0.2
     retrain: bool = False
-    get_progress: Callable[[], float | None] | None = None
 
 
 class QuickModelComputed(BaseModel):
@@ -927,7 +902,7 @@ class GenerationComputingOut(BaseModel):
     """
 
     model_id: int
-    progress: float | None
+    progress: TaskProgressState | None
 
 
 class TableOutModel(BaseModel):
@@ -1151,9 +1126,15 @@ class BERTopicDescriptionModel(BaseModel):
     time: str
 
 
+class TrainingState(TypedDict):
+    name: str
+    status: Literal["training"]
+    progress: TaskProgressState | None
+
+
 class BertopicProjectStateModel(BaseModel):
     available: dict[str, BERTopicDescriptionModel]
-    training: dict[str, dict[str, str | int | float | None]]
+    training: dict[str, TrainingState]
     bindable_features: list[str]
 
 
@@ -1368,10 +1349,8 @@ class EventsModel(BaseModel):
     events: dict[str, dict[str, str | None]]
 
 
-class ReturnTaskPredictModel(BaseModel):
-    path: str
-    metrics: dict[str, MLStatisticsModel] | None = None
-    events: EventsModel | None = None
+class EventsDict(TypedDict):
+    events: dict[str, dict[str, str | None]]
 
 
 class ModelScoresModel(BaseModel):
@@ -1441,13 +1420,9 @@ class ExportGenerationsParams(BaseModel):
     filters: list[str] = []
 
 
-class ProjectCreatingModel(BaseModel):
+class ProjectCreatingModel(ProcessComputing):
     project_slug: str
-    username: str
-    unique_id: str
-    time: datetime.datetime
-    kind: str
-    status: str
+    kind: Literal["create_project"]
 
 
 class TopicsOutModel(BaseModel):
@@ -1459,7 +1434,7 @@ class TopicsOutModel(BaseModel):
 
 
 class BertopicOutModelParameters(BaseModel):
-    bertopic_params: ComputeBertopicModel
+    bertopic_params: BertopicParamsModel
     col_text: str
     col_id: str | None
     name: str

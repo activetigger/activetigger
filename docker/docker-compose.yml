@@ -69,6 +69,8 @@ services:
       - API_PORT=${API_PORT}
       - MODE=${MODE}
       - VITE_API_URL=${API_URL}
+  redis:
+    image: redis:${REDIS_VERSION}
 volumes:
   venv_data:
   uv_cache:

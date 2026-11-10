@@ -46,6 +46,22 @@ import { useChunkedUpload } from './useChunkedUpload';
  * API methods
  */
 
+// retry requests killed at the network level before any response arrived
+// (the GENES proxy resets HTTP/2 connections; Firefox surfaces them as CORS
+// errors with a null status where Chrome retries silently)
+async function fetchWithRetry(input: Request, signal?: AbortSignal): Promise<Response> {
+  let attempt = 0;
+  for (;;) {
+    try {
+      return await fetch(input.clone(), signal ? { signal } : undefined);
+    } catch (error) {
+      attempt += 1;
+      if ((error as Error).name === 'AbortError' || attempt > 2) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
+    }
+  }
+}
+
 // Add a timeout to the default fetch
 async function fetchWithTimeout(input: Request) {
   const timeout = 120000;
@@ -53,9 +69,7 @@ async function fetchWithTimeout(input: Request) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
   try {
-    const response = await fetch(input, {
-      signal: controller.signal,
-    });
+    const response = await fetchWithRetry(input, controller.signal);
     return response;
   } catch (error) {
     // on abort, it's a Timeout, generate an according Response
@@ -80,6 +94,7 @@ async function fetchWithTimeout(input: Request) {
 export const api = createClient<paths>({ baseUrl: `${config.api.url}`, fetch: fetchWithTimeout });
 export const api_withouttimeout = createClient<paths>({
   baseUrl: `${config.api.url}`,
+  fetch: fetchWithRetry,
 });
 
 // This authMiddleware injects the auth headers for each API call
@@ -102,8 +117,23 @@ const authMiddleware: Middleware = {
   },
 };
 
+// the GENES Fortinet appliance deterministically drops Firefox's empty-body
+// POSTs over HTTP/2 (HEADERS+END_STREAM, no DATA frame); always send a body
+const emptyBodyMiddleware: Middleware = {
+  onRequest: ({ request }) => {
+    if (request.method !== 'GET' && request.method !== 'HEAD' && request.body === null) {
+      const headers = new Headers(request.headers);
+      headers.set('Content-Type', 'application/json');
+      return new Request(request, { body: '{}', headers });
+    }
+    return undefined;
+  },
+};
+
 api.use(authMiddleware);
 api_withouttimeout.use(authMiddleware);
+api.use(emptyBodyMiddleware);
+api_withouttimeout.use(emptyBodyMiddleware);
 
 /**
  * Authentication methods
@@ -450,10 +480,14 @@ export function useDuplicateProject() {
       const URL = config.api.url.replace(/\/$/, '');
       const headers = getAuthHeaders(authenticatedUser)?.headers;
       try {
-        const res = await axios.post(`${URL}/projects/duplicate`, null, {
-          params: { project_slug: projectSlug },
-          headers,
-        });
+        const res = await axios.post(
+          `${URL}/projects/duplicate`,
+          {},
+          {
+            params: { project_slug: projectSlug },
+            headers,
+          },
+        );
         notify({ type: 'success', message: 'Project duplicated.' });
         return res.data as string;
       } catch (error) {
@@ -3150,7 +3184,11 @@ export function useDeleteImagePrompt(projectSlug: string | null) {
       const url = `${baseUrl}/prompts/delete?project_slug=${encodeURIComponent(
         projectSlug,
       )}&prompt_id=${encodeURIComponent(promptId)}`;
-      const res = await fetch(url, { method: 'POST', headers: _authHeaders() });
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ..._authHeaders() },
+        body: '{}',
+      });
       if (!res.ok) {
         notify({ type: 'error', message: `HTTP ${res.status}` });
         return false;
@@ -3176,7 +3214,11 @@ export function useComputePromptSimilarity(projectSlug: string | null) {
       const url = `${baseUrl}/prompts/similarity/compute?project_slug=${encodeURIComponent(
         projectSlug,
       )}&prompt_id=${encodeURIComponent(promptId)}&dataset=${encodeURIComponent(dataset)}`;
-      const res = await fetch(url, { method: 'POST', headers: _authHeaders() });
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ..._authHeaders() },
+        body: '{}',
+      });
       if (!res.ok) {
         const detail = await res.json().catch(() => null);
         notify({ type: 'error', message: detail?.detail || `HTTP ${res.status}` });
@@ -3275,13 +3317,13 @@ export function useCopyExistingData() {
 }
 
 /**
- * Restart the queue
+ * Stop every task and reset the server memory
  */
 export function useRestartQueue() {
   const { notify } = useNotifications();
   const restartQueue = useCallback(async () => {
     const res = await api.POST('/server/restart', {});
-    if (!res.error) notify({ type: 'success', message: 'Queue restarted.' });
+    if (!res.error) notify({ type: 'success', message: 'Memory reset, running tasks stopped.' });
     return true;
   }, [notify]);
   return { restartQueue };
@@ -3793,10 +3835,14 @@ export function useUploadPrepareFile() {
     async (file: File): Promise<PrepareSessionModel> => {
       const url = config.api.url.replace(/\/$/, '');
       const { uploadId } = await uploadChunked(file);
-      const res = await axios.post<PrepareSessionModel>(`${url}/toolbox/upload`, null, {
-        params: { upload_id: uploadId },
-        headers: getAuthHeaders(authenticatedUser)?.headers,
-      });
+      const res = await axios.post<PrepareSessionModel>(
+        `${url}/toolbox/upload`,
+        {},
+        {
+          params: { upload_id: uploadId },
+          headers: getAuthHeaders(authenticatedUser)?.headers,
+        },
+      );
       return res.data;
     },
     [authenticatedUser, uploadChunked],

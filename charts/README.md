@@ -11,6 +11,7 @@ It deploys:
 
 - a FastAPI backend API;
 - a React frontend served through nginx;
+- a Redis instance, broker and result backend of the Celery task workers (started inside the API container);
 - an optional PostgreSQL database;
 - PersistentVolumeClaims for API data and PostgreSQL data;
 - a Kubernetes Ingress for external access;
@@ -23,6 +24,7 @@ Main files:
 - `templates/api-deployment.yaml`: API workload;
 - `templates/frontend-deployment.yaml`: frontend workload;
 - `templates/postgresql-deployment.yaml`: embedded PostgreSQL workload;
+- `templates/redis-deployment.yaml`: Redis workload (`redis.enabled=false` with `redis.externalUrl` to use an external instance);
 - `templates/ingress.yaml`: public routing;
 - `templates/secret.yaml`: development Secret generation, disabled when using an external Secret.
 

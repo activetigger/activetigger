@@ -1,7 +1,7 @@
 #!/bin/bash
 # init.sh
 #
-# This script sets up a virtual environment with uv and Python 3.11,
+# This script sets up a virtual environment with uv and Python 3.13,
 # installs required packages, prepares a configuration file, and launches the server.
 #
 # Usage: ./init.sh [-p PORT]

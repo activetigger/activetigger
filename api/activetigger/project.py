@@ -1,6 +1,7 @@
 import json
 import math
 import os
+import pickle
 import shutil
 import time
 import uuid
@@ -12,6 +13,15 @@ import pandas as pd
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse
 from pandas import DataFrame
+from task_manager.tasks.add_evalset_task import AddEvalsetTaskInput, add_evalset_task
+from task_manager.tasks.compute_features_from_specs import FeatureSpec
+from task_manager.tasks.create_project_task import CreateProjectTaskInput, create_project_task
+from task_manager.tasks.extend_features_task import ExtendFeaturesTaskInput, extend_features
+from task_manager.tasks.generate_call_task import GenerateCallTaskInput, generate_call_task
+from task_manager.tasks.update_datasets_task import (
+    UpdateDatasetsTaskInput,
+    update_datasets_task,
+)
 
 from activetigger.bertopic_manager import Bertopic
 from activetigger.config import config
@@ -20,21 +30,17 @@ from activetigger.datamodels import (
     ActiveModel,
     AuthUserModel,
     BertModelModel,
-    BertopicComputing,
     ElementInModel,
     ElementOutModel,
     EvalSetDataModel,
     EvalSetImageModel,
-    EventsModel,
     ExportGenerationsParams,
+    ExtendFeaturesComputing,
     FeatureComputing,
     GenerationComputing,
     GenerationModel,
     GenerationRequest,
-    GenerationResult,
     ImageModelModel,
-    LexicometricsComputing,
-    LMComputing,
     NerModelModel,
     NextInModel,
     NextProjectStateModel,
@@ -43,14 +49,11 @@ from activetigger.datamodels import (
     ProjectBaseModel,
     ProjectCreatingModel,
     ProjectDescriptionModel,
-    ProjectionComputing,
     ProjectionOutModel,
     ProjectionOutModelNode,
     ProjectModel,
     ProjectStateModel,
     ProjectUpdateModel,
-    PromptComputing,
-    QuickModelComputing,
     QuickModelInModel,
     StaticFileModel,
     TextDatasetModel,
@@ -78,14 +81,13 @@ from activetigger.monitoring import Monitoring
 from activetigger.nermodels import NerModels
 from activetigger.projections import Projections
 from activetigger.prompts import BINDABLE_FEATURE_KINDS, Prompts
-from activetigger.queue_manager import Queue
 from activetigger.quickmodels import QuickModels
 from activetigger.schemes import Schemes
-from activetigger.tasks.add_evalset import AddEvalSet, AddEvalSetImage
-from activetigger.tasks.create_project import CreateProject, CreateProjectImagexp
-from activetigger.tasks.extend_features import ExtendFeatures
-from activetigger.tasks.generate_call import GenerateCall
-from activetigger.tasks.update_datasets import UpdateDatasets
+from activetigger.tasks.task_manager_client import (
+    enqueue_celery_task,
+    new_task_id,
+    stop_celery_task,
+)
 from activetigger.users import Users
 
 
@@ -177,8 +179,7 @@ class Project:
     status: str
     starting_time: float
     name: str
-    queue: Queue
-    computing: list
+    computing: list[ProcessComputing]
     path_models: Path
     data: Data
     db_manager: DatabaseManager
@@ -197,20 +198,20 @@ class Project:
     def __init__(
         self,
         project_slug: str,
-        queue: Queue,
         db_manager: DatabaseManager,
         path_models: Path,
         users: Users,
         messages: Messages,
+        computing: list[ProcessComputing],
     ) -> None:
         """
         Initialize the project
         - load if it exits in database
+        - computing is owned by the orchestrator so it outlives this object
         """
         self.status = "initialize"
         self.starting_time = time.time()
-        self.queue = queue
-        self.computing = []
+        self.computing = computing
         self.db_manager = db_manager
         self.path_models = path_models
         self.name = project_slug
@@ -280,7 +281,6 @@ class Project:
         self.languagemodels = LanguageModels(
             project_slug,
             self.params.dir,
-            self.queue,
             self.computing,
             self.db_manager,
             config.resolve_file(config.file_bert_models),
@@ -289,7 +289,6 @@ class Project:
             project_slug,
             self.data,
             self.path_models,
-            self.queue,
             cast(list[FeatureComputing], self.computing),
             self.db_manager,
             self.params.language,
@@ -303,7 +302,6 @@ class Project:
             self.prompts = Prompts(
                 project_slug,
                 self.params.dir,
-                self.queue,
                 self.computing,
                 self.features,
             )
@@ -324,7 +322,6 @@ class Project:
             self.imagemodels = ImageModels(
                 project_slug,
                 self.params.dir,
-                self.queue,
                 self.computing,
                 self.db_manager,
                 config.resolve_file(config.file_image_models),
@@ -338,7 +335,6 @@ class Project:
             self.nermodels = NerModels(
                 project_slug,
                 self.params.dir,
-                self.queue,
                 self.computing,
                 self.db_manager,
                 config.resolve_file(config.file_bert_models),
@@ -346,7 +342,6 @@ class Project:
         self.quickmodels = QuickModels(
             project_slug,
             self.params.dir,
-            self.queue,
             self.computing,
             self.db_manager,
             features=self.features,
@@ -355,28 +350,28 @@ class Project:
             self.db_manager, cast(list[GenerationComputing], self.computing)
         )
         self.projections = Projections(
-            project_slug, self.params.dir, self.computing, self.queue, self.db_manager
+            project_slug, self.params.dir, self.computing, self.db_manager
         )
-        self.lexicometrics = Lexicometrics(self.params.dir, self.computing, self.queue)
+        self.lexicometrics = Lexicometrics(self.params.dir, self.computing)
         self.bertopic = Bertopic(
             project_slug,
             self.params.dir,
-            self.queue,
             self.computing,
             self.features,
             self.db_manager,
         )
 
         # Persist any generation checkpoints left behind by a crashed worker or
-        # a previous server restart. At load time self.computing is empty, so
-        # every gen_*.jsonl file in the project dir is an orphan.
+        # a previous server restart; a gen_<task_id>.jsonl still in flight is kept.
         if self.params.dir is not None:
+            running = {c.unique_id for c in self.computing}
             for jsonl_path in self.params.dir.glob("gen_*.jsonl"):
-                self._recover_generations_from_jsonl(jsonl_path)
+                if jsonl_path.stem.removeprefix("gen_") not in running:
+                    self._recover_generations_from_jsonl(jsonl_path)
 
     def start_project_creation(self, params: ProjectBaseModel, username: str, path: Path) -> None:
         """
-        Manage process creation, sending the heavy process to the queue
+        Start the project creation task on a worker
         """
         self.status = "creating"
 
@@ -389,34 +384,34 @@ class Project:
         # add the dedicated directory
         params.dir = path.joinpath(self.project_slug)
 
-        # send the process to the queue
-        unique_id = self.queue.add_task(
-            "create_project",
-            self.project_slug,
-            CreateProject(
-                self.project_slug,
-                params,
-                username,
-                data_all=config.data_all,
-                train_file=config.train_file,
-                valid_file=config.valid_file,
-                test_file=config.test_file,
-                features_file=config.features_file,
-                random_seed=config.random_seed,
-            ),
-            queue="cpu",
+        # start a create project task
+        (unique_id, abortable) = new_task_id(create_project_task)
+        task_inputs = CreateProjectTaskInput(
+            image_project=False,
+            project_slug=self.project_slug,
+            params=params,
+            username=username,
+            data_all=config.data_all,
+            train_file=config.train_file,
+            valid_file=config.valid_file,
+            test_file=config.test_file,
+            features_file=config.features_file,
+            random_seed=params.seed,
         )
 
         # Update the register
-        self.computing.append(
+        enqueue_celery_task(
+            create_project_task,
+            task_inputs,
+            self.computing,
             ProjectCreatingModel(
-                username=username,
+                user=username,
                 project_slug=self.project_slug,
                 unique_id=unique_id,
                 time=datetime.now(timezone.utc),
                 kind="create_project",
-                status="training",
-            )
+                abortable_celery_task=abortable,
+            ),
         )
 
     def start_project_creation_imagexp(
@@ -429,32 +424,34 @@ class Project:
         self.status = "creating"
         params.dir = path.joinpath(self.project_slug)
 
-        unique_id = self.queue.add_task(
-            "create_project",
-            self.project_slug,
-            CreateProjectImagexp(
-                self.project_slug,
-                params,
-                username,
-                data_all=config.data_all,
-                train_file=config.train_file,
-                valid_file=config.valid_file,
-                test_file=config.test_file,
-                features_file=config.features_file,
-                random_seed=config.random_seed,
-            ),
-            queue="cpu",
+        # start a create project task
+        (unique_id, abortable) = new_task_id(create_project_task)
+        task_inputs = CreateProjectTaskInput(
+            image_project=True,
+            project_slug=self.project_slug,
+            params=params,
+            username=username,
+            data_all=config.data_all,
+            train_file=config.train_file,
+            valid_file=config.valid_file,
+            test_file=config.test_file,
+            features_file=config.features_file,
+            random_seed=params.seed,
         )
 
-        self.computing.append(
+        # Update the register
+        enqueue_celery_task(
+            create_project_task,
+            task_inputs,
+            self.computing,
             ProjectCreatingModel(
-                username=username,
+                user=username,
                 project_slug=self.project_slug,
                 unique_id=unique_id,
                 time=datetime.now(timezone.utc),
                 kind="create_project",
-                status="training",
-            )
+                abortable_celery_task=abortable,
+            ),
         )
 
     def finish_project_creation(
@@ -466,7 +463,7 @@ class Project:
         import_testset_labels: pd.DataFrame | None = None,
     ) -> None:
         """
-        Get the result of the queue and finish the creation process
+        Finish the creation from the worker result (called by the task callback)
         """
         # add the project to the database
         self.db_manager.projects_service.add_project(
@@ -662,60 +659,54 @@ class Project:
             if evalset.col_id == "":
                 evalset.col_id = None
 
-        # check existing task in the queue → if there is already an add_evalset task for this project and this dataset, we return the status of the task without adding a new one
-        if self.queue.current:
-            add_eval_task = next(
-                (
-                    t
-                    for t in self.queue.current
-                    if t.kind == "add_evalset"
-                    and t.project_slug == project_slug
-                    and t.task.dataset == dataset  # ty: ignore[unresolved-attribute]
-                ),
-                None,
-            )
-            if add_eval_task:
-                raise Exception("this set is already being added")
+        # only one add_evalset task per dataset at a time
+        if any(c.kind == f"add_evalset_{dataset}" for c in self.computing):
+            raise Exception("this set is already being added")
 
+        payload: dict[str, Any]
         if isinstance(evalset, EvalSetImageModel):
             scheme_labels = (
                 self.schemes.available()[evalset.scheme].labels if evalset.scheme else None
             )
-            task = AddEvalSetImage(
-                dataset=dataset,
-                evalset=evalset,
-                project=self.params,
-                username=username,
-                index=self.data.get_full_id().index,
-                project_slug=project_slug,
-                scheme=scheme_labels,
-            )
+            payload = {"evalset_image": evalset, "scheme": scheme_labels}
         else:
             available_schemes = self.schemes.available()
             schemes_labels = {name: available_schemes[name].labels for name in evalset.cols_label}
-            task = AddEvalSet(
-                dataset=dataset,
-                evalset=evalset,
-                project=self.params,
-                username=username,
-                index=self.data.get_full_id().index,
-                project_slug=project_slug,
-                schemes=schemes_labels,
-            )
+            payload = {"evalset_data": evalset, "schemes": schemes_labels}
 
-        unique_id = self.queue.add_task(
-            "add_evalset",
-            project_slug,
-            task,
-            queue="cpu",
-        )
-        self.computing.append(
+        # the worker checks id collisions against every id already in the project
+        index_path = self.params.dir.joinpath(f"evalset_index_{uuid.uuid4().hex}.pkl")
+        index_path.write_bytes(pickle.dumps(self.data.get_full_id().index))
+        try:
+            (unique_id, abortable) = new_task_id(add_evalset_task)
+            task_inputs = AddEvalsetTaskInput(
+                project_slug=project_slug,
+                dataset=dataset,
+                username=username,
+                path_project=self.params.dir,
+                index_path=index_path,
+                **payload,
+            )
+        except Exception:
+            index_path.unlink(missing_ok=True)
+            raise
+        enqueue_celery_task(
+            add_evalset_task,
+            task_inputs,
+            self.computing,
             ProcessComputing(
                 user=username,
                 unique_id=unique_id,
                 time=datetime.now(timezone.utc),
                 kind=f"add_evalset_{dataset}",
-            )
+                abortable_celery_task=abortable,
+                # worker outputs a lost callback would leave behind
+                temp_files=[
+                    index_path,
+                    self.params.dir.joinpath(f"eval_{dataset}_{unique_id}.parquet"),
+                    self.params.dir.joinpath(f"add_evalset_{unique_id}.json"),
+                ],
+            ),
         )
         if username == "root":
             return unique_id
@@ -745,8 +736,8 @@ class Project:
         ):
             try:
                 data = self.features.concat_split_column("text", eval_dataset)
-                specs = self.features.build_compute_specs(list(features_meta), data)
-                self._enqueue_extend_features(specs, eval_dataset, username)
+                specs, data_path = self.features.build_compute_specs(list(features_meta), data)
+                self._enqueue_extend_features(specs, data_path, eval_dataset, username)
                 return
             except Exception as ex:
                 print(f"Cannot extend features for the new {eval_dataset} set: {ex}")
@@ -764,35 +755,52 @@ class Project:
             self.features.reset_features_file()
             self.quickmodels.drop_models(which="all")
             return
-        self._enqueue_extend_features([], eval_dataset, "system")
+        data_path = self.features.pickle_for_task(pd.Series(dtype=object))
+        self._enqueue_extend_features([], data_path, eval_dataset, "system")
 
     def _kill_running_feature_extensions(self) -> bool:
         running = [c for c in self.computing if getattr(c, "kind", None) == "extend_features"]
         for c in running:
-            self.queue.kill(c.unique_id)
+            stop_celery_task(c.unique_id, c.abortable_celery_task)
+            # a revoked task never calls back: drop it (and its pickles) now
+            self.clean_process(c)
         return bool(running)
 
-    def _enqueue_extend_features(self, specs: list[dict], eval_dataset: str, username: str) -> None:
+    def _enqueue_extend_features(
+        self, specs: list[FeatureSpec], data_path: Path, eval_dataset: str, username: str
+    ) -> None:
         eval_data = getattr(self.data, eval_dataset)
         new_index = eval_data.index if eval_data is not None else pd.Index([])
-        task = ExtendFeatures(
-            specs=specs,
-            path_process=self.features.path_all.parent,
-            path_models=self.features.path_models,
-            language=self.features.lang,
-            path_features=self.features.path_features,
-            eval_dataset=eval_dataset,
-            new_index=new_index,
-            full_index=self.data.index.index,
-        )
-        unique_id = self.queue.add_task("extend_features", self.name, task, queue="cpu")
-        self.computing.append(
-            ProcessComputing(
+        indexes_path = self.features.pickle_for_task((new_index, self.data.index.index))
+        try:
+            (unique_id, abortable) = new_task_id(extend_features)
+            task_inputs = ExtendFeaturesTaskInput(
+                project_slug=self.name,
+                specs=specs,
+                data_path=data_path,
+                indexes_path=indexes_path,
+                path_process=self.features.path_all.parent,
+                path_models=self.features.path_models,
+                language=self.features.lang,
+                path_features=self.features.path_features,
+                eval_dataset=eval_dataset,
+            )
+        except Exception:
+            data_path.unlink(missing_ok=True)
+            indexes_path.unlink(missing_ok=True)
+            raise
+        enqueue_celery_task(
+            extend_features,
+            task_inputs,
+            self.computing,
+            ExtendFeaturesComputing(
                 user=username,
                 unique_id=unique_id,
                 time=datetime.now(timezone.utc),
                 kind="extend_features",
-            )
+                abortable_celery_task=abortable,
+                temp_files=[data_path, indexes_path],
+            ),
         )
 
     def _recover_features_after_failed_extension(self) -> None:
@@ -885,12 +893,6 @@ class Project:
             test_size=quickmodel.test_size,
             retrain=retrain,
             texts=self.data.train["text"] if self.data.train is not None else None,
-        )
-        self.monitoring.register_process(
-            process_name=process_id,
-            kind="train_quickmodel",
-            parameters={},
-            user_name=username,
         )
         return process_id
 
@@ -1104,13 +1106,13 @@ class Project:
             raise ValueError(
                 "No element available with this selection mode and history. Clear the history to access previous elements."
             )
-        n_sample = f.sum()  # use len(ss) for adding history
+        n_sample = int(f.sum())  # use len(ss) for adding history
 
         n = min(max(1, next.n), 100)
         element_ids: list = []
         indicators: dict = {}
         similarities: dict = {}
-        ranks: dict = {}
+        ranks: dict[str, int] = {}
 
         # validate selection method
         valid_selections = {"fixed", "random", "maxprob", "active", "prompt"}
@@ -1204,7 +1206,7 @@ class Project:
                     raise ValueError(
                         f"Expected unique position for {eid} in prompt ranking, got {type(loc).__name__}"
                     )
-                ranks[eid] = loc + 1
+                ranks[eid] = int(loc) + 1
                 indicators[eid] = f"similarity: {round(similarities[eid], 3)}"
         if len(element_ids) == 0:
             raise NotFoundError("No element available with this selection mode.")
@@ -1945,9 +1947,7 @@ class Project:
         # expose id_internal as the frame index so it lands as the CSV index
         return self._rename_generated_id_column(table).set_index("id_internal")
 
-    def get_process(
-        self, kind: str | list, user: str
-    ) -> list[FeatureComputing | LMComputing | QuickModelComputing]:
+    def get_process(self, kind: str | list, user: str) -> list[ProcessComputing]:
         """
         Get current processes
         """
@@ -1983,7 +1983,7 @@ class Project:
 
         For text/contexts/expand, it needs to draw from raw data
         - direct small modification
-        - bigger modification (texts/contexts/expand) with the queue
+        - bigger modification (texts/contexts/expand) on a worker
         """
 
         if not self.params.dir:
@@ -1999,24 +1999,29 @@ class Project:
         if update.language and update.language != self.params.language:
             self.params.language = update.language
 
-        # for other updates, add task to the queue
-        unique_id = self.queue.add_task(
-            kind="update_datasets",
+        # for other updates, send a task to a worker; the callback saves the params
+        (unique_id, abortable) = new_task_id(update_datasets_task)
+        task_inputs = UpdateDatasetsTaskInput(
             project_slug=self.name,
-            task=UpdateDatasets(
-                project_params=self.params,
-                update=update,
-            ),
-            queue="cpu",
+            path_project=self.params.dir,
+            cols_context=self.params.cols_context,
+            cols_text=self.params.cols_text,
+            update=update,
         )
-        self.computing.append(
+        enqueue_celery_task(
+            update_datasets_task,
+            task_inputs,
+            self.computing,
             UpdateComputing(
                 unique_id=unique_id,
                 user=username,
                 time=datetime.now(timezone.utc),
                 kind="update_datasets",
                 update=update,
-            )
+                abortable_celery_task=abortable,
+                # provisional train file a lost callback would leave behind
+                temp_files=[self.params.dir.joinpath(f"train_{unique_id}.parquet")],
+            ),
         )
 
     def start_languagemodel_training(self, bert: BertModelModel, username: str) -> None:
@@ -2072,7 +2077,7 @@ class Project:
             df = df.groupby("labels").sample(n=min_freq)
 
         # launch training process
-        process_id = self.languagemodels.start_training_process(
+        self.languagemodels.start_training_process(
             name=bert.name,
             project=self.name,
             user=username,
@@ -2093,12 +2098,6 @@ class Project:
             use_dichotomization=use_dichotomization,
             label_for_dichotomization=bert.dichotomize if use_dichotomization else None,
             exclude_labels=bert.exclude_labels,
-        )
-        self.monitoring.register_process(
-            process_name=process_id,
-            kind="train_languagemodel",
-            parameters={},
-            user_name=username,
         )
 
     def start_ner_training(self, ner: NerModelModel, username: str) -> None:
@@ -2130,7 +2129,7 @@ class Project:
         if scheme.kind != "span":
             raise Exception(f"NER training requires a span scheme (got kind: {scheme.kind})")
 
-        process_id = self.nermodels.start_training_process(
+        self.nermodels.start_training_process(
             name=ner.name,
             project=self.name,
             user=username,
@@ -2143,12 +2142,6 @@ class Project:
             params=ner.params,
             test_size=ner.test_size,
             max_length=ner.max_length,
-        )
-        self.monitoring.register_process(
-            process_name=process_id,
-            kind="train_ner",
-            parameters={},
-            user_name=username,
         )
 
     def start_ner_prediction(
@@ -2202,7 +2195,7 @@ class Project:
         if scheme.kind != "span":
             raise Exception(f"NER prediction requires a span scheme (got kind: {scheme.kind})")
 
-        process_id = self.nermodels.start_predicting_process(
+        self.nermodels.start_predicting_process(
             project_slug=self.name,
             name=model_name,
             user=username,
@@ -2217,12 +2210,6 @@ class Project:
             path_train=path_train,
             path_valid=path_valid,
             path_test=path_test,
-        )
-        self.monitoring.register_process(
-            process_name=process_id,
-            kind="predict_ner",
-            parameters={},
-            user_name=username,
         )
 
     def start_image_model_training(self, image: ImageModelModel, username: str) -> None:
@@ -2267,7 +2254,7 @@ class Project:
             min_freq = df["labels"].value_counts().sort_values().min()
             df = df.groupby("labels").sample(n=min_freq)
 
-        process_id = self.imagemodels.start_training_process(
+        self.imagemodels.start_training_process(
             name=image.name,
             project=self.name,
             user=username,
@@ -2285,12 +2272,6 @@ class Project:
             class_min_freq=image.class_min_freq,
             exclude_labels=image.exclude_labels,
             fp16=image.fp16,
-        )
-        self.monitoring.register_process(
-            process_name=process_id,
-            kind="train_imagemodel",
-            parameters={},
-            user_name=username,
         )
 
     def start_image_model_prediction(
@@ -2409,7 +2390,7 @@ class Project:
                 f"Prediction does not support this type of scheme (kind: {training_kind})"
             )
         scheme_labels = scheme_.labels
-        process_id = self.languagemodels.start_predicting_process(
+        self.languagemodels.start_predicting_process(
             project_slug=self.name,
             name=model_name,
             user=username,
@@ -2425,12 +2406,6 @@ class Project:
             path_train=path_train,
             path_valid=path_valid,
             path_test=path_test,
-        )
-        self.monitoring.register_process(
-            process_name=process_id,
-            kind="predict_languagemodel",
-            parameters={},
-            user_name=username,
         )
 
     def start_quick_model_prediction(
@@ -2480,27 +2455,38 @@ class Project:
         if len(extract) == 0:
             raise Exception("No elements available for generation")
         model = self.generations.generations_service.get_gen_model(request.model_id)
-        # add task to the queue
-        unique_id = self.queue.add_task(
-            "generation",
-            self.name,
-            GenerateCall(
-                path_process=self.params.dir,
-                username=username,
-                project_slug=self.name,
-                df=extract,
-                prompt=request.prompt,
-                model=GenerationModel(**model.__dict__),
-                cols_context=self.params.cols_context,
-                dataset=request.dataset,
-                prompt_name=request.prompt_name if request.prompt_name else "",
-                n_workers=request.n_workers,
-            ),
+        prompt_name = request.prompt_name if request.prompt_name else ""
+        if self.params.dir is None:
+            raise Exception
+        # sample and model (with decrypted credentials) go to the worker through a pickle
+        data_path = self.params.dir.joinpath(f"gen_{uuid.uuid4().hex}.pkl")
+        data_path.write_bytes(
+            pickle.dumps({"data": extract, "model": GenerationModel(**model.__dict__).model_dump()})
         )
-        self.computing.append(
+        try:
+            (unique_id, abortable) = new_task_id(generate_call_task)
+            task_inputs = GenerateCallTaskInput(
+                project_slug=self.name,
+                username=username,
+                dataset=request.dataset,
+                prompt_name=prompt_name,
+                prompt=request.prompt,
+                cols_context=self.params.cols_context,
+                n_workers=request.n_workers,
+                data_path=data_path,
+                path_process=self.params.dir,
+            )
+        except Exception:
+            data_path.unlink(missing_ok=True)
+            raise
+
+        enqueue_celery_task(
+            generate_call_task,
+            task_inputs,
+            self.computing,
             GenerationComputing(
                 unique_id=unique_id,
-                prompt_name=request.prompt_name if request.prompt_name else "",
+                prompt_name=prompt_name,
                 user=username,
                 project=self.name,
                 model_id=request.model_id,
@@ -2508,18 +2494,19 @@ class Project:
                 dataset=request.dataset,
                 time=datetime.now(timezone.utc),
                 kind="generation",
-                get_progress=GenerateCall.get_progress_callback(
-                    self.params.dir.joinpath(unique_id) if self.params.dir is not None else None
-                ),
-            )
+                abortable_celery_task=abortable,
+                temp_files=[data_path],
+            ),
         )
 
     def clean_process(self, e: ProcessComputing) -> None:
         """
-        Clean a process from computing and queue
+        Clean a process from computing (tolerant: a stop and a callback can race)
         """
-        self.computing.remove(e)
-        self.queue.delete(e.unique_id)
+        self.computing[:] = [p for p in self.computing if p.unique_id != e.unique_id]
+        # inputs handed to a worker that may never have started
+        for f in e.temp_files:
+            Path(f).unlink(missing_ok=True)
 
     def _recover_generations_from_jsonl(self, path: Path) -> None:
         """
@@ -2551,285 +2538,6 @@ class Project:
             path.unlink()
         except Exception as ex:
             print(f"Failed to recover generation checkpoint {path}: {ex}")
-
-    def update_processes(self) -> None:
-        """
-        Update completed processes and do specific operations regarding their kind
-        - get the result from the queue
-        - add the result if needed
-        - manage error if needed
-        """
-        add_predictions = {}
-
-        # loop on the current process
-        for e in self.computing.copy():
-            # get the process
-            process = self.queue.get(e.unique_id)
-            if process is None:
-                self.clean_process(e)
-                continue
-
-            # check if the process is done, else continue
-            if process.future is None or not process.future.done():
-                continue
-
-            # log error if exists in the process execution
-            exception = process.future.exception()
-            if exception:
-                # User-initiated cancellations are not errors; clean up silently.
-                if process.state == "cancelled":
-                    print(f"Process {e.kind} cancelled by user")
-                    if e.kind == "extend_features":
-                        self._recover_features_after_failed_extension()
-                    self.clean_process(e)
-                    continue
-                print(f"Error in {e.kind} : {exception}")
-                exception_str = str(exception)
-                if any(
-                    s in exception_str
-                    for s in [
-                        "CUDA",
-                        "CUDACachingAllocator",
-                        "out of memory",
-                        "NVML",
-                        "cuda",
-                    ]
-                ):
-                    message = (
-                        f"Error for process {e.kind} : GPU error — not enough GPU memory available. "
-                        "Try reducing the batch size, the max sequence length, or using a smaller model. "
-                        f"Details: {exception_str}"
-                    )
-                else:
-                    message = f"Error for process {e.kind} : {exception}"
-                self.errors.add(message)
-
-                # recover partial generation results from the checkpoint file
-                if e.kind == "generation" and self.params.dir is not None:
-                    self._recover_generations_from_jsonl(
-                        self.params.dir.joinpath(f"gen_{e.unique_id}.jsonl")
-                    )
-
-                # specific case for project creation ; delete the project
-                if e.kind == "create_project":
-                    print("Error in project creation")
-                    self.status = "error"
-
-                # a failed extension leaves a features file with the
-                # pre-eval-set shape; reset to the safe empty state
-                if e.kind == "extend_features":
-                    self._recover_features_after_failed_extension()
-
-                self.clean_process(e)
-                continue
-
-            # get the result and do specific operations, if it fails, log the error
-            try:
-                results = process.future.result()
-                match e.kind:
-                    case "create_project":
-                        e = cast(ProjectCreatingModel, e)
-                        if results is None:
-                            print("No result from project creation")
-                            raise Exception("No result from project creation")
-                        self.finish_project_creation(
-                            e.username, results[0], results[1], results[2], results[3]
-                        )
-                    case "update_datasets":
-                        e = cast(UpdateComputing, e)
-                        self.db_manager.projects_service.update_project(
-                            self.params.project_slug, jsonable_encoder(results[0])
-                        )
-                        self.params = results[0]
-                        # reload the data in memory
-                        self.data.load_dataset("all")
-                        # reset the features file and load the dataset again
-                        if results[1]:
-                            self.features.reset_features_file()
-                            self.bertopic.clear_bertopic()
-                            self.projections.clear_projections()
-
-                    case "train_bert":
-                        model = cast(LMComputing, e)
-                        events = cast(EventsModel, results)
-                        self.languagemodels.add(model)
-                        self.monitoring.close_process(model.unique_id, events)
-                    case "predict_bert":
-                        prediction = cast(LMComputing, e)
-                        if (
-                            results is not None
-                            and results.path
-                            and "predict_annotable.parquet" in results.path
-                        ):
-                            add_predictions["predict_" + prediction.model_name] = results.path
-                        self.languagemodels.add(prediction)
-                        if results is not None and results.events is not None:
-                            self.monitoring.close_process(prediction.unique_id, results.events)
-                    case "train_image":
-                        if self.imagemodels is None:
-                            continue
-                        model = cast(LMComputing, e)
-                        events = cast(EventsModel, results)
-                        self.imagemodels.add(model)
-                        self.monitoring.close_process(model.unique_id, events)
-                    case "predict_image":
-                        if self.imagemodels is None:
-                            continue
-                        prediction = cast(LMComputing, e)
-                        if (
-                            results is not None
-                            and results.path
-                            and "predict_annotable.parquet" in results.path
-                        ):
-                            add_predictions["predict_" + prediction.model_name] = results.path
-                        self.imagemodels.add(prediction)
-                    case "train_ner":
-                        if self.nermodels is None:
-                            continue
-                        model = cast(LMComputing, e)
-                        events = cast(EventsModel, results)
-                        self.nermodels.add(model)
-                        self.monitoring.close_process(model.unique_id, events)
-                    case "predict_ner":
-                        if self.nermodels is None:
-                            continue
-                        prediction = cast(LMComputing, e)
-                        if (
-                            results is not None
-                            and results.path
-                            and "predict_annotable.parquet" in results.path
-                        ):
-                            add_predictions["predict_" + prediction.model_name] = results.path
-                        self.nermodels.add(prediction)
-                        if results is not None and results.events is not None:
-                            self.monitoring.close_process(prediction.unique_id, results.events)
-                    case "train_quickmodel":
-                        sm = cast(QuickModelComputing, e)
-
-                        # Retrieve the additional events if they exist
-                        events = cast(EventsModel, results)
-                        self.quickmodels.add(sm)
-                        self.monitoring.close_process(sm.unique_id, events)
-                    case "predict_quickmodel":
-                        sm = cast(QuickModelComputing, e)
-                    case "predict_with_features":
-                        pf = cast(QuickModelComputing, e)
-                        self.quickmodels.mark_prediction_done(pf.name, pf.dataset)
-                    case "feature":
-                        feature_computation = cast(FeatureComputing, e)
-                        self.features.add(
-                            feature_computation.name,
-                            feature_computation.type,
-                            feature_computation.user,
-                            feature_computation.parameters,
-                            results,
-                        )
-                    case "prompt":
-                        prompt_computation = cast(PromptComputing, e)
-                        if self.prompts is not None and results is not None:
-                            self.prompts.receive_result(prompt_computation, results)
-                    case "prompt_similarity":
-                        # the task already saved the similarity parquet;
-                        # availability is derived from the file on disk
-                        pass
-                    case "projection":
-                        projection = cast(ProjectionComputing, e)
-                        self.projections.add(projection, results)
-                    case "lexicometrics":
-                        lexicometrics_computation = cast(LexicometricsComputing, e)
-                        self.lexicometrics.add(lexicometrics_computation, results)
-                    case "generation":
-                        e = cast(GenerationComputing, e)
-                        r = cast(
-                            list[GenerationResult],
-                            results,
-                        )
-                        batch = e.dataset + "_" + str(e.prompt_name) + "_" + e.unique_id
-                        for row in r:
-                            self.generations.add(
-                                user=row.user,
-                                project_slug=row.project_slug,
-                                element_id=row.element_id,
-                                model_id=row.model_id,
-                                prompt=row.prompt,
-                                answer=row.answer,
-                                batch=batch,
-                            )
-                        if self.params.dir is not None:
-                            jsonl = self.params.dir.joinpath(f"gen_{e.unique_id}.jsonl")
-                            if jsonl.exists():
-                                jsonl.unlink()
-                    case "bertopic":
-                        bertopic_model = cast(BertopicComputing, e)
-                        events = cast(EventsModel, results)
-                        self.bertopic.add(bertopic_model)
-                        self.monitoring.close_process(bertopic_model.unique_id, events)
-                    case "extend_features":
-                        self.features.map, self.features.n = self.features.get_map()
-                        if self.features.n != len(self.data.index):
-                            self._recover_features_after_failed_extension()
-                    case kind if kind.startswith("add_evalset_"):
-                        e = cast(ProcessComputing, e)
-                        if results is not None and len(results) > 0:
-                            (
-                                eval_dataset,
-                                user_name,
-                                proj_slug,
-                                schemes_elements,
-                            ) = results[0]
-                            for scheme_name, elements in schemes_elements:
-                                if elements:
-                                    self.db_manager.projects_service.add_annotations(
-                                        eval_dataset,
-                                        user_name,
-                                        proj_slug,
-                                        scheme_name,
-                                        elements,
-                                    )
-                            # update params with the new evalset
-                            setattr(self.params, eval_dataset, getattr(results[1], eval_dataset))
-                            setattr(
-                                self.params,
-                                f"n_{eval_dataset}",
-                                getattr(results[1], f"n_{eval_dataset}"),
-                            )
-                            self.db_manager.projects_service.update_project(
-                                self.params.project_slug, jsonable_encoder(self.params)
-                            )
-                            # load the new eval set before refreshing features so the
-                            # features file covers the full train+valid+test index
-                            self.data.load_dataset(eval_dataset)
-                            self._refresh_features_after_evalset(eval_dataset, user_name)
-            except Exception as ex:
-                print(f"Error in {e.kind} : {ex}")
-                self.errors.add(f"Error in {e.kind} : {str(ex)}")
-                match e.kind:
-                    case "create_project":
-                        self.status = "error"
-                    case "train_bert":
-                        bert_task = cast(LMComputing, e)
-                        self.db_manager.language_models_service.delete_model(
-                            self.name, bert_task.model_name
-                        )
-                    case "train_image":
-                        image_task = cast(LMComputing, e)
-                        self.db_manager.language_models_service.delete_model(
-                            self.name, image_task.model_name
-                        )
-                    case "train_ner":
-                        ner_task = cast(LMComputing, e)
-                        self.db_manager.language_models_service.delete_model(
-                            self.name, ner_task.model_name
-                        )
-            # clean the process from the list and the queue
-            finally:
-                self.clean_process(e)  # ty: ignore[invalid-argument-type]
-
-        # if there are predictions, add them
-        if len(add_predictions) > 0:
-            errors = self.features.add_predictions(add_predictions)
-            for err in errors:
-                self.errors.add(err)
 
     # def dump(self, with_files=True) -> None:
     #     """

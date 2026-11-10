@@ -17,13 +17,22 @@ embedding columns inline), separate from `features.parquet`.
 
 import builtins
 import shutil
+import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
+from task_manager.tasks.compute_prompt_embedding_task import (
+    ComputePromptEmbeddingTaskInput,
+    compute_prompt_embedding,
+)
+from task_manager.tasks.compute_similarity_with_features_task import (
+    ComputeSimilarityWithFeaturesTaskInput,
+    compute_similarity_with_features,
+)
 
 from activetigger.datamodels import (
     PromptComputing,
@@ -33,11 +42,11 @@ from activetigger.datamodels import (
 )
 from activetigger.errors import InvalidInputError, NotFoundError
 from activetigger.features import Features
-from activetigger.queue_manager import Queue
-from activetigger.tasks.base_task import BaseTask
-from activetigger.tasks.compute_multimodal_prompt import ComputeMultimodalPrompt
-from activetigger.tasks.compute_sbert_prompt import ComputeSbertPrompt
-from activetigger.tasks.compute_similarity_with_features import ComputeSimilarityWithFeatures
+from activetigger.tasks.task_manager_client import (
+    enqueue_celery_task,
+    get_celery_task_progress,
+    new_task_id,
+)
 
 # Feature kinds whose vectors live in a space we can encode a text query into.
 BINDABLE_FEATURE_KINDS = {"multimodal-embeddings", "sentence-embeddings"}
@@ -60,14 +69,12 @@ class Prompts:
         self,
         project_slug: str,
         path_dir: Path,
-        queue: Queue,
         computing: list,
         features: Features,
     ) -> None:
         self.project_slug = project_slug
         self.path_dir = path_dir
         self.path_file = path_dir.joinpath(PROMPTS_FILE)
-        self.queue = queue
         self.computing = computing
         self.features = features
         # Cache of sorted rankings keyed by (prompt_id, dataset). Each entry
@@ -75,6 +82,9 @@ class Prompts:
         # sorted descending. Populated lazily by get_ranking and invalidated
         # on prompt delete / feature cascade.
         self._ranking_cache: dict[str, dict[str, pd.Series]] = {}
+        # prompts.parquet is read-modified-written by task callbacks running
+        # concurrently in the API threadpool: serialize those writes
+        self._lock = threading.Lock()
 
     # ---------- helpers ----------
 
@@ -120,9 +130,9 @@ class Prompts:
 
     def add(self, text: str, feature_name: str, user: str) -> str:
         """
-        Queue the encoding of a new prompt. Returns the task unique_id.
-        The actual parquet row is appended by `receive_result` once the
-        GPU worker completes.
+        Enqueue the encoding of a new prompt on the GPU worker. Returns the
+        task unique_id. The parquet row is appended by `receive_result`
+        from the task callback.
         """
         text = text.strip()
         if not text:
@@ -130,21 +140,20 @@ class Prompts:
         model_name, kind = self._resolve_feature(feature_name)
         prompt_id = str(uuid.uuid4())
 
-        task: BaseTask
-        if kind == "multimodal-embeddings":
-            task = ComputeMultimodalPrompt(
-                text=text, model_name=model_name, path_process=self.path_dir
-            )
-        elif kind == "sentence-embeddings":
-            task = ComputeSbertPrompt(text=text, model_name=model_name, path_process=self.path_dir)
-        else:
-            # Defensive: _resolve_feature already gates on BINDABLE_FEATURE_KINDS,
-            # so this only fires if a new bindable kind is added without a task.
-            raise ValueError(f"No prompt encoder for feature kind '{kind}'")
+        (unique_id, abortable) = new_task_id(compute_prompt_embedding)
+        task_inputs = ComputePromptEmbeddingTaskInput(
+            project_slug=self.project_slug,
+            prompt_id=prompt_id,
+            text=text,
+            model_name=model_name,
+            kind=kind,
+            path_process=self.path_dir,
+        )
 
-        unique_id = self.queue.add_task("prompt", self.project_slug, task, queue="gpu")
-
-        self.computing.append(
+        enqueue_celery_task(
+            compute_prompt_embedding,
+            task_inputs,
+            self.computing,
             PromptComputing(
                 user=user,
                 unique_id=unique_id,
@@ -154,34 +163,36 @@ class Prompts:
                 text=text,
                 feature_name=feature_name,
                 hf_name=model_name,
-            )
+                abortable_celery_task=abortable,
+            ),
         )
         return unique_id
 
     def receive_result(self, computing: PromptComputing, vec: np.ndarray) -> None:
         """Persist a completed prompt to prompts.parquet."""
-        # The feature might have been deleted while the task was queued.
-        if not self.features.exists(computing.feature_name):
-            return
+        with self._lock:
+            # The feature might have been deleted while the task was queued.
+            if not self.features.exists(computing.feature_name):
+                return
 
-        vec = np.asarray(vec).reshape(-1)
-        row: dict[str, Any] = {
-            "text": computing.text,
-            "feature_name": computing.feature_name,
-            "user": computing.user,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
-        for i, v in enumerate(vec):
-            row[f"dim_{i}"] = float(v)
+            vec = np.asarray(vec).reshape(-1)
+            row: dict[str, Any] = {
+                "text": computing.text,
+                "feature_name": computing.feature_name,
+                "user": computing.user,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+            for i, v in enumerate(vec):
+                row[f"dim_{i}"] = float(v)
 
-        df = self._read()
-        new_row = pd.DataFrame([row], index=pd.Index([computing.prompt_id], name="prompt_id"))
+            df = self._read()
+            new_row = pd.DataFrame([row], index=pd.Index([computing.prompt_id], name="prompt_id"))
 
-        # Align columns: existing rows may have fewer/more dim_* columns if
-        # the feature changed. Union columns, fill missing with NaN.
-        combined = pd.concat([df, new_row], axis=0)
-        combined.index.name = "prompt_id"
-        self._write(combined)
+            # Align columns: existing rows may have fewer/more dim_* columns if
+            # the feature changed. Union columns, fill missing with NaN.
+            combined = pd.concat([df, new_row], axis=0)
+            combined.index.name = "prompt_id"
+            self._write(combined)
 
     def list(self, user: str | None = None) -> list[PromptOutModel]:
         df = self._read()
@@ -215,46 +226,49 @@ class Prompts:
         return vec, str(row["feature_name"])
 
     def delete(self, prompt_id: str) -> None:
-        df = self._read()
-        if prompt_id not in df.index:
-            raise NotFoundError(f"Prompt '{prompt_id}' not found")
-        df = df.drop(index=prompt_id)
-        self._write(df)
-        self._ranking_cache.pop(prompt_id, None)
-        self._delete_similarity_files(prompt_id)
+        with self._lock:
+            df = self._read()
+            if prompt_id not in df.index:
+                raise NotFoundError(f"Prompt '{prompt_id}' not found")
+            df = df.drop(index=prompt_id)
+            self._write(df)
+            self._ranking_cache.pop(prompt_id, None)
+            self._delete_similarity_files(prompt_id)
 
     def reset_all(self) -> None:
         """
         Drop every saved prompt and clear the ranking cache.
         Called from the Features on_reset cascade when all features are wiped.
         """
-        if self.path_file.exists():
-            try:
-                self.path_file.unlink()
-            except OSError as ex:
-                print(f"Could not delete prompts file: {ex}")
-        self._ranking_cache.clear()
-        similarity_root = self.path_dir.joinpath(SIMILARITY_DIR)
-        if similarity_root.exists():
-            try:
-                shutil.rmtree(similarity_root)
-            except OSError as ex:
-                print(f"Could not delete prompt similarity files: {ex}")
+        with self._lock:
+            if self.path_file.exists():
+                try:
+                    self.path_file.unlink()
+                except OSError as ex:
+                    print(f"Could not delete prompts file: {ex}")
+            self._ranking_cache.clear()
+            similarity_root = self.path_dir.joinpath(SIMILARITY_DIR)
+            if similarity_root.exists():
+                try:
+                    shutil.rmtree(similarity_root)
+                except OSError as ex:
+                    print(f"Could not delete prompt similarity files: {ex}")
 
     def delete_by_feature(self, feature_name: str) -> int:
         """Drop every prompt bound to a feature (cascade from feature delete)."""
-        df = self._read()
-        if df.empty or "feature_name" not in df.columns:
-            return 0
-        mask = df["feature_name"] == feature_name
-        n = int(mask.sum())
-        if n:
-            dropped_ids = [str(i) for i in df.index[mask]]
-            self._write(df.loc[~mask])
-            for pid in dropped_ids:
-                self._ranking_cache.pop(pid, None)
-                self._delete_similarity_files(pid)
-        return n
+        with self._lock:
+            df = self._read()
+            if df.empty or "feature_name" not in df.columns:
+                return 0
+            mask = df["feature_name"] == feature_name
+            n = int(mask.sum())
+            if n:
+                dropped_ids = [str(i) for i in df.index[mask]]
+                self._write(df.loc[~mask])
+                for pid in dropped_ids:
+                    self._ranking_cache.pop(pid, None)
+                    self._delete_similarity_files(pid)
+            return n
 
     def get_ranking(self, prompt_id: str, dataset: str) -> pd.Series:
         """
@@ -369,44 +383,45 @@ class Prompts:
             ):
                 raise ValueError("A similarity computation is already running for this prompt")
 
-        data = self._dataset_series(dataset)
-        specs = self.features.build_compute_specs([feature_name], data)
+        # resolve everything that can fail before pickling the data for the worker
         prompt_row = self._read().loc[prompt_id]
+        data = self._dataset_series(dataset)
+        specs, data_path = self.features.build_compute_specs([feature_name], data)
 
-        task = ComputeSimilarityWithFeatures(
+        # TODO: create a group of task for each spec in specs
+
+        # add a chord to the group to handle results
+        (unique_id, abortable) = new_task_id(compute_similarity_with_features)
+        task_inputs = ComputeSimilarityWithFeaturesTaskInput(
+            project_slug=self.project_slug,
+            prompt_id=prompt_id,
+            dataset=dataset,
             specs=specs,
+            data_path=data_path,
             path_process=self.features.path_all.parent,
             path_models=self.features.path_models,
             language=self.features.lang,
-            prompt_vector=prompt_vec,
+            prompt_vector=[float(x) for x in np.asarray(prompt_vec).reshape(-1)],
             path_output=self._similarity_dir(prompt_id),
             file_name=f"similarity_{dataset}.parquet",
         )
-        unique_id = self.queue.add_task("prompt_similarity", self.project_slug, task, queue="gpu")
 
-        progress_path = self.features.path_all.parent.joinpath(unique_id)
-
-        def get_progress() -> float | None:
-            try:
-                if not progress_path.exists():
-                    return None
-                raw = progress_path.read_text().strip()
-                return float(raw) if raw else 0.0
-            except (OSError, ValueError):
-                return None
-
-        self.computing.append(
+        enqueue_celery_task(
+            compute_similarity_with_features,
+            task_inputs,
+            self.computing,
             PromptSimilarityComputing(
                 user=username,
                 unique_id=unique_id,
                 time=datetime.now(timezone.utc),
                 kind="prompt_similarity",
+                abortable_celery_task=abortable,
+                temp_files=[data_path],
                 prompt_id=prompt_id,
                 text=str(prompt_row["text"]),
                 feature_name=feature_name,
                 dataset=dataset,
-                get_progress=get_progress,
-            )
+            ),
         )
         return unique_id
 
@@ -465,13 +480,13 @@ class Prompts:
         for e in self.computing:
             if e.kind != "prompt_similarity":
                 continue
-            progress = e.get_progress() if e.get_progress is not None else None
+            progress = get_celery_task_progress(e.unique_id)
             out[e.prompt_id] = {
                 "prompt_id": e.prompt_id,
                 "text": e.text,
                 "feature_name": e.feature_name,
                 "dataset": e.dataset,
-                "progress": str(progress) if progress is not None else None,
+                "progress": str(progress["progress"]) if progress is not None else None,
             }
         return out
 
@@ -480,19 +495,13 @@ class Prompts:
         for e in self.computing:
             if e.kind != "prompt":
                 continue
-            e = e  # type: PromptComputing
-            progress_file = self.path_dir.joinpath(e.unique_id)
-            progress: str | None = None
-            try:
-                if progress_file.exists():
-                    progress = progress_file.read_text().strip()
-            except OSError:
-                progress = None
+            e = cast(PromptComputing, e)
+            progress = get_celery_task_progress(e.unique_id)
             out[e.prompt_id] = {
                 "prompt_id": e.prompt_id,
                 "text": e.text,
                 "feature_name": e.feature_name,
-                "progress": progress,
+                "progress": str(progress["progress"]) if progress else None,
             }
         return out
 

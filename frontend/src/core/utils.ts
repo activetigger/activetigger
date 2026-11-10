@@ -591,3 +591,22 @@ export function truncateInMiddle(string: string, maxLength: number, separator: s
 
   return `${string.slice(0, frontChars)}${separator}${string.slice(string.length - backChars)}`;
 }
+
+/**
+ * Progress reported by a celery task: the backend sends either a bare number
+ * (legacy, features/prompts) or `{ progress, progress_label }`.
+ */
+export function readProgress(val: unknown): { value: number | null; label: string | null } {
+  if (val === null || val === undefined) return { value: null, label: null };
+  if (typeof val === 'object') {
+    const report = val as { progress?: unknown; progress_label?: unknown };
+    const n =
+      report.progress === null || report.progress === undefined ? NaN : Number(report.progress);
+    return {
+      value: Number.isFinite(n) ? n : null,
+      label: typeof report.progress_label === 'string' ? report.progress_label : null,
+    };
+  }
+  const n = Number(val);
+  return { value: Number.isFinite(n) ? n : null, label: null };
+}

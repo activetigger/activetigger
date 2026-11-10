@@ -1,15 +1,42 @@
 import json
 import os
+import pickle
+import threading
+import uuid
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 import pandas as pd
 import pyarrow.parquet as pq
 import regex
 from pandas import DataFrame, Series
+from task_manager.tasks.compute_bert_embeddings_task import (
+    ComputeBertEmbeddingsTaskInput,
+    compute_bert_embeddings,
+)
+from task_manager.tasks.compute_clip_imagexp_task import (
+    ComputeClipImagexpTaskInput,
+    compute_clip_imagexp,
+)
+from task_manager.tasks.compute_dfm_task import ComputeDfmTaskInput, compute_dfm_task
+from task_manager.tasks.compute_fasttext_task import (
+    ComputeFasttextTaskInput,
+    compute_fasttext,
+)
+from task_manager.tasks.compute_features_from_specs import FeatureSpec
+from task_manager.tasks.compute_multimodal_task import (
+    ComputeMultimodalTaskInput,
+    compute_multimodal,
+)
+from task_manager.tasks.compute_sbert_task import ComputeSbertTaskInput, compute_sbert
 
-from activetigger.config import config
+from activetigger.config import (
+    DEFAULT_EMBEDDINGS_MODEL,
+    DEFAULT_EMBEDDINGS_MODEL_CPU,
+    config,
+)
 from activetigger.data import Data
 from activetigger.datamodels import (
     FeatureComputing,
@@ -18,13 +45,11 @@ from activetigger.datamodels import (
 )
 from activetigger.db.projects import ProjectsService
 from activetigger.errors import AlreadyExistsError, InvalidInputError, NotFoundError
-from activetigger.queue_manager import Queue
-from activetigger.tasks.compute_bert_embeddings import ComputeBertEmbeddings
-from activetigger.tasks.compute_clip_imagexp import ComputeClipImagexp
-from activetigger.tasks.compute_dfm import ComputeDfm
-from activetigger.tasks.compute_fasttext import ComputeFasttext
-from activetigger.tasks.compute_multimodal import ComputeMultimodal
-from activetigger.tasks.compute_sbert import ComputeSbert
+from activetigger.tasks.task_manager_client import (
+    enqueue_celery_task,
+    get_celery_task_progress,
+    new_task_id,
+)
 
 # Experimental image projects: list of selectable image embedding models.
 # Each entry maps a UI label to (open_clip model name, pretrained tag).
@@ -84,7 +109,6 @@ class Features:
     project_slug: str
     data: Data
     path_model: Path
-    queue: Queue
     computing: list
     informations: dict
     content: DataFrame
@@ -99,7 +123,6 @@ class Features:
         project_slug: str,
         data: Data,
         models_path: Path,
-        queue: Any,
         computing: list,
         db_manager,
         lang: str,
@@ -115,8 +138,10 @@ class Features:
         self.path_features = data.path_features
         self.path_all = data.path_data_all
         self.path_models = models_path
-        self.queue = queue
         self.informations = {}
+        # the features file is read-modified-written by task callbacks running
+        # concurrently in the API threadpool: serialize those writes
+        self._lock = threading.RLock()
 
         self.lang = lang
         self.computing = computing
@@ -155,7 +180,9 @@ class Features:
             self.options = {
                 "sentence-embeddings": {
                     "models": config.models_embeddings,
-                    "default": "jinaai/jina-embeddings-v5-text-small",
+                    "default": DEFAULT_EMBEDDINGS_MODEL_CPU
+                    if config.cpu_only
+                    else DEFAULT_EMBEDDINGS_MODEL,
                 },
                 "bert-embeddings": {
                     "models": [],
@@ -212,19 +239,20 @@ class Features:
         Reset the features file with only the dataset information
         based on train, valid, test files
         """
-        if self.path_features.exists():
-            self.path_features.unlink()
-        self.projects_service.delete_project_features(self.project_slug)
-        self.create_features_file()
-        self.map, self.n = self.get_map()
+        with self._lock:
+            if self.path_features.exists():
+                self.path_features.unlink()
+            self.projects_service.delete_project_features(self.project_slug)
+            self.create_features_file()
+            self.map, self.n = self.get_map()
 
-        # cascade hook — every prompt/cache bound to a feature is now stale.
-        on_reset = self.on_reset
-        if on_reset is not None:
-            try:
-                on_reset()
-            except Exception as ex:
-                print(f"on_reset hook failed: {ex}")
+            # cascade hook — every prompt/cache bound to a feature is now stale.
+            on_reset = self.on_reset
+            if on_reset is not None:
+                try:
+                    on_reset()
+                except Exception as ex:
+                    print(f"on_reset hook failed: {ex}")
 
     def get_map(self) -> tuple[dict, int]:
         """
@@ -407,87 +435,89 @@ class Features:
         Add feature(s) after computing
         TODO : add in data
         """
-        self._raise_if_extending()
+        with self._lock:
+            self._raise_if_extending()
 
-        # test name
-        if name in self.map:
-            raise AlreadyExistsError("Feature already exists")
+            # test name
+            if name in self.map:
+                raise AlreadyExistsError("Feature already exists")
 
-        # test length
-        if len(new_content) != self.n:
-            raise ValueError("Features don't have the right shape")
+            # test length
+            if len(new_content) != self.n:
+                raise ValueError("Features don't have the right shape")
 
-        # change type for series
-        if type(new_content) is Series:
-            new_content = pd.DataFrame(new_content)
+            # change type for series
+            if type(new_content) is Series:
+                new_content = pd.DataFrame(new_content)
 
-        # change column name with a prefix
-        new_content.columns = [  # ty: ignore[invalid-assignment]
-            f"{name}__{i}" for i in new_content.columns
-        ]
+            # change column name with a prefix
+            new_content.columns = [  # ty: ignore[invalid-assignment]
+                f"{name}__{i}" for i in new_content.columns
+            ]
 
-        # read data, add the feature to the dataset and save
-        content = pd.read_parquet(self.path_features)
-        content = pd.concat(
-            [
-                content[[i for i in content.columns if i not in new_content.columns]],
-                new_content,
-            ],
-            axis=1,
-        )
-        content.to_parquet(self.path_features)
-        del content
+            # read data, add the feature to the dataset and save
+            content = pd.read_parquet(self.path_features)
+            content = pd.concat(
+                [
+                    content[[i for i in content.columns if i not in new_content.columns]],
+                    new_content,
+                ],
+                axis=1,
+            )
+            content.to_parquet(self.path_features)
+            del content
 
-        # add informations to database
-        self.projects_service.add_feature(
-            project_slug=self.project_slug,
-            kind=kind,
-            name=name,
-            parameters=parameters,
-            user_name=username,
-            data=list(new_content.columns),
-        )
+            # add informations to database
+            self.projects_service.add_feature(
+                project_slug=self.project_slug,
+                kind=kind,
+                name=name,
+                parameters=parameters,
+                user_name=username,
+                data=list(new_content.columns),
+            )
 
-        # refresh the map
-        self.map = self.get_map()[0]
+            # refresh the map
+            self.map = self.get_map()[0]
 
     def delete(self, name: str):
         """
         Delete feature
         """
-        self._raise_if_extending()
+        with self._lock:
+            self._raise_if_extending()
 
-        if not self.exists(name):
-            raise NotFoundError("Feature doesn't exist")
+            if not self.exists(name):
+                raise NotFoundError("Feature doesn't exist")
 
-        # remember kind before the DB row is gone, so the on_delete hook
-        # (e.g. prompts cascade) can dispatch on it.
-        kind: str | None = None
-        try:
-            kind = self.projects_service.get_feature(self.project_slug, name).kind
-        except Exception:
-            kind = None
-
-        col = self.map[name]
-        # read data, delete columns and save
-        content = pd.read_parquet(self.path_features)
-
-        content[[i for i in content.columns if i not in col]].to_parquet(self.path_features)
-        del content
-
-        # delete from database
-        self.projects_service.delete_feature(self.project_slug, name)
-
-        # refresh the map
-        self.map = self.get_map()[0]
-
-        # cascade hook (set by Project for image projects to drop dependent prompts)
-        on_delete = self.on_delete
-        if on_delete is not None:
+            # remember kind before the DB row is gone, so the on_delete hook
+            # (e.g. prompts cascade) can dispatch on it.
+            kind: str | None = None
             try:
-                on_delete(name, kind)
-            except Exception as ex:
-                print(f"on_delete hook failed for feature {name}: {ex}")
+                kind = self.projects_service.get_feature(self.project_slug, name).kind
+            except Exception:
+                kind = None
+
+            col = self.map[name]
+            # read data, delete columns and save
+            content = pd.read_parquet(self.path_features)
+
+            content[[i for i in content.columns if i not in col]].to_parquet(self.path_features)
+            del content
+
+            # delete from database
+            self.projects_service.delete_feature(self.project_slug, name)
+
+            # refresh the map
+            self.map = self.get_map()[0]
+
+            # cascade hook (set by Project for image projects to drop dependent prompts)
+            on_delete = self.on_delete
+            if on_delete is not None:
+                try:
+                    on_delete(name, kind)
+                except Exception as ex:
+                    print(f"on_delete hook failed for feature {name}: {ex}")
 
     def get(
         self, features: list | str, dataset: list | str = "all", keep_dataset_column: bool = False
@@ -571,9 +601,14 @@ class Features:
     def current_user_processes(self, user: str):
         return [e for e in self.computing if getattr(e, "user", None) == user]
 
+    @staticmethod
+    def _progress(task_id: str) -> str | None:
+        progress = get_celery_task_progress(task_id)
+        return str(progress["progress"]) if progress else None
+
     def current_computing(self) -> dict[str, dict[str, str | None]]:
         computing = {
-            e.name: {"progress": self.computing_progress(e.unique_id), "name": e.name}
+            e.name: {"progress": self._progress(e.unique_id), "name": e.name}
             for e in self.computing
             if e.kind == "feature"
         }
@@ -583,7 +618,7 @@ class Features:
         for e in self.computing:
             if e.kind == "extend_features":
                 computing["extending features"] = {
-                    "progress": self.computing_progress(e.unique_id),
+                    "progress": self._progress(e.unique_id),
                     "name": "extending features",
                     "kind": "extend_features",
                 }
@@ -683,6 +718,10 @@ class Features:
         }:
             raise InvalidInputError("Kind not recognized")
 
+        abortable = None
+        # pickles handed to the worker, removed with the process entry
+        temp_files: list[Path] = []
+
         # Experimental image projects: gate text-only feature kinds.
         if self.kind == "image" and kind not in {
             "image-embeddings",
@@ -747,8 +786,8 @@ class Features:
             self.add(name, kind, username, parameters, column_encoded)
             return None
 
-        # features with queue
-        unique_id = None
+        # features computed on a worker
+        task, task_inputs = None, None
 
         if kind == "sentence-embeddings":
             model = self.__sbert_choose_model(parameters)
@@ -757,17 +796,23 @@ class Features:
                 parameters["max_length_tokens"] = 1024
             if "batch_size" not in parameters:
                 parameters["batch_size"] = 32
-            unique_id = self.queue.add_task(
-                "feature",
-                self.project_slug,
-                ComputeSbert(
-                    texts=df,
+
+            # serialize df on disk for transmission to Celery task
+            texts_path = self.data.path_project.joinpath(f"texts_{uuid.uuid4().hex}.pkl")
+            df.to_pickle(texts_path)
+            temp_files.append(texts_path)
+            task, task_inputs = (
+                compute_sbert,
+                ComputeSbertTaskInput(
+                    feature_name=name,
+                    username=username,
+                    project_slug=self.project_slug,
+                    texts_path=texts_path,
                     path_process=self.path_all.parent,
                     model=model,
-                    max_tokens=parameters["max_length_tokens"],
+                    max_tokens=int(parameters["max_length_tokens"]),
                     batch_size=int(parameters["batch_size"]),
                 ),
-                queue="gpu",
             )
 
             parameters = {
@@ -793,20 +838,25 @@ class Features:
 
             max_length_tokens = int(parameters.get("max_length_tokens", 512))
             batch_size = int(parameters.get("batch_size", 32))
-            model_path = self.languagemodels.path.joinpath(model_name)
 
-            unique_id = self.queue.add_task(
-                "feature",
-                self.project_slug,
-                ComputeBertEmbeddings(
-                    texts=df,
+            # serialize df on disk for transmission to Celery task
+            texts_path = self.data.path_project.joinpath(f"texts_{uuid.uuid4().hex}.pkl")
+            df.to_pickle(texts_path)
+            temp_files.append(texts_path)
+            task, task_inputs = (
+                compute_bert_embeddings,
+                ComputeBertEmbeddingsTaskInput(
+                    feature_name=name,
+                    username=username,
+                    project_slug=self.project_slug,  # generate an id to add it to computing
+                    texts_path=texts_path,
                     path_process=self.path_all.parent,
-                    model_path=model_path,
+                    model_name=model_name,
+                    model_dir=self.languagemodels.path,
                     pooling=pooling,
                     batch_size=batch_size,
                     max_tokens=max_length_tokens,
                 ),
-                queue="gpu",
             )
 
             parameters = {
@@ -829,17 +879,23 @@ class Features:
                 raise InvalidInputError(f"Unknown image embedding model: {ui_label}")
 
             batch_size = int(parameters.get("batch_size", 16))
-            unique_id = self.queue.add_task(
-                "feature",
-                self.project_slug,
-                ComputeClipImagexp(
-                    paths=df,
+            # serialize image paths on disk for transmission to Celery task
+            paths_path = self.data.path_project.joinpath(f"paths_{uuid.uuid4().hex}.pkl")
+            df.to_pickle(paths_path)
+            temp_files.append(paths_path)
+            task, task_inputs = (
+                compute_clip_imagexp,
+                ComputeClipImagexpTaskInput(
+                    feature_name=name,
+                    username=username,
+                    project_slug=self.project_slug,
+                    paths_path=paths_path,
                     path_process=self.path_all.parent,
-                    model=spec["model"],
+                    model=ui_label,
+                    clip_model=spec["model"],
                     pretrained=spec["pretrained"],
                     batch_size=batch_size,
                 ),
-                queue="gpu",
             )
 
             parameters = {
@@ -859,16 +915,22 @@ class Features:
                 raise InvalidInputError(f"Unknown multimodal embedding model: {ui_label}")
 
             batch_size = int(parameters.get("batch_size", 8))
-            unique_id = self.queue.add_task(
-                "feature",
-                self.project_slug,
-                ComputeMultimodal(
-                    paths=df,
+            # serialize image paths on disk for transmission to Celery task
+            paths_path = self.data.path_project.joinpath(f"paths_{uuid.uuid4().hex}.pkl")
+            df.to_pickle(paths_path)
+            temp_files.append(paths_path)
+            task, task_inputs = (
+                compute_multimodal,
+                ComputeMultimodalTaskInput(
+                    feature_name=name,
+                    username=username,
+                    project_slug=self.project_slug,
+                    paths_path=paths_path,
                     path_process=self.path_all.parent,
-                    model_name=hf_name,
+                    model=ui_label,
+                    hf_name=hf_name,
                     batch_size=batch_size,
                 ),
-                queue="gpu",
             )
 
             parameters = {
@@ -881,14 +943,20 @@ class Features:
             }
 
         if kind == "fasttext":
-            unique_id = self.queue.add_task(
-                "feature",
-                self.project_slug,
-                ComputeFasttext(
-                    texts=df,
-                    language=self.lang,
+            # serialize df on disk for transmission to Celery task
+            texts_path = self.data.path_project.joinpath(f"texts_{uuid.uuid4().hex}.pkl")
+            df.to_pickle(texts_path)
+            temp_files.append(texts_path)
+            task, task_inputs = (
+                compute_fasttext,
+                ComputeFasttextTaskInput(
+                    feature_name=name,
+                    username=username,
+                    project_slug=self.project_slug,
+                    texts_path=texts_path,
                     path_process=self.path_all.parent,
                     path_models=self.path_models,
+                    language=self.lang,
                     model=parameters["model"],
                 ),
             )
@@ -901,11 +969,6 @@ class Features:
             }
 
         if kind == "dfm":
-            args = parameters.copy()
-            args["texts"] = df
-            args["language"] = self.lang
-            unique_id = self.queue.add_task("feature", self.project_slug, ComputeDfm(**args))
-            del args
             parameters = {
                 "name": name,
                 "kind": kind,
@@ -917,9 +980,30 @@ class Features:
                 "dfm_norm": parameters.get("dfm_norm", None),
                 "dfm_log": parameters.get("dfm_log", None),
             }
+            # serialize df on disk for transmission to Celery task
+            texts_path = self.data.path_project.joinpath(f"texts_{uuid.uuid4().hex}.pkl")
+            df.to_pickle(texts_path)
+            temp_files.append(texts_path)
+            # NOTE: as before, the dfm_* UI values are recorded but the vectoriser runs with defaults
+            task, task_inputs = (
+                compute_dfm_task,
+                ComputeDfmTaskInput(
+                    feature_name=name,
+                    username=username,
+                    project_slug=self.project_slug,
+                    texts_path=texts_path,
+                    path_process=self.path_all.parent,
+                    parameters=parameters,
+                    language=self.lang,
+                ),
+            )
 
-        if unique_id:
-            self.computing.append(
+        if task is not None and task_inputs is not None:
+            unique_id, abortable = new_task_id(task)
+            enqueue_celery_task(
+                task,
+                task_inputs,
+                self.computing,
                 FeatureComputing(
                     unique_id=unique_id,
                     kind="feature",
@@ -928,29 +1012,40 @@ class Features:
                     user=username,
                     name=name,
                     time=datetime.now(timezone.utc),
-                )
+                    abortable_celery_task=abortable,
+                    temp_files=temp_files,
+                ),
             )
             return None
         raise ValueError("Error in the process")
 
-    def build_compute_specs(self, names: list[str], data: Series) -> list[dict[str, Any]]:
+    def pickle_for_task(self, obj: Any) -> Path:
         """
-        Assemble the `specs` list consumed by `PredictWithFeatures` for a
-        set of existing feature names.
+        Serialize an object for a celery task; the worker unlinks the file.
+        """
+        path = self.data.path_project.joinpath(f"task_{uuid.uuid4().hex}.pkl")
+        with open(path, "wb") as f:
+            pickle.dump(obj, f)
+        return path
+
+    def build_compute_specs(self, names: list[str], data: Series) -> tuple[list[FeatureSpec], Path]:
+        """
+        Assemble the specs consumed by the compute-features celery tasks for a
+        set of existing feature names, plus the pickled `data` series (texts
+        or image paths) shared by every spec.
 
         For each name:
           - checks it exists in the project,
           - checks its `kind` is in `COMPUTABLE_KINDS` (imported /
             prediction features can't be recomputed → `ValueError`),
           - retrieves the stored parameters from the DB,
-          - attaches the shared `data` series (texts or image paths),
           - resolves the trained-model path for `bert-embeddings` so
             the task stays independent of `LanguageModels`.
         """
         if not names:
             raise ValueError("No features to compute")
 
-        specs: list[dict[str, Any]] = []
+        specs: list[FeatureSpec] = []
         for name in names:
             if not self.exists(name):
                 raise ValueError(f"Feature '{name}' does not exist")
@@ -961,20 +1056,15 @@ class Features:
             if kind not in self.COMPUTABLE_KINDS:
                 raise ValueError(f"Feature '{name}' has kind '{kind}' which is not computable")
 
-            spec: dict[str, Any] = {
-                "name": name,
-                "kind": kind,
-                "parameters": feature.parameters,
-                "data": data,
-            }
+            spec = FeatureSpec(name=name, kind=kind, parameters=feature.parameters)
             if kind == "bert-embeddings":
                 if self.languagemodels is None:
                     raise ValueError(
                         f"Feature '{name}' needs a LanguageModels manager to resolve its model path"
                     )
-                spec["model_path"] = self.languagemodels.path.joinpath(feature.parameters["model"])
+                spec.model_path = self.languagemodels.path.joinpath(feature.parameters["model"])
             specs.append(spec)
-        return specs
+        return specs, self.pickle_for_task(data)
 
     def concat_split_column(self, column: str, dataset: str = "all") -> Series:
         """
@@ -1002,17 +1092,6 @@ class Features:
         if self.data.test is not None:
             parts.append(self.data.test[column])
         return pd.concat(parts)
-
-    def computing_progress(self, unique_id: str) -> str | None:
-        """
-        Get the progress of a computing feature
-        """
-        try:
-            with open(self.path_all.parent.joinpath(unique_id), "r") as f:
-                r = f.read()
-            return r
-        except Exception:
-            return None
 
     def state(self) -> FeaturesProjectStateModel:
         # Refresh trained-BERT list each call: models are trained out-of-band

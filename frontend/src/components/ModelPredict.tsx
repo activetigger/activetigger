@@ -122,6 +122,7 @@ export const ModelPredict: FC<{ currentModel: string | null; kind?: string }> = 
           processes={trainingMap}
           processStatus="predicting"
           displayStopButton={isComputing}
+          stopKind={kind === 'ner' ? 'ner' : 'bert'}
         />
       </div>
       <Modal show={showOverwriteConfirm} onHide={() => setShowOverwriteConfirm(false)} centered>

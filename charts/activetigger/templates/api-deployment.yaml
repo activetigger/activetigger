@@ -64,6 +64,20 @@ spec:
           resources:
             {{- toYaml .Values.initContainer.resources | nindent 12 }}
         {{- end }}
+        {{- if .Values.redis.enabled }}
+        - name: wait-for-redis
+          image: {{ .Values.initContainer.image | quote }}
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z {{ include "activetigger.redisServiceName" . }} {{ .Values.redis.port }}; do
+                echo "waiting for redis"
+                sleep 2
+              done
+          resources:
+            {{- toYaml .Values.initContainer.resources | nindent 12 }}
+        {{- end }}
       containers:
         - name: api
           image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}"
@@ -79,6 +93,10 @@ spec:
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
+            # Celery workers run inside the API container (entrypoint.sh) and
+            # call back the API on localhost:API_PORT
+            - name: REDIS_URL
+              value: {{ include "activetigger.redisUrl" . | quote }}
             - name: ROOT_PASSWORD
               valueFrom:
                 secretKeyRef:

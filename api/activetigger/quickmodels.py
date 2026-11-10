@@ -1,6 +1,7 @@
 import os
 import pickle
 import shutil
+import uuid
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
@@ -10,11 +11,14 @@ import numpy as np
 import pandas as pd
 from fastapi.responses import FileResponse
 from pandas import DataFrame
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.naive_bayes import MultinomialNB
-from sklearn.neighbors import KNeighborsClassifier
 from sklearn.preprocessing import StandardScaler
+from task_manager.tasks.predict_ml_task import PredictMLTaskInput, predict_ml
+from task_manager.tasks.predict_with_features_task import (
+    PredictWithFeaturesTaskInput,
+    predict_with_features,
+)
+from task_manager.tasks.train_ml import MODELS_WITHOUT_BALANCE
+from task_manager.tasks.train_ml_task import TrainMLMultiClassInput, train_ml
 
 from activetigger.config import config
 from activetigger.data import Data
@@ -43,10 +47,12 @@ from activetigger.functions import (
     get_model_metrics,
     serve_temp_export,
 )
-from activetigger.queue_manager import Queue
-from activetigger.tasks.predict_ml import PredictMLMultiClass
-from activetigger.tasks.predict_with_features import PredictWithFeatures
-from activetigger.tasks.train_ml import TrainMLMultiClass
+from activetigger.monitoring import Monitoring
+from activetigger.tasks.task_manager_client import (
+    enqueue_celery_task,
+    get_celery_task_progress,
+    new_task_id,
+)
 
 if TYPE_CHECKING:
     from activetigger.features import Features
@@ -61,7 +67,6 @@ class QuickModels:
     """
 
     path: Path
-    queue: Queue
     available_models: dict[str, Any]
     computing: list
     loaded: dict
@@ -72,7 +77,6 @@ class QuickModels:
         self,
         project_slug: str,
         path: Path,
-        queue: Queue,
         computing: list,
         db_manager: DatabaseManager,
         features: "Features | None" = None,
@@ -89,9 +93,9 @@ class QuickModels:
         if not self.path.exists():
             os.mkdir(self.path)
         self.project_slug = project_slug
+        self.monitoring = Monitoring(db_manager, project_slug)
         self.language_models_service = db_manager.language_models_service
         self.computing = computing
-        self.queue = queue
         self.features = features
 
         # Models and default parameters
@@ -128,103 +132,56 @@ class QuickModels:
         """
         Add a new quickmodel for a user and a scheme
         """
-        X, Y, labels = self.transform_data(df, col_labels, col_features, standardize)
+        # features (standardized if needed) without rows with missing predictors
+        X = df[col_features]
+        f_na = X.isna().any(axis=1)
+        if f_na.any():
+            print(f"There is {f_na.sum()} predictor rows with missing values")
+            X = X[~f_na]
+        if standardize:
+            X = DataFrame(StandardScaler().fit_transform(X), columns=X.columns, index=X.index)
+        Y = df.loc[X.index, col_labels]
+        labels = [str(i) for i in Y.unique() if pd.notna(i)]
 
         # default parameters
         if model_params is None:
-            model_params = self.available_models[model_type].dict()
+            model_params = self.available_models[model_type].model_dump()
+        if model_type in MODELS_WITHOUT_BALANCE:
+            balance_classes = False
 
-        # Select model
-        if model_type == "knn":
-            params_knn = KnnParams(**model_params)
-            model = KNeighborsClassifier(n_neighbors=int(params_knn.n_neighbors), n_jobs=-1)
-            balance_classes = False  # Force the parameter to be set as False
-            model_params = params_knn.model_dump()
+        # write the data on disk on a temporary file
+        col_text = "text" if texts is not None else None
+        df_task = pd.concat([Y, X], axis=1)
+        if texts is not None:
+            df_task[col_text] = texts.reindex(df_task.index)
+        path_df = self.path.joinpath("train_ml_" + uuid.uuid4().hex + ".parquet")
+        df_task.to_parquet(path_df)
+        del df_task
 
-        if model_type == "logistic-l1":
-            params_libL1 = LogisticL1Params(**model_params)
-            model = LogisticRegression(
-                penalty="l1",
-                solver="saga",
-                C=params_libL1.costLogL1,
-                class_weight="balanced" if balance_classes else None,
-                n_jobs=-1,
-                random_state=config.random_seed,
-            )
-            model_params = params_libL1.model_dump()
-
-        if model_type == "logistic-l2":
-            params_libL2 = LogisticL2Params(**model_params)
-            model = LogisticRegression(
-                penalty="l2",
-                solver="lbfgs",
-                C=params_libL2.costLogL2,
-                class_weight="balanced" if balance_classes else None,
-                n_jobs=-1,
-                random_state=config.random_seed,
-            )
-            model_params = params_libL2.model_dump()
-
-        if model_type == "randomforest":
-            # params  Num. trees mtry  Sample fraction
-            # Number of variables randomly sampled as candidates at each split:
-            # it is “mtry” in R and it is “max_features” Python
-            #  The sample.fraction parameter specifies the fraction of observations to be used in each tree
-            params_rf = RandomforestParams(**model_params)
-            model = RandomForestClassifier(
-                n_estimators=int(params_rf.n_estimators),
-                max_features=(
-                    int(params_rf.max_features) if params_rf.max_features is not None else None
-                ),
-                class_weight="balanced"
-                if balance_classes
-                else None,  # AM: Need to choose between balanced and balanced_subsample
-                n_jobs=-1,
-                random_state=config.random_seed,
-            )
-            model_params = params_rf.model_dump()
-
-        if model_type == "multi_naivebayes":
-            # small workaround for parameters
-            params_nb = Multi_naivebayesParams(**model_params)
-            if params_nb.class_prior is not None:
-                class_prior = params_nb.class_prior
-            else:
-                class_prior = None
-            # Only with dtf or tfidf for features
-            # TODO: calculate class prior for docfreq & termfreq
-            model = MultinomialNB(
-                alpha=params_nb.alpha,
-                fit_prior=params_nb.fit_prior,
-                class_prior=class_prior,
-            )
-            balance_classes = False  # Force the parameter to be set as False
-            model_params = params_nb.model_dump()
-
-        # launch the compuation (model + statistics) as a future process
-        args = {
-            "model": model,  # ty: ignore[possibly-unresolved-reference]
-            "X": X,
-            "Y": Y,
-            "labels": labels,
-            "cv10": cv10,
-            "balance_classes": balance_classes,
-            "path": self.path,
-            "name": name,
-            "retrain": retrain,
-            "scheme": scheme,
-            "model_type": model_type,
-            "user": user,
-            "standardize": standardize,
-            "features": features,
-            "model_params": model_params,
-            "texts": texts,
-            "random_seed": config.random_seed,
-            "exclude_labels": exclude_labels,
-            "test_size": test_size,
-        }
-        unique_id = self.queue.add_task("train_quickmodel", project_slug, TrainMLMultiClass(**args))
-        del args
+        # queue celery task
+        inputs = TrainMLMultiClassInput(
+            project_slug=project_slug,
+            path=self.path,
+            path_df=path_df,
+            col_Y=col_labels,
+            cols_X=list(X.columns),
+            col_text=col_text,
+            name=name,
+            user=user,
+            model_type=model_type,
+            model_params=model_params,
+            scheme=scheme,
+            features=features,
+            labels=labels,
+            standardize=standardize,
+            cv10=cv10,
+            balance_classes=balance_classes,
+            exclude_labels=exclude_labels,
+            test_size=test_size,
+            retrain=retrain,
+            random_seed=config.random_seed,
+        )
+        (unique_id, abortable) = new_task_id(train_ml)
 
         req = QuickModelComputing(
             status="training",
@@ -245,8 +202,14 @@ class QuickModels:
             test_size=test_size,
             retrain=retrain,
             dataset="train",
+            abortable_celery_task=abortable,
+            temp_files=[path_df],
         )
-        self.computing.append(req)
+        # registered before the send: a fast task calls back at once
+        self.monitoring.register_process(
+            process_name=unique_id, kind="train_quickmodel", parameters={}, user_name=user
+        )
+        enqueue_celery_task(train_ml, inputs, self.computing, req)
         return unique_id
 
     def add(self, element: QuickModelComputing) -> None:
@@ -334,11 +297,10 @@ class QuickModels:
         for e in self.computing:
             if getattr(e, "kind", None) not in kinds:
                 continue
-            get_progress = getattr(e, "get_progress", None)
             r[e.user] = LMComputingOutModel(
                 name=getattr(e, "name", ""),
                 status=getattr(e, "status", "training"),
-                progress=get_progress() if get_progress else None,
+                progress=get_celery_task_progress(e.unique_id),
             )
         return r
 
@@ -348,35 +310,6 @@ class QuickModels:
         """
         existing = self.language_models_service.available_models(self.project_slug, "quickmodel")
         return name in [m.name for m in existing]
-
-    def transform_data(
-        self, data, col_label, col_predictors, standardize
-    ) -> tuple[DataFrame, pd.Series, list]:
-        """
-        Load data
-        """
-        f_na = data[col_predictors].isna().sum(axis=1) > 0
-        if f_na.sum() > 0:
-            print(f"There is {f_na.sum()} predictor rows with missing values")
-
-        # normalize X data
-        if standardize:
-            scaler = StandardScaler()
-            df = data[col_predictors]
-            df_stand = scaler.fit_transform(df)
-            df_pred = pd.DataFrame(df_stand, columns=df.columns, index=df.index)
-        else:
-            df_pred = data[col_predictors]
-
-        # create global dataframe with no missing predictor
-        df = pd.concat([data[~f_na][col_label], df_pred], axis=1)
-
-        # data for training
-        Y = df[col_label]
-        X = df[col_predictors]
-        labels = [str(i) for i in Y.unique() if pd.notna(i)]
-
-        return X, Y, labels
 
     def export_prediction(self, name: str, format: str = "csv") -> tuple[BytesIO, dict[str, str]]:
         """
@@ -514,24 +447,31 @@ class QuickModels:
             raise NotFoundError("The model does not exist")
         sm = self.get(name)
         file_name = f"predict_{dataset}.parquet"
-        unique_id = self.queue.add_task(
-            "prediction",
-            self.project_slug,
-            PredictMLMultiClass(
-                model=sm.model,
-                df=df,
-                col_dataset=col_dataset,
-                col_features=cols_features,
-                col_label=col_label,
-                path=self.path.joinpath(name),
-                file_name=file_name,
-                statistics=statistics,
-                col_text=col_text,
-                exclude_labels=sm.exclude_labels,
-            ),
-            queue="cpu",
+
+        # write df on disk on a temporary file read by the worker
+        path_df = self.path.joinpath(name, "predict_ml_" + uuid.uuid4().hex + ".parquet")
+        df.to_parquet(path_df)
+
+        # queue celery task (the worker loads model.pkl from the model directory)
+        inputs = PredictMLTaskInput(
+            path=self.path.joinpath(name),
+            path_df=path_df,
+            project_slug=self.project_slug,
+            model_name=name,
+            col_dataset=col_dataset,
+            col_features=cols_features,
+            col_label=col_label,
+            file_name=file_name,
+            statistics=statistics,
+            col_text=col_text,
+            exclude_labels=sm.exclude_labels,
         )
-        self.computing.append(
+        (unique_id, abortable) = new_task_id(predict_ml)
+        del df
+        enqueue_celery_task(
+            predict_ml,
+            inputs,
+            self.computing,
             QuickModelComputing(
                 user=username,
                 unique_id=unique_id,
@@ -545,7 +485,9 @@ class QuickModels:
                 model_type=sm.model_type,
                 model_params=sm.model_params,
                 labels=sm.labels,
-            )
+                abortable_celery_task=abortable,
+                temp_files=[path_df],
+            ),
         )
         print("Predicting process started")
 
@@ -648,44 +590,39 @@ class QuickModels:
         data: pd.Series,
     ) -> str:
         """
-        Shared queue-insertion path for `predict_on_dataset` and
+        Shared dispatch path for `predict_on_dataset` and
         `predict_on_external_dataset`. Builds the PredictWithFeatures
         task, wires the progress callable, and registers a
         `QuickModelComputing` entry so the frontend can render a bar.
         """
         assert self.features is not None
-        specs = self.features.build_compute_specs(sm.features, data)
+        specs, data_path = self.features.build_compute_specs(sm.features, data)
 
-        task = PredictWithFeatures(
+        (unique_id, abortable) = new_task_id(predict_with_features)
+        task_inputs = PredictWithFeaturesTaskInput(
+            project_slug=self.project_slug,
+            name=sm.name,
+            dataset=dataset,
             specs=specs,
+            data_path=data_path,
             path_process=self.features.path_all.parent,
             path_models=self.features.path_models,
             language=self.features.lang,
-            quickmodel=sm,
-            path_output=self.path.joinpath(sm.name),
+            path_quickmodel=self.path.joinpath(sm.name),
             file_name=f"predict_{dataset}.parquet",
         )
-        unique_id = self.queue.add_task(
-            "predict_with_features", self.project_slug, task, queue="cpu"
-        )
 
-        progress_path = self.features.path_all.parent.joinpath(unique_id)
-
-        def get_progress() -> float | None:
-            try:
-                if not progress_path.exists():
-                    return None
-                raw = progress_path.read_text().strip()
-                return float(raw) if raw else 0.0
-            except (OSError, ValueError):
-                return None
-
-        self.computing.append(
+        enqueue_celery_task(
+            predict_with_features,
+            task_inputs,
+            self.computing,
             QuickModelComputing(
                 user=username,
                 unique_id=unique_id,
                 time=datetime.now(timezone.utc),
                 kind="predict_with_features",
+                abortable_celery_task=abortable,
+                temp_files=[data_path],
                 status="predicting",
                 name=sm.name,
                 dataset=dataset,
@@ -694,8 +631,7 @@ class QuickModels:
                 model_type=sm.model_type,
                 model_params=sm.model_params,
                 labels=sm.labels,
-                get_progress=get_progress,
-            )
+            ),
         )
         return unique_id
 

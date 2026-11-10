@@ -1,2 +1,4 @@
 [environment]
 extra-paths = ["api"]
+python = "api/.venv"
+python-version = "3.13"

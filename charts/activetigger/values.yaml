@@ -17,8 +17,8 @@ api:
     CPU_ONLY: "true"
     ACTIVETIGGER_USER_HDD_MAX: "20"
     MAX_LOADED_PROJECTS: "2"
-    N_WORKERS_CPU: "1"
-    N_WORKERS_GPU: "0"
+    N_WORKERS_CPU: "5"
+    N_WORKERS_GPU: "1"
     UPDATE_TIMEOUT: "1"
   persistence:
     enabled: true
@@ -86,6 +86,27 @@ postgresql:
     limits:
       cpu: "2"
       memory: 2Gi
+  podSecurityContext:
+    fsGroup: 999
+    fsGroupChangePolicy: OnRootMismatch
+
+# Celery broker and result backend for the task workers (required)
+redis:
+  enabled: true
+  # used only when enabled is false
+  externalUrl: ""
+  image:
+    repository: redis
+    tag: "8"
+    pullPolicy: IfNotPresent
+  port: 6379
+  resources:
+    requests:
+      cpu: "100m"
+      memory: 128Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
   podSecurityContext:
     fsGroup: 999
     fsGroupChangePolicy: OnRootMismatch

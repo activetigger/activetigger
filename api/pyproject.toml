@@ -9,7 +9,7 @@ readme = "README.md"
 license = {file = "LICENSE"}
 classifiers = ["License :: OSI Approved :: MIT License"]
 dynamic = ["version", "description"]
-requires-python = ">= 3.11,<3.14"
+requires-python = ">=3.13,<3.14"
 dependencies = [
 		"fastapi[all]",
 		"sentencepiece",
@@ -39,7 +39,6 @@ dependencies = [
 		"plotly",
 		"matplotlib",
 		"scikit-learn",
-		"loky",
 		"einops",
 		"accelerate>=1.13.0",
 		"sacremoses>=0.1.1",
@@ -73,6 +72,7 @@ dependencies = [
 		"codecarbon>=2.7.0",
 		"wtpsplit>=2.1.0",
 		"python-docx>=1.1.0",
+		"task_manager"
 ]
 
 # torch/torchvision live in mutually exclusive extras (see tool.uv.conflicts):
@@ -94,6 +94,8 @@ dev = [
 line-length = 100
 
 [tool.ruff.lint]
+# explicit base set: ruff 0.16 widened its defaults
+select = ["E4", "E7", "E9", "F"]
 extend-select = [
 #  "B",           # flake8-bugbear
   "I",           # isort
@@ -136,6 +138,10 @@ exclude = ["migrations/"]
 
 [tool.ty.rules]
 all = "error"
+# style-only rules introduced by recent ty versions
+missing-type-argument = "ignore"
+missing-override-decorator = "ignore"
+unsound-return-statement = "ignore"
 
 [tool.uv]
 environments = [
@@ -152,6 +158,10 @@ fr-core-news-sm = { url = "https://github.com/explosion/spacy-models/releases/do
 en-core-web-sm = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0.tar.gz" }
 torch = [{ index = "pytorch-cpu", extra = "cpu" }]
 torchvision = [{ index = "pytorch-cpu", extra = "cpu" }]
+task_manager = { workspace = true }	
+
+[tool.uv.workspace]
+members = ["task_manager"]
 
 [[tool.uv.index]]
 name = "pytorch-cpu"

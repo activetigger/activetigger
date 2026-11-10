@@ -20,6 +20,7 @@ import logging
 
 import pytest
 import torch
+from task_manager.tasks.train_bert import CustomLoggingCallback
 from torch.utils.data import Dataset
 from transformers import (
     BertConfig,
@@ -28,8 +29,6 @@ from transformers import (
     TrainerControl,
     TrainingArguments,
 )
-
-from activetigger.tasks.train_bert import CustomLoggingCallback
 
 GRADACC = 4
 NUM_LABELS = 3
@@ -61,8 +60,8 @@ def _train_tiny_bert(tmp_path, gradacc: int) -> Trainer:
         num_attention_heads=2,
         intermediate_size=64,
         max_position_embeddings=32,
-        num_labels=NUM_LABELS,
     )
+    config.num_labels = NUM_LABELS
     model = BertForSequenceClassification(config)
     args = TrainingArguments(
         output_dir=str(tmp_path / "out"),
@@ -80,7 +79,10 @@ def _train_tiny_bert(tmp_path, gradacc: int) -> Trainer:
         disable_tqdm=True,
     )
     callback = CustomLoggingCallback(
-        event=None, logger=logging.getLogger("test"), current_path=tmp_path
+        is_aborted=lambda: False,
+        logger=logging.getLogger("test"),
+        current_path=tmp_path,
+        update_progress=lambda progress, label=None: None,
     )
     ds = _TinyDataset()
     trainer = Trainer(

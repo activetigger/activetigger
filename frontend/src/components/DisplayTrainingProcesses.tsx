@@ -2,6 +2,7 @@ import { FC, useEffect, useRef } from 'react';
 // import { useStopProcesses } from '../core/api';
 import { StopProcessButton } from './StopProcessButton';
 import { LossChart } from './vizualisation/lossChart';
+import { readProgress } from '../core/utils';
 
 export interface DisplayTrainingProcessesProps {
   projectSlug: string | null;
@@ -57,22 +58,24 @@ export const DisplayTrainingProcesses: FC<DisplayTrainingProcessesProps> = ({
     }
   }, [processes]);
 
-  const formatProgress = (val: number | string | null, key: string) => {
-    if (val === null || val === undefined) {
+  const formatProgress = (val: unknown, key: string) => {
+    const report = readProgress(val);
+    if (report.value === null) {
       const prev = maxProgressRef.current[key] ?? 0;
       if (prev === 0) {
         return { label: 'Waiting in queue', value: 0 };
       }
       return { label: `${prev}%`, value: prev };
     }
-    const v = Math.round(Number(val));
+    const v = Math.round(report.value);
     const prev = maxProgressRef.current[key] ?? 0;
     const effective = Math.max(v, prev);
     maxProgressRef.current[key] = effective;
     if (effective >= 100) {
       return { label: 'Finalizing…', value: 100 };
     }
-    return { label: `${effective}%`, value: effective };
+    const suffix = report.label ? ` · ${report.label}` : '';
+    return { label: `${effective}%${suffix}`, value: effective };
   };
 
   if (!processes) return null;

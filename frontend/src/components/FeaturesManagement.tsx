@@ -87,7 +87,7 @@ export const FeaturesManagement: FC = () => {
             <div className="d-flex m-2 align-items-center justify-content-between">
               <span>
                 {element?.progress != null
-                  ? `Currently computing ${element.name} (${element.progress}%)`
+                  ? `Currently computing ${element.name} (${Math.round(Number(element.progress))}%)`
                   : `Waiting in queue: ${element ? element.name : ''}`}
               </span>
               <StopProcessButton projectSlug={projectName || null} kind="feature" />

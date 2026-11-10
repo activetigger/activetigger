@@ -403,7 +403,7 @@ export const MonitorPage: FC = () => {
                 <h2 className="subtitle">Monitor active projects</h2>
 
                 <button className="btn btn-danger m-1" onClick={restartQueue}>
-                  Restart memory & queue
+                  Reset memory & stop tasks
                 </button>
 
                 {Object.keys(activeProjects || {}).map((project) => (

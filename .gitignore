@@ -31,6 +31,8 @@ api/activetigger/db/__pycache__/
 api/key.yaml
 .secret_key
 **/.secret_key
+.task_callback_token
+**/.task_callback_token
 api/activetigger/generation/__pycache__/
 api/activetigger/tasks/__pycache__/
 **/__pycache__/

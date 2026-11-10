@@ -2,13 +2,16 @@ import json
 import os
 import shutil
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Optional, Tuple, cast
+from typing import Any, Tuple, cast
 
 import pandas as pd
 from fastapi.responses import FileResponse
 from pandas import DataFrame
+from task_manager.tasks.predict_image_task import PredictImageTaskInput, predict_image
+from task_manager.tasks.train_image_task import TrainImageTaskInput, train_image
 
 import activetigger.functions as functions
 from activetigger.config import config
@@ -25,11 +28,14 @@ from activetigger.datamodels import (
 )
 from activetigger.db.languagemodels import ModelsService
 from activetigger.db.manager import DatabaseManager
-from activetigger.errors import AlreadyExistsError, InvalidInputError, NotFoundError
+from activetigger.errors import AlreadyExistsError, NotFoundError
 from activetigger.functions import get_model_metrics
-from activetigger.queue_manager import Queue
-from activetigger.tasks.predict_image import PredictImage
-from activetigger.tasks.train_image import TrainImage
+from activetigger.monitoring import Monitoring
+from activetigger.tasks.task_manager_client import (
+    enqueue_celery_task,
+    get_celery_task_progress,
+    new_task_id,
+)
 
 
 class ImageModels:
@@ -45,7 +51,6 @@ class ImageModels:
 
     project_slug: str
     path: Path
-    queue: Queue
     computing: list
     models_service: ModelsService
     db_manager: DatabaseManager
@@ -57,7 +62,6 @@ class ImageModels:
         self,
         project_slug: str,
         path: Path,
-        queue: Queue,
         computing: list,
         db_manager: DatabaseManager,
         list_models: str | None = None,
@@ -74,7 +78,7 @@ class ImageModels:
             adapt=False,
         )
         self.project_slug = project_slug
-        self.queue = queue
+        self.monitoring = Monitoring(db_manager, project_slug)
         self.computing = computing
         self.models_service = db_manager.language_models_service
         self.path: Path = Path(path).joinpath("image").absolute()
@@ -136,7 +140,7 @@ class ImageModels:
             e.user: LMComputingOutModel(
                 name=e.model_name,
                 status=e.status,
-                progress=e.get_progress() if e.get_progress else None,
+                progress=get_celery_task_progress(e.unique_id),
                 loss=self.get_loss(e.model_name),
                 epochs=e.params["epochs"] if e.params else None,
             )
@@ -213,33 +217,40 @@ class ImageModels:
         if training_kind not in ["multilabel", "multiclass"]:
             raise Exception("training_kind must be multilabel or multiclass")
 
-        unique_id = self.queue.add_task(
-            "training",
-            project,
-            TrainImage(
-                path=self.path,
-                project_slug=project,
-                model_name=model_name,
-                df=df.copy(deep=True),
-                training_kind=training_kind,
-                scheme_labels=scheme_labels,
-                col_label=col_label,
-                col_text=col_text,
-                base_model=base_model,
-                params=params,
-                test_size=test_size,
-                loss=loss,
-                class_balance=class_balance,
-                class_min_freq=class_min_freq,
-                fp16=fp16,
-            ),
-            queue="gpu",
+        # write df on disk on a temporary file read by the worker
+        path_df = self.path.joinpath("train_image_" + uuid.uuid4().hex + ".parquet")
+        df.to_parquet(path_df)
+
+        # queue celery task
+        inputs = TrainImageTaskInput(
+            path=self.path,
+            path_df=path_df,
+            project_slug=project,
+            model_name=model_name,
+            training_kind=training_kind,
+            scheme_labels=scheme_labels,
+            col_label=col_label,
+            col_text=col_text,
+            base_model=base_model,
+            params=params,
+            test_size=test_size,
+            loss=loss,
+            class_balance=class_balance,
+            class_min_freq=class_min_freq,
+            fp16=fp16,
         )
+        (unique_id, abortable) = new_task_id(train_image)
         del df
 
         params_db = LMParametersDbModel(**params.model_dump(), exclude_labels=exclude_labels or [])
-
-        self.computing.append(
+        # registered before the send: a fast task calls back at once
+        self.monitoring.register_process(
+            process_name=unique_id, kind="train_imagemodel", parameters={}, user_name=user
+        )
+        enqueue_celery_task(
+            train_image,
+            inputs,
+            self.computing,
             LMComputing(
                 user=user,
                 model_name=model_name,
@@ -251,8 +262,9 @@ class ImageModels:
                 scheme=scheme,
                 dataset=None,
                 params=params_db.model_dump(),
-                get_progress=self.get_progress(model_name, status="training"),
-            )
+                abortable_celery_task=abortable,
+                temp_files=[path_df],
+            ),
         )
         return unique_id
 
@@ -286,31 +298,40 @@ class ImageModels:
 
         file_name = f"predict_{dataset}.parquet"
 
-        unique_id = self.queue.add_task(
-            "prediction",
-            project_slug,
-            PredictImage(
-                path=self.path.joinpath(name),
-                dataset=dataset,
-                df=df,
-                training_kind=training_kind,
-                scheme_labels=scheme_labels,
-                col_text="text",
-                col_label=col_label,
-                col_id_external="id_external",
-                col_datasets="dataset",
-                basemodel=self.get_base_model(name),
-                file_name=file_name,
-                batch=batch_size,
-                statistics=statistics,
-                path_data=path_data,
-                path_train=path_train,
-                path_valid=path_valid,
-                path_test=path_test,
-            ),
-            queue="gpu",
+        # write df on disk on a temporary file read by the worker
+        path_df = None
+        if df is not None:
+            path_df = self.path.joinpath(name, "predict_image_" + uuid.uuid4().hex + ".parquet")
+            df.to_parquet(path_df)
+
+        # queue celery task
+        inputs = PredictImageTaskInput(
+            path=self.path.joinpath(name),
+            path_df=path_df,
+            project_slug=project_slug,
+            model_name=name,
+            dataset=dataset,
+            training_kind=training_kind,
+            scheme_labels=scheme_labels,
+            col_text="text",
+            col_label=col_label,
+            col_id_external="id_external",
+            col_datasets="dataset",
+            basemodel=self.get_base_model(name),
+            file_name=file_name,
+            batch=batch_size,
+            statistics=statistics,
+            path_data=path_data,
+            path_train=path_train,
+            path_valid=path_valid,
+            path_test=path_test,
         )
-        self.computing.append(
+        (unique_id, abortable) = new_task_id(predict_image)
+        del df
+        enqueue_celery_task(
+            predict_image,
+            inputs,
+            self.computing,
             LMComputing(
                 user=user,
                 model_name=name,
@@ -320,8 +341,9 @@ class ImageModels:
                 training_kind=training_kind,
                 dataset=dataset,
                 status=status,
-                get_progress=self.get_progress(name, status=status),
-            )
+                abortable_celery_task=abortable,
+                temp_files=[path_df] if path_df else [],
+            ),
         )
 
     def delete(self, name: str) -> None:
@@ -445,24 +467,6 @@ class ImageModels:
         with open(self.path.joinpath(model_name).joinpath("config.json"), "r") as f:
             r = json.load(f)
         return list(r["id2label"].values())
-
-    def get_progress(self, model_name, status: str) -> Callable[[], Optional[float]]:
-        if status == "training":
-            path_model = self.path.joinpath(model_name).joinpath("progress_train")
-        elif status == "predicting":
-            path_model = self.path.joinpath(model_name).joinpath("progress_predict")
-        else:
-            raise InvalidInputError("Status not recognized")
-
-        def progress():
-            if path_model.exists():
-                r = path_model.read_text()
-                if r.strip() == "":
-                    r = 0
-                return float(r)
-            return None
-
-        return progress
 
     def get_loss(self, model_name) -> dict | None:
         now = time.time()

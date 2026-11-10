@@ -200,6 +200,9 @@ DOMAIN=yourdomain.com
 CERTBOT_EMAIL=admin@yourdomain.com
 # your private secret seed
 SECRET="a random 32 url-safe base64-encoded"
+# celery worker pools: light tasks in parallel, heavy tasks (training, embeddings) one at a time
+N_WORKERS_CPU=5
+N_WORKERS_GPU=1
 ```
 
 ## start

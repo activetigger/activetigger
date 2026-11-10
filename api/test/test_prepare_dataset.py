@@ -1,13 +1,13 @@
 from pathlib import Path
 
 import pandas as pd
-
-from activetigger.datamodels import PrepareSplitModel
-from activetigger.tasks.prepare_dataset import (
-    PrepareDataset,
+from task_manager.tasks.prepare_dataset import (
+    prepare_dataset,
     split_by_chars,
     split_by_regex,
 )
+
+from activetigger.datamodels import PrepareSplitModel
 
 
 def test_split_by_chars_respects_words():
@@ -35,8 +35,7 @@ def test_split_by_regex_drops_empty_segments():
 
 def _run_task(tmp_path: Path, df: pd.DataFrame, params: PrepareSplitModel) -> pd.DataFrame:
     df.to_parquet(tmp_path.joinpath("raw.parquet"), index=False)
-    PrepareDataset(tmp_path, params)()
-    return pd.read_parquet(tmp_path.joinpath("result.parquet"))
+    return pd.read_parquet(prepare_dataset(tmp_path, params, lambda progress, label=None: None))
 
 
 def test_prepare_dataset_chunk_method(tmp_path: Path):

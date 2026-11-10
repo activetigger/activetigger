@@ -7,6 +7,7 @@ import pytz
 import yaml
 from cryptography.fernet import Fernet
 from dotenv import load_dotenv
+from task_manager.config import load_or_create_task_callback_token
 
 # Previously committed dev placeholder. Kept here so we can reject it
 # explicitly — it is public on GitHub and any token signed with it is forgeable.
@@ -87,14 +88,18 @@ def parse_environ(key: str, parse_method: Callable[[str], int | float], default:
         return default
 
 
+# per-model options are forwarded as kwargs to SentenceTransformer.encode
+# (task / prompt_name); permissive licences first, jina is CC BY-NC 4.0
 DEFAULT_EMBEDDINGS_MODELS = {
-    "jinaai/jina-embeddings-v5-text-small": {
-        "task": "retrieval",
-    },
-    "all-mpnet-base-v2": {},
+    "microsoft/harrier-oss-v1-0.6b": {},
+    "microsoft/harrier-oss-v1-270m": {},
     "Qwen/Qwen3-Embedding-0.6B": {},
+    "google/embeddinggemma-2": {"prompt_name": "Classification"},
+    "jinaai/jina-embeddings-v5-text-small": {"task": "classification"},
     "Qwen/Qwen3-Embedding-8B": {},
 }
+DEFAULT_EMBEDDINGS_MODEL = "microsoft/harrier-oss-v1-0.6b"
+DEFAULT_EMBEDDINGS_MODEL_CPU = "microsoft/harrier-oss-v1-270m"
 
 
 class Config(metaclass=_Singleton):
@@ -103,13 +108,12 @@ class Config(metaclass=_Singleton):
     user_hdd_max: float
     mode: MODE = MODE.parse(os.environ.get("MODE"))
     secret_key: str
+    task_callback_token: str
     database_url: str
     root_password: str | None = os.environ.get("ROOT_PASSWORD", None)
     # orchestrator
     jwt_algorithm: str = os.environ.get("JWT_ALGORITHM", "HS256")
     max_loaded_projects: int
-    n_workers_gpu: int
-    n_workers_cpu: int
     update_timeout: int
     mail_server_port: int
     random_seed: int
@@ -144,8 +148,6 @@ class Config(metaclass=_Singleton):
         self.mode = MODE.parse(os.environ.get("MODE"))
         self.user_hdd_max = parse_environ("ACTIVETIGGER_USER_HDD_MAX", float, 30.0)
         self.max_loaded_projects = parse_environ("MAX_LOADED_PROJECTS", int, 30)
-        self.n_workers_gpu = parse_environ("N_WORKERS_GPU", int, 1)
-        self.n_workers_cpu = parse_environ("N_WORKERS_CPU", int, 5)
         self.update_timeout = parse_environ("UPDATE_TIMEOUT", int, 1)
         self.random_seed = parse_environ("RANDOM_SEED", int, 42)
         self.database_url = os.environ.get(
@@ -153,6 +155,7 @@ class Config(metaclass=_Singleton):
             f"sqlite:///{os.path.join(self.data_path, 'projects', 'activetigger.db')}",
         )
         self.secret_key = _load_or_create_secret_key(self.data_path)
+        self.task_callback_token = load_or_create_task_callback_token(self.data_path)
         self.model_path = os.environ.get("MODEL_PATH", os.path.join(self.data_path, "models"))
         self.timezone = pytz.timezone("Europe/Paris")
         if self.mail_server and self.mail_account and self.mail_password:

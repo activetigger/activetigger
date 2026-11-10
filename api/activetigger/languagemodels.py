@@ -2,13 +2,16 @@ import json
 import os
 import shutil
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Optional, Tuple, cast
+from typing import Any, Tuple, cast
 
 import pandas as pd
 from fastapi.responses import FileResponse
 from pandas import DataFrame
+from task_manager.tasks.predict_bert_task import PredictBertTaskInput, predict_bert
+from task_manager.tasks.train_bert_task import TrainBertTaskInput, train_bert
 
 import activetigger.functions as functions
 from activetigger.config import config
@@ -26,11 +29,14 @@ from activetigger.datamodels import (
 )
 from activetigger.db.languagemodels import ModelsService
 from activetigger.db.manager import DatabaseManager
-from activetigger.errors import AlreadyExistsError, InvalidInputError, NotFoundError
+from activetigger.errors import AlreadyExistsError, NotFoundError
 from activetigger.functions import get_model_metrics
-from activetigger.queue_manager import Queue
-from activetigger.tasks.predict_bert import PredictBertMultiClass
-from activetigger.tasks.train_bert import TrainBert
+from activetigger.monitoring import Monitoring
+from activetigger.tasks.task_manager_client import (
+    enqueue_celery_task,
+    get_celery_task_progress,
+    new_task_id,
+)
 
 
 class LanguageModels:
@@ -40,7 +46,6 @@ class LanguageModels:
 
     project_slug: str
     path: Path
-    queue: Queue
     computing: list
     language_models_service: ModelsService
     db_manager: DatabaseManager
@@ -52,14 +57,13 @@ class LanguageModels:
         self,
         project_slug: str,
         path: Path,
-        queue: Queue,
         computing: list,
         db_manager: DatabaseManager,
         list_models: str | None = None,
     ) -> None:
         self.params_default = LMParametersModel()
         self.project_slug = project_slug
-        self.queue = queue
+        self.monitoring = Monitoring(db_manager, project_slug)
         self.computing = computing
         self.language_models_service = db_manager.language_models_service
         self.path: Path = Path(path).joinpath("bert")
@@ -72,22 +76,22 @@ class LanguageModels:
         # instead of raising (which would break every project open)
         self.base_models = [
             {
-                "name": "answerdotai/ModernBERT-base",
+                "name": "microsoft/deberta-v3-base",
                 "priority": 10,
                 "comment": "",
                 "language": "en",
             },
             {
-                "name": "camembert/camembert-base",
-                "priority": 0,
+                "name": "almanach/camembertav2-base",
+                "priority": 10,
                 "comment": "",
                 "language": "fr",
             },
             {
-                "name": "flaubert/flaubert_base_cased",
-                "priority": 7,
+                "name": "jhu-clsp/mmBERT-base",
+                "priority": 8,
                 "comment": "",
-                "language": "fr",
+                "language": "multi",
             },
         ]
         if list_models is not None and Path(list_models).exists():
@@ -141,7 +145,7 @@ class LanguageModels:
             e.user: LMComputingOutModel(
                 name=e.model_name,
                 status=e.status,
-                progress=e.get_progress() if e.get_progress else None,
+                progress=get_celery_task_progress(e.unique_id),
                 loss=self.get_loss(e.model_name),
                 epochs=e.params["epochs"] if e.params else None,
             )
@@ -204,9 +208,9 @@ class LanguageModels:
         TODO : implement
         """
         if kind == "train":
-            return 4
+            return 2
         if kind == "predict":
-            return 3
+            return 1
         return 0
 
     def start_training_process(
@@ -258,43 +262,55 @@ class LanguageModels:
         if params.gpu:
             mem = functions.get_gpu_memory_info()
             if self.estimate_memory_use(model_name, kind="train") > mem.available_memory:
+                print(
+                    f"needs estimation {self.estimate_memory_use(model_name, kind='train')} when we have {mem.available_memory} memory"
+                )
                 raise Exception("Not enough GPU memory available. Wait or reduce batch.")
+
+        # write df on disk on a temporary file
+        path_df = os.path.join(self.path, "train_bert_" + uuid.uuid4().hex + ".parquet")
+        df.to_parquet(path_df)
+        # prepare input payload
 
         # launch as a independant process
         if training_kind not in ["multilabel", "multiclass"]:
             raise Exception("training_kind must be multilabel or multiclass")
-        unique_id = self.queue.add_task(
-            "training",
-            project,
-            TrainBert(
-                path=self.path,
-                project_slug=project,
-                model_name=model_name,
-                df=df.copy(deep=True),
-                training_kind=training_kind,
-                scheme_labels=scheme_labels,
-                col_label=col_label,
-                col_text=col_text,
-                base_model=base_model,
-                params=params,
-                test_size=test_size,
-                loss=loss,
-                max_length=max_length,
-                auto_max_length=auto_max_length,
-                class_balance=class_balance,
-                class_min_freq=class_min_freq,
-                use_dichotomization=use_dichotomization,
-                label_for_dichotomization=label_for_dichotomization,
-            ),
-            queue="gpu",
+        trainBertInputs = TrainBertTaskInput(
+            path=self.path,
+            path_df=Path(path_df),
+            project_slug=project,
+            model_name=model_name,
+            training_kind=training_kind,
+            scheme_labels=scheme_labels,
+            col_label=col_label,
+            col_text=col_text,
+            base_model=base_model,
+            params=params,
+            test_size=test_size,
+            loss=loss,
+            max_length=max_length,
+            auto_max_length=auto_max_length,
+            class_balance=class_balance,
+            class_min_freq=class_min_freq,
+            use_dichotomization=use_dichotomization,
+            label_for_dichotomization=label_for_dichotomization,
         )
+        # queue celery task
+        (unique_id, abortable) = new_task_id(train_bert)
+
         del df
 
         # add flags in params
         params = LMParametersDbModel(**params.model_dump(), exclude_labels=exclude_labels or [])
 
-        # Update the queue state
-        self.computing.append(
+        # registered before the send: a fast task calls back at once
+        self.monitoring.register_process(
+            process_name=unique_id, kind="train_languagemodel", parameters={}, user_name=user
+        )
+        enqueue_celery_task(
+            train_bert,
+            trainBertInputs,
+            self.computing,
             LMComputing(
                 user=user,
                 model_name=model_name,
@@ -306,8 +322,9 @@ class LanguageModels:
                 scheme=scheme,
                 dataset=None,
                 params=params.model_dump(),
-                get_progress=self.get_progress(model_name, status="training"),
-            )
+                abortable_celery_task=abortable,
+                temp_files=[Path(path_df)],
+            ),
         )
         return unique_id
 
@@ -348,45 +365,50 @@ class LanguageModels:
         if not (self.path.joinpath(name)).exists():
             raise NotFoundError("The model does not exist")
 
-        # remove stale progress left by a previous run whose worker died
-        # before cleanup; otherwise the frontend shows the old percentage
-        stale_progress = self.path.joinpath(name).joinpath("progress_predict")
-        if stale_progress.exists():
-            stale_progress.unlink()
-
         # case of external loading
         if df is None and dataset not in ["all", "external"]:
             raise Exception("Dataframe is required for this dataset")
 
         file_name = f"predict_{dataset}.parquet"
 
-        # load the model
-        unique_id = self.queue.add_task(
-            "prediction",
-            project_slug,
-            PredictBertMultiClass(
-                path=self.path.joinpath(name),
-                dataset=dataset,
-                df=df,
-                training_kind=training_kind,
-                scheme_labels=scheme_labels,
-                col_text="text",
-                col_label=col_label,
-                col_id_external="id_external",
-                col_datasets="dataset",
-                basemodel=self.get_base_model(name),
-                file_name=file_name,
-                batch=batch_size,
-                statistics=statistics,
-                path_data=path_data,
-                external_dataset=external_dataset,
-                path_train=path_train,
-                path_valid=path_valid,
-                path_test=path_test,
-            ),
-            queue="gpu",
+        # write df on disk on a temporary file read by the worker
+        path_df = None
+        if df is not None:
+            path_df = self.path.joinpath(name, "predict_bert_" + uuid.uuid4().hex + ".parquet")
+            df.to_parquet(path_df)
+
+        # queue celery task
+        inputs = PredictBertTaskInput(
+            path=self.path.joinpath(name),
+            path_df=path_df,
+            project_slug=project_slug,
+            model_name=name,
+            dataset=dataset,
+            training_kind=training_kind,
+            scheme_labels=scheme_labels,
+            col_text="text",
+            col_label=col_label,
+            col_id_external="id_external",
+            col_datasets="dataset",
+            file_name=file_name,
+            batch=batch_size,
+            statistics=statistics,
+            path_data=path_data,
+            external_dataset=external_dataset,
+            path_train=path_train,
+            path_valid=path_valid,
+            path_test=path_test,
         )
-        self.computing.append(
+        (unique_id, abortable) = new_task_id(predict_bert)
+        del df
+        # registered before the send: a fast task calls back at once
+        self.monitoring.register_process(
+            process_name=unique_id, kind="predict_languagemodel", parameters={}, user_name=user
+        )
+        enqueue_celery_task(
+            predict_bert,
+            inputs,
+            self.computing,
             LMComputing(
                 user=user,
                 model_name=name,
@@ -396,8 +418,9 @@ class LanguageModels:
                 training_kind=training_kind,
                 dataset=dataset,
                 status=status,
-                get_progress=self.get_progress(name, status=status),
-            )
+                abortable_celery_task=abortable,
+                temp_files=[path_df] if path_df else [],
+            ),
         )
         return unique_id
 
@@ -560,28 +583,6 @@ class LanguageModels:
         with open(self.path.joinpath(model_name).joinpath("config.json"), "r") as f:
             r = json.load(f)
         return list(r["id2label"].values())
-
-    def get_progress(self, model_name, status: str) -> Callable[[], Optional[float]]:
-        """
-        Get progress when training
-        (different cases)
-        """
-        if status == "training":
-            path_model = self.path.joinpath(model_name).joinpath("progress_train")
-        elif status == "predicting":
-            path_model = self.path.joinpath(model_name).joinpath("progress_predict")
-        else:
-            raise InvalidInputError("Status not recognized")
-
-        def progress_predicting():
-            if path_model.exists():
-                r = path_model.read_text()
-                if r.strip() == "":
-                    r = 0
-                return float(r)
-            return None
-
-        return progress_predicting
 
     def get_loss(self, model_name) -> dict | None:
         now = time.time()

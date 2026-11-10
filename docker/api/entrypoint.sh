@@ -76,6 +76,22 @@ if [ ! -f /api/config.yaml ]; then
     fi
 fi
 
+# Launch workers
+uv run --no-sync watchmedo auto-restart \
+    --directory="./task_manager/src/task_manager/" \
+    --pattern="*.py" \
+    --recursive \
+    -- uv run --no-sync celery-worker-cpu &
+
+# Heavy tasks (training, embeddings, prediction) go to the GPU queue, consumed
+# by this single prefork worker (one child at a time, one task per child). It is started even
+# without a GPU: the tasks then run on CPU, still serialized.
+uv run --no-sync watchmedo auto-restart \
+  --directory="./task_manager/src/task_manager/" \
+  --pattern="*.py" \
+  --recursive \
+  -- uv run --no-sync celery-worker-gpu &
+
 # Launch the server
 echo "Launching API on port $API_PORT..."
 
@@ -94,7 +110,7 @@ else
   echo
   # Single worker is intentional: the orchestrator holds in-memory project state
   # and runs a background asyncio update loop. Heavy compute is offloaded to
-  # multiprocessing workers via queue_manager. --proxy-headers is required
+  # the celery workers started above. --proxy-headers is required
   # because nginx forwards X-Forwarded-* in front of the API.
   exec uv run --no-sync uvicorn activetigger.app.main:app \
     --host 0.0.0.0 \

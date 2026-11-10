@@ -1,7 +1,7 @@
 # Active Tigger
 
 [![License](https://img.shields.io/badge/license-EUPL1.2-blue.svg)](https://github.com/activetigger/activetigger/blob/main/LICENSE.md)
-[![Python Version](https://img.shields.io/badge/python-3.11+-blue)](https://www.python.org/downloads/)
+[![Python Version](https://img.shields.io/badge/python-3.13+-blue)](https://www.python.org/downloads/)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688)
 ![React](https://img.shields.io/badge/React-18.3-blue)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.4-3178C6)
@@ -21,9 +21,8 @@ Designed primarily by researchers in social sciences, its use can extend to all 
 
 Schultz, E., Boelaert, J., Morin, A., Bonutti D'Agostini, E., Claesson, A., & Chatelain, A., Ollion, É. (2026). ActiveTigger: An open source collaborative text annotation software for computational social sciences. In Proceedings of the 18th International Conference on Statistical Analysis of Textual Data (JADT 2026 https://jadt2026.unipa.it/), Palermo, Italy, July 8–10, 2026.
 
-
 ## Run the app with Docker (recommended)
- 
+
 :warning: If you don't already have it installed, install docker/docker compose first :whale:. You need the docker daemon running to proceed.
 
 Clone the current repository.
@@ -77,6 +76,16 @@ First, clone the repository
 git clone https://github.com/activetigger/activetigger.git
 ```
 
+### Redis dependency
+
+Redis database is needed for the task manager.
+You'll need one instance.
+
+```bash
+sudo apt install redis
+sudo systemctl start redis
+```
+
 ### Install the Python API
 
 We recommend using [uv](https://docs.astral.sh/uv/), a fast Python package and project manager written in Rust. It replaces `pip`, `venv`, and `conda` in a single tool and automatically handles Python version management, virtual environments, and dependency resolution — making setup faster and more reliable.
@@ -110,9 +119,24 @@ Add a specific `config.yaml` file in the api directory if you want to specify th
 Launch the server (on 0.0.0.0 port 5000 by default, you can configure exposed port if needed with -p PORTNUM):
 
 ```bash
+# CPU workers
+uv run celery-worker-cpu &
+
+# GPU worker (dev mode)
+uv run celery-worker-gpu &
+
+# API
 uv run python -m activetigger
 ```
 
+Tasks (project creation, features, training, prediction) run in celery workers which need a redis broker. Start redis (for instance `docker run -p 6379:6379 redis`) and, from the `api` directory, the two worker pools in separate terminals:
+
+```bash
+uv run celery-worker-cpu
+uv run celery-worker-gpu
+```
+
+The workers read `api/.env` like the API (see `.env.sample`): `REDIS_URL` (default `redis://localhost:6379`), `ORCHESTRATOR_API_URL` (default `http://localhost:5000`, must match the `-p` port of the API), `WORKER_LOGLEVEL` (default `INFO`), `N_WORKERS_CPU` and `N_WORKERS_GPU`. The callback routes are protected by a shared secret, `TASK_CALLBACK_TOKEN`, generated in `$DATA_PATH/.task_callback_token` when unset.
 
 #### Check the API
 
@@ -200,6 +224,5 @@ The development of Active Tigger is supported by : [DRARI Île-de-France](https:
 ## AI Disclosure
 
 We use Claude Code to develop part of the code. Nevertheless, all content is reviewed at least by a human, and we try to keep the code auditable.
-
 
 [^1]: The current version is a refactor of [R Shiny ActiveTigger app (Julien Boelaert & Etienne Ollion)](https://gitlab.univ-lille.fr/julien.boelaert/activetigger). Active Tigger name is a pun that draws on the similarity between the words 'Tagger' and 'Tigger.'

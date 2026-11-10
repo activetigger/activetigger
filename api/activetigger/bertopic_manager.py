@@ -2,11 +2,14 @@ import json
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable
 
 import pandas as pd
 from fastapi.responses import FileResponse
 from slugify import slugify
+from task_manager.tasks.compute_bertopic_task import (
+    ComputeBertopicTaskInput,
+    compute_bertopic,
+)
 
 from activetigger.config import config
 from activetigger.datamodels import (
@@ -18,13 +21,18 @@ from activetigger.datamodels import (
     BertopicProjectionNode,
     BertopicProjectStateModel,
     TopicsOutModel,
+    TrainingState,
 )
 from activetigger.db.languagemodels import ModelsService
 from activetigger.db.manager import DatabaseManager
 from activetigger.errors import NotFoundError
 from activetigger.features import Features
-from activetigger.queue_manager import Queue
-from activetigger.tasks.compute_bertopic import ComputeBertopic
+from activetigger.monitoring import Monitoring
+from activetigger.tasks.task_manager_client import (
+    enqueue_celery_task,
+    get_celery_task_progress,
+    new_task_id,
+)
 
 
 class Bertopic:
@@ -43,13 +51,12 @@ class Bertopic:
         self,
         project_slug: str,
         path: Path,
-        queue: Queue,
         computing: list,
         features: Features,
         db_manager: DatabaseManager,
     ) -> None:
         self.project_slug = project_slug
-        self.queue = queue
+        self.monitoring = Monitoring(db_manager, project_slug)
         self.computing = computing
         self.path: Path = path.joinpath("bertopic")
         self.path.mkdir(parents=True, exist_ok=True)
@@ -93,21 +100,30 @@ class Bertopic:
             )
         self._materialize_feature_embeddings(parameters)
 
-        args = ComputeBertopic(
+        inputs = ComputeBertopicTaskInput(
             path_bertopic=self.path,
             path_data=path_data,
+            project_slug=self.project_slug,
+            name=name,
             col_id=col_id,
             col_text=col_text,
             parameters=parameters,
-            name=name,
             force_compute_embeddings=False,
             random_seed=config.random_seed,
         )
-        unique_id = self.queue.add_task("bertopic", self.project_slug, args, queue="cpu")
-        self.computing.append(
+        unique_id, abortable = new_task_id(compute_bertopic)
+        # registered before the send: a fast task calls back at once
+        self.monitoring.register_process(
+            process_name=unique_id, kind="fit_bertopic", parameters={}, user_name=user
+        )
+        enqueue_celery_task(
+            compute_bertopic,
+            inputs,
+            self.computing,
             BertopicComputing(
                 user=user,
                 unique_id=unique_id,
+                abortable_celery_task=abortable,
                 name=name,
                 path_data=path_data,
                 col_id=col_id,
@@ -116,8 +132,7 @@ class Bertopic:
                 time=datetime.now(timezone.utc),
                 kind="bertopic",
                 force_compute_embeddings=False,
-                get_progress=self.get_progress(name),
-            )
+            ),
         )
         return unique_id
 
@@ -144,16 +159,18 @@ class Bertopic:
             path=str(model_path),
         )
 
-    def training(self) -> dict[str, dict[str, str | int | float | None]]:
+    def training(self) -> dict[str, TrainingState]:
         """
         Get available BERTopic models in the current process
         """
         return {
-            e.user: {
-                "name": e.name,
-                "status": "training",
-                "progress": e.get_progress() if e.get_progress else None,
-            }
+            e.user: TrainingState(
+                {
+                    "name": e.name,
+                    "status": "training",
+                    "progress": get_celery_task_progress(e.unique_id),
+                }
+            )
             for e in self.computing
             if e.kind == "bertopic"
         }
@@ -260,33 +277,6 @@ class Bertopic:
         Get current user processes
         """
         return [e for e in self.computing if e.user == user]
-
-    def get_progress(self, name) -> Callable[[], float | None]:
-        """
-        Access the log progress.
-        During embedding computation, reads from a separate SBERT progress file
-        and scales it to the 10-60% range of the overall BERTopic progress.
-        """
-        path_run = self.path.joinpath("runs").joinpath(name)
-        path_progress = path_run.joinpath("progress")
-        path_sbert_progress = path_run.joinpath("progress_sbert")
-
-        def progress():
-            # If SBERT is computing embeddings, scale its 0-100 to 10-60
-            if path_sbert_progress.exists():
-                try:
-                    sbert_val = float(path_sbert_progress.read_text().strip())
-                    return 10 + (sbert_val / 100) * 50
-                except (ValueError, OSError):
-                    pass
-            if path_progress.exists():
-                try:
-                    return float(path_progress.read_text().strip())
-                except (ValueError, OSError):
-                    pass
-            return None
-
-        return progress
 
     def delete(self, name: str) -> None:
         """
