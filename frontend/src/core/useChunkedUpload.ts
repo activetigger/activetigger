@@ -80,11 +80,15 @@ export function useChunkedUpload() {
         }
 
         const finish = await withRetry(() =>
-          axios.post(`${url}/upload/finish`, {}, {
-            params: { upload_id: uploadId },
-            headers,
-            signal: ctrl.signal,
-          }),
+          axios.post(
+            `${url}/upload/finish`,
+            {},
+            {
+              params: { upload_id: uploadId },
+              headers,
+              signal: ctrl.signal,
+            },
+          ),
         );
         return { uploadId, filename: finish.data.filename as string };
       } catch (error) {

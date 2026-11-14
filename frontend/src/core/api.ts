@@ -118,13 +118,14 @@ const authMiddleware: Middleware = {
 };
 
 // the GENES Fortinet appliance deterministically drops Firefox's empty-body
-// POSTs over HTTP/2 (HEADERS+END_STREAM, no DATA frame); always send a body
+// POSTs over HTTP/2 (HEADERS+END_STREAM, no DATA frame); always send a body.
+// JSON null (not {}) so FastAPI treats optional body models as absent
 const emptyBodyMiddleware: Middleware = {
   onRequest: ({ request }) => {
     if (request.method !== 'GET' && request.method !== 'HEAD' && request.body === null) {
       const headers = new Headers(request.headers);
       headers.set('Content-Type', 'application/json');
-      return new Request(request, { body: '{}', headers });
+      return new Request(request, { body: 'null', headers });
     }
     return undefined;
   },

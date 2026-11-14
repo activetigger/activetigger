@@ -1,9 +1,9 @@
-# Build the frontend from the refacto-tasks branch and publish it at the root
+# Build the frontend from main  branch and publish it at the root
 # of the gh-pages branch, REPLACING the production frontend, to test it live.
-# Manual only: run "Build the frontend (refacto-tasks)" from the Actions tab.
+# Manual only: run "Build the frontend (main)" from the Actions tab.
 # To go back to the production frontend, run "Build the frontend" (deployed branch).
 
-name: Build the frontend (refacto-tasks)
+name: Build the frontend (main)
 
 on:
   workflow_dispatch:
@@ -23,7 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: refacto-tasks
+          ref: main
 
       - name: Setup Node.js environment
         uses: actions/setup-node@v4
