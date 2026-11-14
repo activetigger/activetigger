@@ -380,6 +380,10 @@ class ImageModels:
         model_path = Path(model.path)
         new_path = model_path.parent / model_path.name.replace(former_name, new_name)
         os.rename(model_path, new_path)
+        # exported archive follows the model name
+        static = Path(config.data_path) / "projects" / "static" / self.project_slug
+        if (static / f"{former_name}.tar.gz").exists():
+            os.rename(static / f"{former_name}.tar.gz", static / f"{new_name}.tar.gz")
 
     def add(self, element: LMComputing) -> None:
         """
