@@ -19,13 +19,13 @@ class ComputeProjectionCallback(TaskCallback):
     # load the coordinates written by the worker and register the projection
     @classmethod
     def on_complete_task_specific(
-        cls, task_id: str, task_result: ComputeProjectionTaskResult, project_manager, process
+        cls, task_id: str, task_result: ComputeProjectionTaskResult, project_manager, computing_task
     ):
         coordinates_path = Path(task_result["coordinates_path"])
         try:
             coordinates = pd.read_parquet(coordinates_path)
             # restore the integer axis column names expected by Projections.add
             coordinates.columns = [int(c) if c.isdigit() else c for c in coordinates.columns]
-            project_manager.projections.add(process, coordinates)
+            project_manager.projections.add(computing_task, coordinates)
         finally:
             coordinates_path.unlink(missing_ok=True)

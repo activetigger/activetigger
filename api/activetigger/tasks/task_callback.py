@@ -6,7 +6,7 @@ from typing import Any
 
 from task_manager.utils import TaskFailureReportForCallback
 
-from activetigger.datamodels import ProcessComputing
+from activetigger.datamodels import EventsModel, ProcessComputing, TaskComputing
 from activetigger.orchestrator import get_orchestrator
 from activetigger.project import Project
 from activetigger.tasks.task_manager_client import was_stopped
@@ -51,29 +51,34 @@ class TaskCallback(ABC):
             project_slug = cls.get_project_slug(task_result)
             project_manager = cls.get_project_manager(project_slug, task_id)
             # copy: clean_process mutates the list
-            for process in list(project_manager.computing):
-                if process.unique_id == task_id:
-                    # always drop the entry, a raising hook must not leave a stale process
-                    try:
-                        cls.on_complete_task_specific(
-                            task_id, task_result, project_manager, process
-                        )
-                    except Exception as ex:
-                        # surface the error to the user instead of a 500 the worker would retry
-                        print(f"Error in {process.kind} callback {task_id}: {ex}")
-                        project_manager.errors.add(f"Error in {process.kind} : {ex}")
-                        # a creation is only cleaned by the orchestrator loop on "error"
-                        if project_slug in orchestrator.project_creation_ongoing:
-                            project_manager.status = "error"
-                    finally:
-                        project_manager.clean_process(process)
+            # always drop the entry, a raising hook must not leave a stale process
+            try:
+                computing_task = orchestrator.__computing_tasks_by_project[project_slug][task_id]
+                cls.on_complete_task_specific(task_id, task_result, project_manager, computing_task)
+                events = (
+                    EventsModel(events=task_result["events"]) if "events" in task_result else None
+                )
+
+            except Exception as ex:
+                # surface the error to the user instead of a 500 the worker would retry
+                print(f"Error in {computing_task.kind} callback {task_id}: {ex}")
+                project_manager.errors.add(f"Error in {computing_task.kind} : {ex}")
+                # a creation is only cleaned by the orchestrator loop on "error"
+                if project_slug in orchestrator.project_creation_ongoing:
+                    project_manager.status = "error"
+            finally:
+                orchestrator.on_task_end(task_id, project_slug, events)
         finally:
             orchestrator.callbacks_in_progress.discard(task_id)
 
     @classmethod
     @abstractmethod
     def on_complete_task_specific(
-        cls, task_id: str, task_result: Any, project_manager: Project, process: ProcessComputing
+        cls,
+        task_id: str,
+        task_result: Any,
+        project_manager: Project,
+        computing_task: TaskComputing,
     ) -> None:
         """Specific Callback for one task called by the generic on_complete method."""
         raise NotImplementedError
@@ -83,14 +88,11 @@ class TaskCallback(ABC):
         print(f"Error on {cls.task_name} task {task_id} in orchestrator {task_report}")
         orchestrator = get_orchestrator()
         orchestrator.callbacks_in_progress.add(task_id)
+        # cast first args as Task Input type
+        task_input = task_report.task_args[0]
+        project_slug = task_input["project_slug"]
         try:
-            # cast first args as Task Input type
-            task_input = task_report.task_args[0]
-            project_slug = task_input["project_slug"]
             project_manager = cls.get_project_manager(project_slug, task_id)
-            for e in list(project_manager.computing):
-                if e.unique_id == task_id:
-                    project_manager.clean_process(e)
             specific_message = cls.on_failure_task_specific(task_id, task_report, project_manager)
             # a stopped task is not an error (same as the in-process "cancelled" state)
             if "Process interrupted by user" in task_report.exception or was_stopped(task_id):
@@ -146,6 +148,7 @@ class TaskCallback(ABC):
                 )
         finally:
             orchestrator.callbacks_in_progress.discard(task_id)
+            orchestrator.on_task_end(task_id, project_slug)
 
     @classmethod
     @abstractmethod

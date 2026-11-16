@@ -9,7 +9,7 @@ from activetigger.functions import get_device, release_device_memory
 from pandas import DataFrame, Series
 from sentence_transformers import SentenceTransformer
 
-from task_manager.auto_callback_task import UpdateProgressMethod
+from task_manager.active_tigger_task import UpdateProgressMethod
 
 
 def encode_sbert(

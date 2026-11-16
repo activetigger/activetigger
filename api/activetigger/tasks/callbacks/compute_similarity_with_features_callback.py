@@ -19,6 +19,6 @@ class ComputeSimilarityWithFeaturesCallback(TaskCallback):
         task_id: str,
         task_result: ComputeSimilarityWithFeaturesTaskResult,
         project_manager,
-        process,
+        computing_task,
     ):
         pass

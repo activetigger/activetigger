@@ -5,14 +5,19 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Tuple, cast
+from typing import Any, Literal, Tuple, cast
 
 import pandas as pd
 from fastapi.responses import FileResponse
 from pandas import DataFrame
 from task_manager.celery import celery_app
-from task_manager.tasks.predict_bert_task import PredictBertTaskInput, predict_bert
+from task_manager.tasks.predict_bert_task import (
+    PredictBertTask,
+    PredictBertTaskInputs,
+    predict_bert,
+)
 from task_manager.tasks.train_bert_task import TrainBertTask, TrainBertTaskInputs, train_bert
+from task_manager.tasks.train_image_task import TrainImageTaskInputs
 
 import activetigger.functions as functions
 from activetigger.config import config
@@ -26,6 +31,8 @@ from activetigger.datamodels import (
     ModelInformationsModel,
     ModelScoresModel,
     StaticFileModel,
+    TaskComputing,
+    TaskToBeRun,
     TextDatasetModel,
 )
 from activetigger.db.languagemodels import ModelsService
@@ -33,11 +40,7 @@ from activetigger.db.manager import DatabaseManager
 from activetigger.errors import AlreadyExistsError, NotFoundError
 from activetigger.functions import get_model_metrics
 from activetigger.monitoring import Monitoring
-from activetigger.tasks.task_manager_client import (
-    enqueue_celery_task,
-    get_celery_task_progress,
-    new_task_id,
-)
+from activetigger.tasks.task_manager_client import get_celery_task_progress
 
 
 class LanguageModels:
@@ -238,7 +241,7 @@ class LanguageModels:
         class_balance: bool = False,
         class_min_freq: int = 1,
         exclude_labels: list[str] | None = None,
-    ) -> str:
+    ) -> TaskToBeRun:
         """
         Manage the training of a model from the API
         """
@@ -277,11 +280,13 @@ class LanguageModels:
         if training_kind not in ["multilabel", "multiclass"]:
             raise Exception("training_kind must be multilabel or multiclass")
         trainBertInputs = TrainBertTaskInputs(
+            user=user,
             path=self.path,
             path_df=Path(path_df),
             project_slug=project,
             model_name=model_name,
             training_kind=training_kind,
+            scheme=scheme,
             scheme_labels=scheme_labels,
             col_label=col_label,
             col_text=col_text,
@@ -295,41 +300,12 @@ class LanguageModels:
             class_min_freq=class_min_freq,
             use_dichotomization=use_dichotomization,
             label_for_dichotomization=label_for_dichotomization,
+            exclude_labels=exclude_labels or [],
         )
         # queue celery task
-        (unique_id, abortable) = new_task_id(train_bert)
 
         del df
-
-        # add flags in params
-        params = LMParametersDbModel(**params.model_dump(), exclude_labels=exclude_labels or [])
-
-        # registered before the send: a fast task calls back at once
-        self.monitoring.register_process(
-            process_name=unique_id, kind="train_languagemodel", parameters={}, user_name=user
-        )
-        print(TrainBertTask.name)
-        train_bert.name
-        enqueue_celery_task(
-            train_bert,
-            trainBertInputs,
-            self.computing,
-            LMComputing(
-                user=user,
-                model_name=model_name,
-                unique_id=unique_id,
-                time=current_date,
-                kind="train_bert",
-                training_kind=training_kind,
-                status="training",
-                scheme=scheme,
-                dataset=None,
-                params=params.model_dump(),
-                abortable_celery_task=abortable,
-                temp_files=[Path(path_df)],
-            ),
-        )
-        return unique_id
+        return {"name": TrainBertTask.name, "inputs": trainBertInputs}
 
     def clean_files_valid(self, model_name: str, dataset: str):
         """
@@ -343,7 +319,7 @@ class LanguageModels:
         if (self.path.joinpath(model_name).joinpath(f"metrics_{dataset}.json")).exists():
             os.remove(self.path.joinpath(model_name).joinpath(f"metrics_{dataset}.json"))
 
-    def start_predicting_process(
+    def get_predicting_task(
         self,
         project_slug: str,
         name: str,
@@ -354,14 +330,13 @@ class LanguageModels:
         scheme_labels: list[str],
         col_label: str | None = None,
         batch_size: int = 32,
-        status: str = "predicting",
         statistics: list | None = None,
         path_data: Path | None = None,
         external_dataset: None | TextDatasetModel = None,
         path_train: Path | None = None,
         path_valid: Path | None = None,
         path_test: Path | None = None,
-    ) -> str:
+    ) -> TaskToBeRun:
         """
         Start predicting process
         """
@@ -381,8 +356,9 @@ class LanguageModels:
             df.to_parquet(path_df)
 
         # queue celery task
-        inputs = PredictBertTaskInput(
+        inputs = PredictBertTaskInputs(
             path=self.path.joinpath(name),
+            user=user,
             path_df=path_df,
             project_slug=project_slug,
             model_name=name,
@@ -402,30 +378,9 @@ class LanguageModels:
             path_valid=path_valid,
             path_test=path_test,
         )
-        (unique_id, abortable) = new_task_id(predict_bert)
+
         del df
-        # registered before the send: a fast task calls back at once
-        self.monitoring.register_process(
-            process_name=unique_id, kind="predict_languagemodel", parameters={}, user_name=user
-        )
-        enqueue_celery_task(
-            predict_bert,
-            inputs,
-            self.computing,
-            LMComputing(
-                user=user,
-                model_name=name,
-                unique_id=unique_id,
-                time=datetime.now(timezone.utc),
-                kind="predict_bert",
-                training_kind=training_kind,
-                dataset=dataset,
-                status=status,
-                abortable_celery_task=abortable,
-                temp_files=[path_df] if path_df else [],
-            ),
-        )
-        return unique_id
+        return {"name": PredictBertTask.name, "inputs": inputs}
 
     def rename(self, former_name: str, new_name: str) -> None:
         """
@@ -519,32 +474,78 @@ class LanguageModels:
             path=f"{self.project_slug}/{name}.tar.gz",
         )
 
-    def add(self, element: LMComputing) -> None:
+    def add_training_result(
+        self,
+        computing_task: TaskComputing[TrainBertTaskInputs] | TaskComputing[TrainImageTaskInputs],
+    ):
+
+        # add flags in params
+        params = LMParametersDbModel(
+            **computing_task.inputs.params.model_dump(),
+            exclude_labels=computing_task.inputs.exclude_labels,
+        )
+        # add in database
+        self.language_models_service.add_model(
+            kind="bert",
+            name=computing_task.inputs.model_name,
+            user=computing_task.user,
+            project=self.project_slug,
+            scheme=computing_task.inputs.scheme or "default",
+            params=params.model_dump(),
+            path=str(self.path.joinpath(computing_task.inputs.model_name)),  # TODO refactor
+            status="trained",
+        )
+
+        # TODO test if the model is already compressed
+        self.language_models_service.set_model_params(
+            self.project_slug,
+            computing_task.inputs.model_name,
+            "compressed",
+            True,
+        )
+        print("Model trained")
+
+    def add_predicting_result(
+        self,
+        computing_task: TaskComputing[PredictBertTaskInputs],
+    ):
+        # update flag if prediction was on the annotable dataset
+        if computing_task.inputs.dataset == "annotable":
+            self.language_models_service.set_model_params(
+                self.project_slug,
+                computing_task.inputs.model_name,
+                flag="predicted",
+                value=True,
+            )
+        # update flag if prediction was on the complete dataset
+        if computing_task.inputs.dataset == "all":
+            self.language_models_service.set_model_params(
+                self.project_slug,
+                computing_task.inputs.model_name,
+                flag="predicted_all",
+                value=True,
+            )
+        # update flag if there is a prediction in an external dataset
+        if computing_task.inputs.dataset == "external":
+            self.language_models_service.set_model_params(
+                self.project_slug,
+                computing_task.inputs.model_name,
+                flag="predicted_external",
+                value=True,
+            )
+        print("Prediction finished")
+
+    def add(
+        self,
+        element: LMComputing,
+        status: Literal["training"] | Literal["testing"] | Literal["predicting"],
+    ) -> None:
         """
         Manage computed process for model
         """
-        if element.status == "training":
-            # add in database
-            self.language_models_service.add_model(
-                kind="bert",
-                name=element.model_name,
-                user=element.user,
-                project=self.project_slug,
-                scheme=element.scheme or "default",
-                params=element.params or {},
-                path=str(self.path.joinpath(element.model_name)),  # TODO refactor
-                status="trained",
-            )
 
-            # TODO test if the model is already compressed
-            self.language_models_service.set_model_params(
-                self.project_slug,
-                element.model_name,
-                "compressed",
-                True,
-            )
-            print("Model trained")
-        if element.status == "testing":
+        if status == "testing":
+            # TODO: looks like dead code
             self.language_models_service.set_model_params(
                 self.project_slug,
                 element.model_name,
@@ -552,32 +553,6 @@ class LanguageModels:
                 value=True,
             )
             print("Testing finished")
-        if element.status == "predicting":
-            # update flag if prediction was on the annotable dataset
-            if element.dataset == "annotable":
-                self.language_models_service.set_model_params(
-                    self.project_slug,
-                    element.model_name,
-                    flag="predicted",
-                    value=True,
-                )
-            # update flag if prediction was on the complete dataset
-            if element.dataset == "all":
-                self.language_models_service.set_model_params(
-                    self.project_slug,
-                    element.model_name,
-                    flag="predicted_all",
-                    value=True,
-                )
-            # update flag if there is a prediction in an external dataset
-            if element.dataset == "external":
-                self.language_models_service.set_model_params(
-                    self.project_slug,
-                    element.model_name,
-                    flag="predicted_external",
-                    value=True,
-                )
-            print("Prediction finished")
 
     def get_labels(self, model_name: str) -> list:
         """

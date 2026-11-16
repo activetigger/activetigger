@@ -56,7 +56,9 @@ def post_embeddings(
         df = pd.concat(series_list)
 
         # compute features
-        project.features.compute(
+
+        orchestrator = get_orchestrator()
+        task = project.features.compute_or_get_task(
             df,
             feature.name,
             feature.use_default_name,
@@ -64,7 +66,9 @@ def post_embeddings(
             feature.parameters,
             current_user.username,
         )
-        get_orchestrator().log_action(
+        if task is not None:
+            orchestrator.create_task(task["name"], task["inputs"])
+        orchestrator.log_action(
             current_user.username, f"COMPUTE FEATURE: {feature.type}", project.name
         )
     except (HTTPException, APIError, OverflowError):

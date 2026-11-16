@@ -3,19 +3,22 @@ from typing import TypedDict
 
 from pydantic import BaseModel
 
-from task_manager.auto_callback_task import AbortableAutoCallbackTask, QueueName
+from task_manager.active_tigger_task import AbortableActiveTiggerTask, QueueName
 from task_manager.celery import celery_app
+from task_manager.task_input import TaskInputs
+from task_manager.task_names import TaskNames
 from task_manager.tasks.compute_prompt_embedding import encode_prompt
 
 
-class ComputePromptEmbeddingTaskInput(BaseModel):
-    project_slug: str
+class ComputePromptEmbeddingTaskInputs(TaskInputs):
     prompt_id: str
     text: str
     model_name: str
     # feature kind: "sentence-embeddings" or "multimodal-embeddings"
     kind: str
     path_process: Path
+    feature_name: str
+    hf_name: str
 
 
 # Return type must be a dict, a BaseModel would not be serialized by Celery
@@ -25,8 +28,8 @@ class ComputePromptEmbeddingTaskResult(TypedDict):
     embedding: list[float]
 
 
-class ComputePromptEmbeddingTask(AbortableAutoCallbackTask):
-    name = "compute prompt embedding"
+class ComputePromptEmbeddingTask(AbortableActiveTiggerTask):
+    name: TaskNames = "compute_prompt_embedding"
     # loads the feature's sentence-transformer, possibly a large VL model
     queue = QueueName.GPU
 
@@ -39,7 +42,7 @@ class ComputePromptEmbeddingTask(AbortableAutoCallbackTask):
     pydantic=True,
 )
 def compute_prompt_embedding(
-    self: ComputePromptEmbeddingTask, inputs: ComputePromptEmbeddingTaskInput
+    self: ComputePromptEmbeddingTask, inputs: ComputePromptEmbeddingTaskInputs
 ) -> ComputePromptEmbeddingTaskResult:
 
     vec = encode_prompt(

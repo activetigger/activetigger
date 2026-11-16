@@ -5,15 +5,15 @@ from typing import Any, TypedDict
 import pandas as pd
 from pydantic import BaseModel
 
-from task_manager.auto_callback_task import AbortableAutoCallbackTask, QueueName
+from task_manager.active_tigger_task import AbortableActiveTiggerTask, QueueName
 from task_manager.celery import celery_app
+from task_manager.task_input import TaskInputs
+from task_manager.task_names import TaskNames
 from task_manager.tasks.compute_sbert import encode_sbert
 
 
-class ComputeSbertTaskInput(BaseModel):
+class ComputeSbertTaskInputs(TaskInputs):
     feature_name: str
-    username: str
-    project_slug: str
     texts_path: Path
     path_process: Path
     model: str
@@ -30,8 +30,8 @@ class ComputeSbertTaskResult(TypedDict):
     parameters: dict[str, Any]
 
 
-class ComputeSbertTask(AbortableAutoCallbackTask):
-    name = "compute sbert"
+class ComputeSbertTask(AbortableActiveTiggerTask):
+    name: TaskNames = "compute_sbert"
     # GPU task unless CPU_only mode
     queue = QueueName.GPU
 
@@ -43,7 +43,7 @@ class ComputeSbertTask(AbortableAutoCallbackTask):
     base=ComputeSbertTask,
     pydantic=True,
 )
-def compute_sbert(self: ComputeSbertTask, inputs: ComputeSbertTaskInput) -> ComputeSbertTaskResult:
+def compute_sbert(self: ComputeSbertTask, inputs: ComputeSbertTaskInputs) -> ComputeSbertTaskResult:
 
     texts = pd.read_pickle(inputs.texts_path)
     try:
@@ -62,13 +62,13 @@ def compute_sbert(self: ComputeSbertTask, inputs: ComputeSbertTaskInput) -> Comp
     emb.to_parquet(embeddings_path)
     return {
         "project_slug": inputs.project_slug,
-        "username": inputs.username,
+        "username": inputs.user,
         "embeddings_path": str(embeddings_path),
         "parameters": {
             "model": inputs.model,
             "name": inputs.feature_name,
             "kind": "sentence-embeddings",
-            "username": inputs.username,
+            "username": inputs.user,
             "max_length_tokens": inputs.max_tokens,
         },
     }

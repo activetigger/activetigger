@@ -300,9 +300,9 @@ def stop_process(
         raise HTTPException(status_code=400, detail="You must provide a unique_id or a kind")
     try:
         orchestrator = get_orchestrator()
-        if unique_id is not None:
+        if unique_id is not None and kind is None:
             test_rights(ServerAction.MANAGE_SERVER, current_user.username)
-            orchestrator.stop_process_by_process_id(unique_id, current_user.username)
+            orchestrator.stop_task(unique_id, project_slug)
         if project_slug is not None:
             # rights already checked
             orchestrator.stop_user_processes(current_user.username, project_slug, kind)

@@ -26,12 +26,12 @@ from typing import Any, cast
 import numpy as np
 import pandas as pd
 from task_manager.tasks.compute_prompt_embedding_task import (
-    ComputePromptEmbeddingTaskInput,
-    compute_prompt_embedding,
+    ComputePromptEmbeddingTask,
+    ComputePromptEmbeddingTaskInputs,
 )
 from task_manager.tasks.compute_similarity_with_features_task import (
-    ComputeSimilarityWithFeaturesTaskInput,
-    compute_similarity_with_features,
+    ComputeSimilarityWithFeaturesTask,
+    ComputeSimilarityWithFeaturesTaskInputs,
 )
 
 from activetigger.datamodels import (
@@ -39,13 +39,13 @@ from activetigger.datamodels import (
     PromptOutModel,
     PromptSimilarityComputing,
     PromptsProjectStateModel,
+    TaskComputing,
+    TaskToBeRun,
 )
 from activetigger.errors import InvalidInputError, NotFoundError
 from activetigger.features import Features
 from activetigger.tasks.task_manager_client import (
-    enqueue_celery_task,
     get_celery_task_progress,
-    new_task_id,
 )
 
 # Feature kinds whose vectors live in a space we can encode a text query into.
@@ -128,7 +128,7 @@ class Prompts:
 
     # ---------- public API ----------
 
-    def add(self, text: str, feature_name: str, user: str) -> str:
+    def get_compute_task(self, text: str, feature_name: str, user: str) -> TaskToBeRun:
         """
         Enqueue the encoding of a new prompt on the GPU worker. Returns the
         task unique_id. The parquet row is appended by `receive_result`
@@ -140,45 +140,32 @@ class Prompts:
         model_name, kind = self._resolve_feature(feature_name)
         prompt_id = str(uuid.uuid4())
 
-        (unique_id, abortable) = new_task_id(compute_prompt_embedding)
-        task_inputs = ComputePromptEmbeddingTaskInput(
+        task_inputs = ComputePromptEmbeddingTaskInputs(
+            user=user,
             project_slug=self.project_slug,
             prompt_id=prompt_id,
             text=text,
             model_name=model_name,
             kind=kind,
             path_process=self.path_dir,
+            feature_name=feature_name,
+            hf_name=model_name,
         )
+        return {"name": ComputePromptEmbeddingTask.name, "inputs": task_inputs}
 
-        enqueue_celery_task(
-            compute_prompt_embedding,
-            task_inputs,
-            self.computing,
-            PromptComputing(
-                user=user,
-                unique_id=unique_id,
-                time=datetime.now(timezone.utc),
-                kind="prompt",
-                prompt_id=prompt_id,
-                text=text,
-                feature_name=feature_name,
-                hf_name=model_name,
-                abortable_celery_task=abortable,
-            ),
-        )
-        return unique_id
-
-    def receive_result(self, computing: PromptComputing, vec: np.ndarray) -> None:
+    def receive_result(
+        self, computing: TaskComputing[ComputePromptEmbeddingTaskInputs], vec: np.ndarray
+    ) -> None:
         """Persist a completed prompt to prompts.parquet."""
         with self._lock:
             # The feature might have been deleted while the task was queued.
-            if not self.features.exists(computing.feature_name):
+            if not self.features.exists(computing.inputs.feature_name):
                 return
 
             vec = np.asarray(vec).reshape(-1)
             row: dict[str, Any] = {
-                "text": computing.text,
-                "feature_name": computing.feature_name,
+                "text": computing.inputs.text,
+                "feature_name": computing.inputs.feature_name,
                 "user": computing.user,
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }
@@ -186,7 +173,9 @@ class Prompts:
                 row[f"dim_{i}"] = float(v)
 
             df = self._read()
-            new_row = pd.DataFrame([row], index=pd.Index([computing.prompt_id], name="prompt_id"))
+            new_row = pd.DataFrame(
+                [row], index=pd.Index([computing.inputs.prompt_id], name="prompt_id")
+            )
 
             # Align columns: existing rows may have fewer/more dim_* columns if
             # the feature changed. Union columns, fill missing with NaN.
@@ -349,7 +338,9 @@ class Prompts:
             return series
         return self.features.concat_split_column("text", dataset=dataset)
 
-    def compute_similarity(self, prompt_id: str, dataset: str, username: str) -> str | None:
+    def get_compute_similarity_task(
+        self, prompt_id: str, dataset: str, username: str
+    ) -> TaskToBeRun | None:
         """
         Compute the cosine similarity between a prompt and every element
         of the requested dataset, persisted as a parquet exportable from
@@ -391,8 +382,9 @@ class Prompts:
         # TODO: create a group of task for each spec in specs
 
         # add a chord to the group to handle results
-        (unique_id, abortable) = new_task_id(compute_similarity_with_features)
-        task_inputs = ComputeSimilarityWithFeaturesTaskInput(
+
+        task_inputs = ComputeSimilarityWithFeaturesTaskInputs(
+            user=username,
             project_slug=self.project_slug,
             prompt_id=prompt_id,
             dataset=dataset,
@@ -404,26 +396,11 @@ class Prompts:
             prompt_vector=[float(x) for x in np.asarray(prompt_vec).reshape(-1)],
             path_output=self._similarity_dir(prompt_id),
             file_name=f"similarity_{dataset}.parquet",
+            text=str(prompt_row["text"]),
+            feature_name=feature_name,
         )
 
-        enqueue_celery_task(
-            compute_similarity_with_features,
-            task_inputs,
-            self.computing,
-            PromptSimilarityComputing(
-                user=username,
-                unique_id=unique_id,
-                time=datetime.now(timezone.utc),
-                kind="prompt_similarity",
-                abortable_celery_task=abortable,
-                temp_files=[data_path],
-                prompt_id=prompt_id,
-                text=str(prompt_row["text"]),
-                feature_name=feature_name,
-                dataset=dataset,
-            ),
-        )
-        return unique_id
+        return {"name": ComputeSimilarityWithFeaturesTask.name, "inputs": task_inputs}
 
     def export_similarity(
         self, prompt_id: str, dataset: str, format: str, col_id: str | None

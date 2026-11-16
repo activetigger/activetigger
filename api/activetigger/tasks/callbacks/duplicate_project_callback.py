@@ -64,7 +64,7 @@ class DuplicateProjectCallback(TaskCallback):
             shutil.rmtree(target_static_dir, ignore_errors=True)
 
     @classmethod
-    def on_complete_task_specific(cls, task_id, task_result, project_manager, process):
+    def on_complete_task_specific(cls, task_id, task_result, project_manager, computing_task):
         pass
 
     @classmethod

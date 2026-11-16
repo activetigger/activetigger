@@ -1,25 +1,25 @@
 import json
 import shutil
-from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
 from fastapi.responses import FileResponse
 from slugify import slugify
 from task_manager.tasks.compute_bertopic_task import (
+    ComputeBertopicTask,
     ComputeBertopicTaskInput,
-    compute_bertopic,
 )
 
 from activetigger.config import config
 from activetigger.datamodels import (
-    BertopicComputing,
     BERTopicDescriptionModel,
     BertopicOutModelParameters,
     BertopicParamsModel,
     BertopicProjectionData,
     BertopicProjectionNode,
     BertopicProjectStateModel,
+    TaskComputing,
+    TaskToBeRun,
     TopicsOutModel,
     TrainingState,
 )
@@ -28,11 +28,7 @@ from activetigger.db.manager import DatabaseManager
 from activetigger.errors import NotFoundError
 from activetigger.features import Features
 from activetigger.monitoring import Monitoring
-from activetigger.tasks.task_manager_client import (
-    enqueue_celery_task,
-    get_celery_task_progress,
-    new_task_id,
-)
+from activetigger.tasks.task_manager_client import get_celery_task_progress
 
 
 class Bertopic:
@@ -70,7 +66,7 @@ class Bertopic:
         with open(folder_path / "params.json", "r") as file:
             return json.load(file)
 
-    def compute(
+    def get_compute_task(
         self,
         path_data: Path,
         col_id: str | None,
@@ -78,7 +74,7 @@ class Bertopic:
         parameters: BertopicParamsModel,
         name: str,
         user: str,
-    ) -> str:
+    ) -> TaskToBeRun:
         """
         Compute BERTopic model.
 
@@ -101,6 +97,7 @@ class Bertopic:
         self._materialize_feature_embeddings(parameters)
 
         inputs = ComputeBertopicTaskInput(
+            user=user,
             path_bertopic=self.path,
             path_data=path_data,
             project_slug=self.project_slug,
@@ -111,48 +108,26 @@ class Bertopic:
             force_compute_embeddings=False,
             random_seed=config.random_seed,
         )
-        unique_id, abortable = new_task_id(compute_bertopic)
-        # registered before the send: a fast task calls back at once
-        self.monitoring.register_process(
-            process_name=unique_id, kind="fit_bertopic", parameters={}, user_name=user
-        )
-        enqueue_celery_task(
-            compute_bertopic,
-            inputs,
-            self.computing,
-            BertopicComputing(
-                user=user,
-                unique_id=unique_id,
-                abortable_celery_task=abortable,
-                name=name,
-                path_data=path_data,
-                col_id=col_id,
-                col_text=col_text,
-                parameters=parameters,
-                time=datetime.now(timezone.utc),
-                kind="bertopic",
-                force_compute_embeddings=False,
-            ),
-        )
-        return unique_id
 
-    def add(self, element: BertopicComputing) -> None:
+        return {"name": ComputeBertopicTask.name, "inputs": inputs}
+
+    def add(self, computing_task: TaskComputing[ComputeBertopicTaskInput]) -> None:
         """
         Register a computed BERTopic in the database (called once the
         task has completed). The params.json written by the task holds
         the full run description (parameters, columns, paths, timestamp)
         and becomes the row's parameters.
         """
-        model_path = self.path.joinpath("runs").joinpath(element.name)
+        model_path = self.path.joinpath("runs").joinpath(computing_task.inputs.name)
         try:
             params = self.get_params(model_path)
         except (OSError, json.JSONDecodeError):
-            params = {"bertopic_params": element.parameters.model_dump()}
+            params = {"bertopic_params": computing_task.inputs.parameters.model_dump()}
         self.models_service.add_model(
             kind="bertopic",
             project=self.project_slug,
-            name=element.name,
-            user=element.user,
+            name=computing_task.inputs.name,
+            user=computing_task.user,
             status="trained",
             scheme=None,
             params=params,

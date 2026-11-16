@@ -14,7 +14,7 @@ class GenerateCallCallback(TaskCallback):
     # every answer is in the jsonl checkpoint: insert them and drop the file
     @classmethod
     def on_complete_task_specific(
-        cls, task_id: str, task_result: GenerateCallTaskResult, project_manager, process
+        cls, task_id: str, task_result: GenerateCallTaskResult, project_manager, computing_task
     ):
         print(
             f"Generation {task_result['batch']} by {task_result['username']}: "

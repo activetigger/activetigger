@@ -1,12 +1,10 @@
 from typing import cast
 
 # use task specification to ensure name and return are in sync with task_manager
-from task_manager.tasks.train_ner_task import (
-    TrainNerTask,
-    TrainNerTaskResult,
-)
+from task_manager.tasks.train_ner_task import TrainNerTask, TrainNerTaskInputs, TrainNerTaskResult
 
-from activetigger.datamodels import EventsModel, LMComputing
+from activetigger.datamodels import EventsModel, LMComputing, TaskComputing
+from activetigger.project import Project
 
 # ensure the callback definition is what we expect by using the TaskCallback abstraction
 from activetigger.tasks.task_callback import TaskCallback
@@ -20,14 +18,16 @@ class TrainNerCallback(TaskCallback):
     # it will be executed from the orchestrator allowing using its dependencies (db and all)
     @classmethod
     def on_complete_task_specific(
-        cls, task_id: str, task_result: TrainNerTaskResult, project_manager, process
+        cls,
+        task_id: str,
+        task_result: TrainNerTaskResult,
+        project_manager: Project,
+        computing_task: TaskComputing[TrainNerTaskInputs],
     ):
         if project_manager.nermodels is None:
             raise Exception("NER models are not available for this project")
-        model = cast(LMComputing, process)
-        events = EventsModel(events=task_result["events"])
-        project_manager.nermodels.add(model)
-        project_manager.monitoring.close_process(model.unique_id, events)
+
+        project_manager.nermodels.add_train(computing_task)
 
     # a failed training must not leave a half-registered model in the database
     @classmethod

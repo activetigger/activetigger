@@ -5,15 +5,15 @@ from typing import Any, TypedDict
 import pandas as pd
 from pydantic import BaseModel
 
-from task_manager.auto_callback_task import AbortableAutoCallbackTask, QueueName
+from task_manager.active_tigger_task import AbortableActiveTiggerTask, QueueName
 from task_manager.celery import celery_app
+from task_manager.task_input import TaskInputs
+from task_manager.task_names import TaskNames
 from task_manager.tasks.compute_clip_imagexp import encode_clip
 
 
-class ComputeClipImagexpTaskInput(BaseModel):
+class ComputeClipImagexpTaskInputs(TaskInputs):
     feature_name: str
-    username: str
-    project_slug: str
     paths_path: Path
     path_process: Path
     # UI label stored in the feature parameters
@@ -32,8 +32,8 @@ class ComputeClipImagexpTaskResult(TypedDict):
     parameters: dict[str, Any]
 
 
-class ComputeClipImagexpTask(AbortableAutoCallbackTask):
-    name = "compute clip imagexp"
+class ComputeClipImagexpTask(AbortableActiveTiggerTask):
+    name: TaskNames = "compute_clip_imagexp"
     # GPU task unless CPU_only mode
     queue = QueueName.GPU
 
@@ -46,7 +46,7 @@ class ComputeClipImagexpTask(AbortableAutoCallbackTask):
     pydantic=True,
 )
 def compute_clip_imagexp(
-    self: ComputeClipImagexpTask, inputs: ComputeClipImagexpTaskInput
+    self: ComputeClipImagexpTask, inputs: ComputeClipImagexpTaskInputs
 ) -> ComputeClipImagexpTaskResult:
     paths = pd.read_pickle(inputs.paths_path)
     try:
@@ -64,13 +64,13 @@ def compute_clip_imagexp(
     emb.to_parquet(embeddings_path)
     return {
         "project_slug": inputs.project_slug,
-        "username": inputs.username,
+        "username": inputs.user,
         "embeddings_path": str(embeddings_path),
         "parameters": {
             "model": inputs.model,
             "name": inputs.feature_name,
             "kind": "image-embeddings",
-            "username": inputs.username,
+            "username": inputs.user,
             "batch_size": inputs.batch_size,
         },
     }

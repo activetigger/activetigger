@@ -28,13 +28,13 @@ from transformers import (
     AutoTokenizer,  # ty: ignore[possibly-missing-import]
 )
 
-from task_manager.auto_callback_task import UpdateProgressMethod
+from task_manager.active_tigger_task import UpdateProgressMethod
+from task_manager.task_input import TaskInputs
 from task_manager.tasks.train_ner import decode_spans, parse_spans
 
 
-class PredictNerTaskInput(BaseModel):
+class PredictNerTaskInputs(TaskInputs):
     path: Path
-    project_slug: str
     model_name: str
     dataset: str
     col_text: str
@@ -77,7 +77,7 @@ class PredictNer:
     def __init__(
         self,
         unique_id: str,
-        inputs: PredictNerTaskInput,
+        inputs: PredictNerTaskInputs,
         is_aborted: Callable[[], bool],
         update_progress: UpdateProgressMethod,
     ):

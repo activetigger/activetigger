@@ -2,17 +2,16 @@ from pathlib import Path
 from typing import TypedDict
 
 import pandas as pd
-from activetigger.datamodels import GenerationModel
-from pydantic import BaseModel
+from activetigger.datamodels import GenerationModel, TaskComputing
 
-from task_manager.auto_callback_task import AbortableAutoCallbackTask, QueueName
+from task_manager.active_tigger_task import AbortableActiveTiggerTask, QueueName
 from task_manager.celery import celery_app
+from task_manager.task_input import TaskInputs
+from task_manager.task_names import TaskNames
 from task_manager.tasks.generate_call import generate_call
 
 
-class GenerateCallTaskInput(BaseModel):
-    project_slug: str
-    username: str
+class GenerateCallTaskInputs(TaskInputs):
     dataset: str
     prompt_name: str
     prompt: str
@@ -35,9 +34,13 @@ class GenerateCallTaskResult(TypedDict):
     n_errors: int
 
 
-class GenerateCallTask(AbortableAutoCallbackTask):
-    name = "generation"
+class GenerateCallTask(AbortableActiveTiggerTask):
+    name: TaskNames = "generation"
     queue = QueueName.CPU
+
+    @classmethod
+    def clean_temp_files(cls, computing_task: TaskComputing[GenerateCallTaskInputs]):
+        computing_task.inputs.data_path.unlink(missing_ok=True)
 
 
 @celery_app.task(
@@ -48,7 +51,7 @@ class GenerateCallTask(AbortableAutoCallbackTask):
     pydantic=True,
 )
 def generate_call_task(
-    self: GenerateCallTask, inputs: GenerateCallTaskInput
+    self: GenerateCallTask, inputs: GenerateCallTaskInputs
 ) -> GenerateCallTaskResult:
     task_id = self.request.id
     batch = f"{inputs.dataset}_{inputs.prompt_name}_{task_id}"
@@ -60,7 +63,7 @@ def generate_call_task(
             GenerationModel(**payload["model"]),
             inputs.prompt,
             inputs.cols_context,
-            inputs.username,
+            inputs.user,
             inputs.project_slug,
             batch,
             path_jsonl=path_jsonl,
@@ -72,7 +75,7 @@ def generate_call_task(
         inputs.data_path.unlink(missing_ok=True)
     return {
         "project_slug": inputs.project_slug,
-        "username": inputs.username,
+        "username": inputs.user,
         "batch": batch,
         "jsonl_path": str(path_jsonl),
         "n_results": n_results,

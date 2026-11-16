@@ -5,11 +5,11 @@ from typing import cast
 from celery import uuid
 from celery.contrib.abortable import AbortableAsyncResult, AbortableTask
 from celery.result import AsyncResult
-from task_manager.auto_callback_task import QueueName, TaskProgressState
+from task_manager.active_tigger_task import QueueName
 from task_manager.celery import celery_app
 from task_manager.stop_signal import redis_client, request_stop, stop_requested
 
-from activetigger.datamodels import ProcessComputing
+from activetigger.datamodels import ProcessComputing, TaskProgressState
 
 # collections of utils methods to interact with celery task_manager
 
@@ -21,6 +21,7 @@ def new_task_id(task) -> tuple[str, bool]:
     return uuid(), isinstance(task, AbortableTask)
 
 
+# TODO: remove this method to be replace by orchestrator.stop_task
 def enqueue_celery_task(
     task,
     inputs,

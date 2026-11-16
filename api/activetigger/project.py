@@ -13,14 +13,14 @@ import pandas as pd
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse
 from pandas import DataFrame
-from task_manager.tasks.add_evalset_task import AddEvalsetTaskInput, add_evalset_task
+from task_manager.tasks.add_evalset_task import AddEvalsetTask, AddEvalsetTaskInputs
 from task_manager.tasks.compute_features_from_specs import FeatureSpec
-from task_manager.tasks.create_project_task import CreateProjectTaskInput, create_project_task
-from task_manager.tasks.extend_features_task import ExtendFeaturesTaskInput, extend_features
-from task_manager.tasks.generate_call_task import GenerateCallTaskInput, generate_call_task
+from task_manager.tasks.create_project_task import CreateProjectTask, CreateProjectTaskInput
+from task_manager.tasks.extend_features_task import ExtendFeaturesTask, ExtendFeaturesTaskInputs
+from task_manager.tasks.generate_call_task import GenerateCallTask, GenerateCallTaskInputs
 from task_manager.tasks.update_datasets_task import (
-    UpdateDatasetsTaskInput,
-    update_datasets_task,
+    UpdateDatasetsTask,
+    UpdateDatasetsTaskInputs,
 )
 
 from activetigger.bertopic_manager import Bertopic
@@ -47,7 +47,6 @@ from activetigger.datamodels import (
     PredictedLabel,
     ProcessComputing,
     ProjectBaseModel,
-    ProjectCreatingModel,
     ProjectDescriptionModel,
     ProjectionOutModel,
     ProjectionOutModelNode,
@@ -56,8 +55,8 @@ from activetigger.datamodels import (
     ProjectUpdateModel,
     QuickModelInModel,
     StaticFileModel,
+    TaskToBeRun,
     TextDatasetModel,
-    UpdateComputing,
 )
 from activetigger.db.manager import DatabaseManager
 from activetigger.errors import AlreadyExistsError, InvalidInputError, NotFoundError
@@ -84,8 +83,6 @@ from activetigger.prompts import BINDABLE_FEATURE_KINDS, Prompts
 from activetigger.quickmodels import QuickModels
 from activetigger.schemes import Schemes
 from activetigger.tasks.task_manager_client import (
-    enqueue_celery_task,
-    new_task_id,
     stop_celery_task,
 )
 from activetigger.users import Users
@@ -369,7 +366,9 @@ class Project:
                 if jsonl_path.stem.removeprefix("gen_") not in running:
                     self._recover_generations_from_jsonl(jsonl_path)
 
-    def start_project_creation(self, params: ProjectBaseModel, username: str, path: Path) -> None:
+    def get_project_creation_task(
+        self, params: ProjectBaseModel, username: str, path: Path
+    ) -> TaskToBeRun:
         """
         Start the project creation task on a worker
         """
@@ -383,14 +382,12 @@ class Project:
 
         # add the dedicated directory
         params.dir = path.joinpath(self.project_slug)
-
         # start a create project task
-        (unique_id, abortable) = new_task_id(create_project_task)
         task_inputs = CreateProjectTaskInput(
             image_project=False,
             project_slug=self.project_slug,
             params=params,
-            username=username,
+            user=username,
             data_all=config.data_all,
             train_file=config.train_file,
             valid_file=config.valid_file,
@@ -398,25 +395,11 @@ class Project:
             features_file=config.features_file,
             random_seed=params.seed,
         )
+        return {"name": CreateProjectTask.name, "inputs": task_inputs}
 
-        # Update the register
-        enqueue_celery_task(
-            create_project_task,
-            task_inputs,
-            self.computing,
-            ProjectCreatingModel(
-                user=username,
-                project_slug=self.project_slug,
-                unique_id=unique_id,
-                time=datetime.now(timezone.utc),
-                kind="create_project",
-                abortable_celery_task=abortable,
-            ),
-        )
-
-    def start_project_creation_imagexp(
+    def get_project_creation_imagexp_task(
         self, params: ProjectBaseModel, username: str, path: Path
-    ) -> None:
+    ) -> TaskToBeRun:
         """
         Experimental: enqueue creation of an image project.
         See docs/image-projects-strategy.md.
@@ -425,12 +408,11 @@ class Project:
         params.dir = path.joinpath(self.project_slug)
 
         # start a create project task
-        (unique_id, abortable) = new_task_id(create_project_task)
         task_inputs = CreateProjectTaskInput(
             image_project=True,
             project_slug=self.project_slug,
             params=params,
-            username=username,
+            user=username,
             data_all=config.data_all,
             train_file=config.train_file,
             valid_file=config.valid_file,
@@ -438,21 +420,7 @@ class Project:
             features_file=config.features_file,
             random_seed=params.seed,
         )
-
-        # Update the register
-        enqueue_celery_task(
-            create_project_task,
-            task_inputs,
-            self.computing,
-            ProjectCreatingModel(
-                user=username,
-                project_slug=self.project_slug,
-                unique_id=unique_id,
-                time=datetime.now(timezone.utc),
-                kind="create_project",
-                abortable_celery_task=abortable,
-            ),
-        )
+        return {"name": CreateProjectTask.name, "inputs": task_inputs}
 
     def finish_project_creation(
         self,
@@ -576,7 +544,7 @@ class Project:
         if Path(f"{config.data_path}/projects/static/{self.name}").exists():
             shutil.rmtree(f"{config.data_path}/projects/static/{self.name}")
 
-    def drop_evalset(self, dataset: str) -> None:
+    def drop_evalset(self, dataset: str) -> TaskToBeRun | None:
         """
         Clean all the test data of the project
         - remove the file
@@ -609,15 +577,15 @@ class Project:
         )
         # add reload
         self.data.load_dataset("all")
-        self._shrink_features_after_evalset_drop(dataset)
+        return self._get_shrink_features_after_evalset_drop_task(dataset)
 
-    def add_evalset(
+    def get_add_evalset_task(
         self,
         dataset,
         evalset: EvalSetDataModel | EvalSetImageModel,
         username: str,
         project_slug: str,
-    ) -> str | None:
+    ) -> TaskToBeRun:
         """
         Add a eval dataset (test or valid)
         """
@@ -678,42 +646,22 @@ class Project:
         index_path = self.params.dir.joinpath(f"evalset_index_{uuid.uuid4().hex}.pkl")
         index_path.write_bytes(pickle.dumps(self.data.get_full_id().index))
         try:
-            (unique_id, abortable) = new_task_id(add_evalset_task)
-            task_inputs = AddEvalsetTaskInput(
+            task_inputs = AddEvalsetTaskInputs(
                 project_slug=project_slug,
                 dataset=dataset,
-                username=username,
+                user=username,
                 path_project=self.params.dir,
                 index_path=index_path,
                 **payload,
             )
+            return {"name": AddEvalsetTask.name, "inputs": task_inputs}
         except Exception:
             index_path.unlink(missing_ok=True)
             raise
-        enqueue_celery_task(
-            add_evalset_task,
-            task_inputs,
-            self.computing,
-            ProcessComputing(
-                user=username,
-                unique_id=unique_id,
-                time=datetime.now(timezone.utc),
-                kind=f"add_evalset_{dataset}",
-                abortable_celery_task=abortable,
-                # worker outputs a lost callback would leave behind
-                temp_files=[
-                    index_path,
-                    self.params.dir.joinpath(f"eval_{dataset}_{unique_id}.parquet"),
-                    self.params.dir.joinpath(f"add_evalset_{unique_id}.json"),
-                ],
-            ),
-        )
-        if username == "root":
-            return unique_id
-        else:
-            return None
 
-    def _refresh_features_after_evalset(self, eval_dataset: str, username: str) -> None:
+    def _refresh_features_after_evalset(
+        self, eval_dataset: str, username: str
+    ) -> TaskToBeRun | None:
         """
         Bring the features file to the new train+valid+test shape after a
         new eval set has been loaded. If every existing feature can be
@@ -737,14 +685,14 @@ class Project:
             try:
                 data = self.features.concat_split_column("text", eval_dataset)
                 specs, data_path = self.features.build_compute_specs(list(features_meta), data)
-                self._enqueue_extend_features(specs, data_path, eval_dataset, username)
-                return
+                return self._get_extend_features_task(specs, data_path, eval_dataset, username)
+
             except Exception as ex:
                 print(f"Cannot extend features for the new {eval_dataset} set: {ex}")
         self.features.reset_features_file()
         self.quickmodels.drop_models(which="all")
 
-    def _shrink_features_after_evalset_drop(self, eval_dataset: str) -> None:
+    def _get_shrink_features_after_evalset_drop_task(self, eval_dataset: str) -> TaskToBeRun | None:
         """
         Remove the dropped eval set's rows from the features file in a
         background task. Row removal needs no recomputation, so every
@@ -756,7 +704,7 @@ class Project:
             self.quickmodels.drop_models(which="all")
             return
         data_path = self.features.pickle_for_task(pd.Series(dtype=object))
-        self._enqueue_extend_features([], data_path, eval_dataset, "system")
+        return self._get_extend_features_task([], data_path, eval_dataset, "system")
 
     def _kill_running_feature_extensions(self) -> bool:
         running = [c for c in self.computing if getattr(c, "kind", None) == "extend_features"]
@@ -766,15 +714,15 @@ class Project:
             self.clean_process(c)
         return bool(running)
 
-    def _enqueue_extend_features(
+    def _get_extend_features_task(
         self, specs: list[FeatureSpec], data_path: Path, eval_dataset: str, username: str
-    ) -> None:
+    ) -> TaskToBeRun:
         eval_data = getattr(self.data, eval_dataset)
         new_index = eval_data.index if eval_data is not None else pd.Index([])
         indexes_path = self.features.pickle_for_task((new_index, self.data.index.index))
         try:
-            (unique_id, abortable) = new_task_id(extend_features)
-            task_inputs = ExtendFeaturesTaskInput(
+            task_inputs = ExtendFeaturesTaskInputs(
+                user=username,
                 project_slug=self.name,
                 specs=specs,
                 data_path=data_path,
@@ -785,23 +733,11 @@ class Project:
                 path_features=self.features.path_features,
                 eval_dataset=eval_dataset,
             )
+            return {"name": ExtendFeaturesTask.name, "inputs": task_inputs}
         except Exception:
             data_path.unlink(missing_ok=True)
             indexes_path.unlink(missing_ok=True)
             raise
-        enqueue_celery_task(
-            extend_features,
-            task_inputs,
-            self.computing,
-            ExtendFeaturesComputing(
-                user=username,
-                unique_id=unique_id,
-                time=datetime.now(timezone.utc),
-                kind="extend_features",
-                abortable_celery_task=abortable,
-                temp_files=[data_path, indexes_path],
-            ),
-        )
 
     def _recover_features_after_failed_extension(self) -> None:
         """
@@ -813,13 +749,13 @@ class Project:
         self.features.reset_features_file()
         self.quickmodels.drop_models(which="all")
 
-    def train_quickmodel(
+    def get_train_quickmodel_task(
         self,
         quickmodel: QuickModelInModel,
         username: str,
         n_min_annotated: int = 3,
         retrain: bool = False,
-    ) -> str:
+    ) -> TaskToBeRun:
         """
         Build all the information before calling the quickmodel computation
         retrain : if True, will delete the previous model with the same name
@@ -875,7 +811,7 @@ class Project:
 
         col_features = list(df_features.columns)
         data = pd.concat([df_scheme, df_features], axis=1)
-        process_id = self.quickmodels.compute_quickmodel(
+        task = self.quickmodels.get_quickmodel_task(
             project_slug=self.params.project_slug,
             user=username,
             scheme=quickmodel.scheme,
@@ -894,9 +830,9 @@ class Project:
             retrain=retrain,
             texts=self.data.train["text"] if self.data.train is not None else None,
         )
-        return process_id
+        return task
 
-    def retrain_quickmodel(self, name: str, scheme: str, username: str) -> None:
+    def get_retrain_quickmodel_task(self, name: str, scheme: str, username: str) -> TaskToBeRun:
         """
         Retrain a quickmodel
         """
@@ -915,7 +851,7 @@ class Project:
             exclude_labels=model.exclude_labels,
             test_size=model.test_size,
         )
-        self.train_quickmodel(quickmodel, username, retrain=True)
+        return self.get_train_quickmodel_task(quickmodel, username, retrain=True)
 
     def get_model_prediction(self, type: str, name: str) -> pd.DataFrame:
         """
@@ -1977,7 +1913,7 @@ class Project:
             shutil.copyfile(path_origin, path_target)
         return StaticFileModel(name=name, path=f"{project_slug}/{name}")
 
-    def start_update_project(self, update: ProjectUpdateModel, username: str) -> None:
+    def get_update_project_task(self, update: ProjectUpdateModel, username: str) -> TaskToBeRun:
         """
         Update project parameters
 
@@ -2000,29 +1936,16 @@ class Project:
             self.params.language = update.language
 
         # for other updates, send a task to a worker; the callback saves the params
-        (unique_id, abortable) = new_task_id(update_datasets_task)
-        task_inputs = UpdateDatasetsTaskInput(
+
+        task_inputs = UpdateDatasetsTaskInputs(
+            user=username,
             project_slug=self.name,
             path_project=self.params.dir,
             cols_context=self.params.cols_context,
             cols_text=self.params.cols_text,
             update=update,
         )
-        enqueue_celery_task(
-            update_datasets_task,
-            task_inputs,
-            self.computing,
-            UpdateComputing(
-                unique_id=unique_id,
-                user=username,
-                time=datetime.now(timezone.utc),
-                kind="update_datasets",
-                update=update,
-                abortable_celery_task=abortable,
-                # provisional train file a lost callback would leave behind
-                temp_files=[self.params.dir.joinpath(f"train_{unique_id}.parquet")],
-            ),
-        )
+        return {"name": UpdateDatasetsTask.name, "inputs": task_inputs}
 
     def start_languagemodel_training(self, bert: BertModelModel, username: str) -> None:
         """
@@ -2100,7 +2023,7 @@ class Project:
             exclude_labels=bert.exclude_labels,
         )
 
-    def start_ner_training(self, ner: NerModelModel, username: str) -> None:
+    def get_ner_training(self, ner: NerModelModel, username: str) -> TaskToBeRun:
         """
         Launch fine-tuning of a token-classification model for a span scheme.
 
@@ -2129,7 +2052,7 @@ class Project:
         if scheme.kind != "span":
             raise Exception(f"NER training requires a span scheme (got kind: {scheme.kind})")
 
-        self.nermodels.start_training_process(
+        return self.nermodels.get_training_task(
             name=ner.name,
             project=self.name,
             user=username,
@@ -2153,7 +2076,7 @@ class Project:
         model_name: str,
         external_dataset: TextDatasetModel | None = None,
         batch_size: int = 16,
-    ) -> None:
+    ) -> TaskToBeRun:
         """
         Launch a NER prediction run. Mirrors start_language_model_prediction
         but drops training_kind dispatch (always "ner") and routes to
@@ -2195,7 +2118,7 @@ class Project:
         if scheme.kind != "span":
             raise Exception(f"NER prediction requires a span scheme (got kind: {scheme.kind})")
 
-        self.nermodels.start_predicting_process(
+        return self.nermodels.start_predicting_process(
             project_slug=self.name,
             name=model_name,
             user=username,
@@ -2212,7 +2135,7 @@ class Project:
             path_test=path_test,
         )
 
-    def start_image_model_training(self, image: ImageModelModel, username: str) -> None:
+    def start_image_model_training(self, image: ImageModelModel, username: str) -> TaskToBeRun:
         """
         Launch an image-classification fine-tuning process for an image project.
         """
@@ -2254,7 +2177,7 @@ class Project:
             min_freq = df["labels"].value_counts().sort_values().min()
             df = df.groupby("labels").sample(n=min_freq)
 
-        self.imagemodels.start_training_process(
+        return self.imagemodels.get_training_task(
             name=image.name,
             project=self.name,
             user=username,
@@ -2282,7 +2205,7 @@ class Project:
         scheme_name: str,
         model_name: str,
         batch_size: int = 32,
-    ) -> None:
+    ) -> TaskToBeRun:
         """
         Launch an image-classification prediction process.
 
@@ -2323,7 +2246,7 @@ class Project:
                 f"Prediction does not support this type of scheme (kind: {training_kind})"
             )
         scheme_labels = scheme_.labels
-        self.imagemodels.start_predicting_process(
+        task = self.imagemodels.get_predicting_task(
             project_slug=self.name,
             name=model_name,
             user=username,
@@ -2339,8 +2262,10 @@ class Project:
             path_valid=path_valid,
             path_test=path_test,
         )
+        # maybe we could use orchestrator.create_trask direclty here ?
+        return task
 
-    def start_language_model_prediction(
+    def get_language_model_prediction_task(
         self,
         username: str,
         dataset_type: str,
@@ -2349,7 +2274,7 @@ class Project:
         model_name: str,
         external_dataset: TextDatasetModel | None = None,
         batch_size: int = 32,
-    ) -> None:
+    ) -> TaskToBeRun:
         """
         Fetch all necessary data and launch a prediction process
         """
@@ -2390,7 +2315,7 @@ class Project:
                 f"Prediction does not support this type of scheme (kind: {training_kind})"
             )
         scheme_labels = scheme_.labels
-        self.languagemodels.start_predicting_process(
+        return self.languagemodels.get_predicting_task(
             project_slug=self.name,
             name=model_name,
             user=username,
@@ -2408,14 +2333,14 @@ class Project:
             path_test=path_test,
         )
 
-    def start_quick_model_prediction(
+    def get_quick_model_prediction_task(
         self,
         username: str,
         dataset_type: str,
         datasets: list[str] | None,
         scheme_name: str,
         model_name: str,
-    ) -> None:
+    ) -> TaskToBeRun:
         """
         Fetch all necessary data and launch prediction process
         """
@@ -2433,7 +2358,7 @@ class Project:
         df["text"] = labels["text"]
 
         # add the data for the labels
-        self.quickmodels.start_predicting_process(
+        return self.quickmodels.start_predicting_process(
             name=model_name,
             username=username,
             df=df,
@@ -2445,7 +2370,7 @@ class Project:
             col_text="text",
         )
 
-    def start_generation(self, request: GenerationRequest, username: str) -> None:
+    def get_generation_task(self, request: GenerationRequest, username: str) -> TaskToBeRun:
         """
         Start a generation process
         """
@@ -2464,10 +2389,9 @@ class Project:
             pickle.dumps({"data": extract, "model": GenerationModel(**model.__dict__).model_dump()})
         )
         try:
-            (unique_id, abortable) = new_task_id(generate_call_task)
-            task_inputs = GenerateCallTaskInput(
+            task_inputs = GenerateCallTaskInputs(
                 project_slug=self.name,
-                username=username,
+                user=username,
                 dataset=request.dataset,
                 prompt_name=prompt_name,
                 prompt=request.prompt,
@@ -2476,28 +2400,11 @@ class Project:
                 data_path=data_path,
                 path_process=self.params.dir,
             )
+            return {"name": GenerateCallTask.name, "inputs": task_inputs}
+
         except Exception:
             data_path.unlink(missing_ok=True)
             raise
-
-        enqueue_celery_task(
-            generate_call_task,
-            task_inputs,
-            self.computing,
-            GenerationComputing(
-                unique_id=unique_id,
-                prompt_name=prompt_name,
-                user=username,
-                project=self.name,
-                model_id=request.model_id,
-                number=request.n_batch,
-                dataset=request.dataset,
-                time=datetime.now(timezone.utc),
-                kind="generation",
-                abortable_celery_task=abortable,
-                temp_files=[data_path],
-            ),
-        )
 
     def clean_process(self, e: ProcessComputing) -> None:
         """

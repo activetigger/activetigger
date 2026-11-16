@@ -13,6 +13,6 @@ class PredictMLCallback(TaskCallback):
     # directory and read on demand: nothing else to persist on completion
     @classmethod
     def on_complete_task_specific(
-        cls, task_id: str, task_result: PredictMLTaskResult, project_manager, process
+        cls, task_id: str, task_result: PredictMLTaskResult, project_manager, computing_task
     ):
         pass

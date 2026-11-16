@@ -18,12 +18,16 @@ class ComputeLexicometricsCallback(TaskCallback):
     # load the statistics written by the worker and store them on the project
     @classmethod
     def on_complete_task_specific(
-        cls, task_id: str, task_result: ComputeLexicometricsTaskResult, project_manager, process
+        cls,
+        task_id: str,
+        task_result: ComputeLexicometricsTaskResult,
+        project_manager,
+        computing_task,
     ):
         statistics_path = Path(task_result["statistics_path"])
         try:
             with open(statistics_path) as f:
                 results = json.load(f)
-            project_manager.lexicometrics.add(process, results)
+            project_manager.lexicometrics.add(computing_task, results)
         finally:
             statistics_path.unlink(missing_ok=True)

@@ -2,16 +2,17 @@ import json
 from pathlib import Path
 from typing import Any, TypedDict
 
+from activetigger.datamodels import LexicometricsParametersModel
 from pydantic import BaseModel
 
-from task_manager.auto_callback_task import AbortableAutoCallbackTask, QueueName
+from task_manager.active_tigger_task import AbortableActiveTiggerTask, QueueName
 from task_manager.celery import celery_app
+from task_manager.task_input import TaskInputs
+from task_manager.task_names import TaskNames
 from task_manager.tasks.compute_lexicometrics import compute_lexicometrics
 
 
-class ComputeLexicometricsTaskInput(BaseModel):
-    project_slug: str
-    username: str
+class ComputeLexicometricsTaskInputs(TaskInputs):
     # project directory holding the train file
     path_data: Path
     train_file: str = "train.parquet"
@@ -24,6 +25,7 @@ class ComputeLexicometricsTaskInput(BaseModel):
     tfidf_n_words_per_doc: int = 10
     tfidf_min_term_freq: int = 5
     tfidf_max_documents: int = 10000
+    parameters: LexicometricsParametersModel
 
 
 # Return type must be a dict, a BaseModel would not be serialized by Celery
@@ -34,8 +36,8 @@ class ComputeLexicometricsTaskResult(TypedDict):
     statistics_path: str
 
 
-class ComputeLexicometricsTask(AbortableAutoCallbackTask):
-    name = "compute lexicometrics"
+class ComputeLexicometricsTask(AbortableActiveTiggerTask):
+    name: TaskNames = "compute_lexicometrics"
     # sklearn + tokenizer counting, never uses the GPU
     queue = QueueName.CPU
 
@@ -48,7 +50,7 @@ class ComputeLexicometricsTask(AbortableAutoCallbackTask):
     pydantic=True,
 )
 def compute_lexicometrics_task(
-    self: ComputeLexicometricsTask, inputs: ComputeLexicometricsTaskInput
+    self: ComputeLexicometricsTask, inputs: ComputeLexicometricsTaskInputs
 ) -> ComputeLexicometricsTaskResult:
     statistics: dict[str, Any] = compute_lexicometrics(
         inputs.path_data,
@@ -70,6 +72,6 @@ def compute_lexicometrics_task(
         json.dump(statistics, f)
     return {
         "project_slug": inputs.project_slug,
-        "username": inputs.username,
+        "username": inputs.user,
         "statistics_path": str(statistics_path),
     }

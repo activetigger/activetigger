@@ -28,7 +28,6 @@ from activetigger.datamodels import (
     LexicometricsModel,
     ProjectAuthsModel,
     ProjectBaseModel,
-    ProjectCreatingModel,
     ProjectDescriptionModel,
     ProjectStateModel,
     ProjectUpdateModel,
@@ -39,7 +38,6 @@ from activetigger.errors import APIError
 from activetigger.functions import slugify
 from activetigger.orchestrator import get_orchestrator
 from activetigger.project import Project
-from activetigger.tasks.task_manager_client import get_celery_task_progress
 from activetigger.uploads import get_upload_staging
 
 router = APIRouter(tags=["projects"])
@@ -114,12 +112,14 @@ def compute_lexicometrics(
     """
     test_rights(ProjectAction.ADD, current_user.username, project.project_slug)
     try:
-        project.lexicometrics.compute(
+        task = project.lexicometrics.get_compute_task(
             project_slug=project.name,
             username=current_user.username,
             language=project.params.language,
         )
-        get_orchestrator().log_action(
+        orchestrator = get_orchestrator()
+        orchestrator.create_task(task["name"], task["inputs"])
+        orchestrator.log_action(
             current_user.username, "COMPUTE LEXICOMETRICS", project.project_slug
         )
         return WaitingModel(detail="Lexicometrics are computing")
@@ -231,8 +231,10 @@ def update_project(
     """
     test_rights(ProjectAction.UPDATE, current_user.username, project.project_slug)
     try:
-        project.start_update_project(update, current_user.username)
-        get_orchestrator().log_action(
+        orchestrator = get_orchestrator()
+        task = project.get_update_project_task(update, current_user.username)
+        orchestrator.create_task(task["name"], task["inputs"])
+        orchestrator.log_action(
             current_user.username,
             f"INFO UPDATE PROJECT: {project.project_slug}",
             project.project_slug,
@@ -308,30 +310,18 @@ def get_project_status(
     try:
         orchestrator = get_orchestrator()
         slug = slugify(project_name)
-        # if project is being duplicated (filesystem copy still running, or
-        # done but DB clone not yet finalized by the update loop)
-        if slug in orchestrator.project_duplication_ongoing:
-            return "duplicating"
-        # if project is in creation
-        if slug in orchestrator.project_creation_ongoing:
-            # Try to read creation progress for image projects
-            project = orchestrator.project_creation_ongoing[slug]
-            creation_tasks = [t for t in project.computing if isinstance(t, ProjectCreatingModel)]
-            if len(creation_tasks) > 0:
-                # normally we should only have one
-                creation_task = creation_tasks[0]
-                creation_progress = get_celery_task_progress(creation_task.unique_id)
-                if creation_progress:
-                    return f"creating:{creation_progress['progress']}"
-                return "creating"
+        project_status = orchestrator.check_project_status(slug)
+
+        if project_status in ["duplicating", "creating", "not existing"]:
+            return project_status
+
         # if creation failed, return the error (consumed once)
         if slug in orchestrator.creation_errors:
             error_msg = orchestrator.creation_errors.pop(slug)
             return f"error: {error_msg}"
-        elif orchestrator.exists(project_name):
-            return "existing"
-        else:
-            return "not existing"
+        # we could return up or down here
+        return "existing"
+
     except (HTTPException, APIError, OverflowError):
         raise
     except Exception as e:
@@ -349,8 +339,11 @@ def delete_evalset(
     """
     test_rights(ProjectAction.UPDATE, current_user.username, project.project_slug)
     try:
-        project.drop_evalset(dataset=dataset)
-        get_orchestrator().log_action(
+        task = project.drop_evalset(dataset=dataset)
+        orchestrator = get_orchestrator()
+        if task is not None:
+            orchestrator.create_task(task["name"], task["inputs"])
+        orchestrator.log_action(
             current_user.username, f"DELETE EVALSET {dataset}", project.project_slug
         )
     except (HTTPException, APIError, OverflowError):
@@ -396,11 +389,20 @@ def add_testdata(
         evalset.labels_filename = labels_target.name
 
     try:
-        id = project.add_evalset(dataset, evalset, current_user.username, project.project_slug)
-        get_orchestrator().log_action(
+        task = project.get_add_evalset_task(
+            dataset, evalset, current_user.username, project.project_slug
+        )
+        orchestrator = get_orchestrator()
+        task_id = orchestrator.create_task(task["name"], task["inputs"])
+        orchestrator.log_action(
             current_user.username, f"ADD EVALSET {dataset}", project.project_slug
         )
-        return id
+        # copied from project.get_add_evalset_task but I don't understand such a conditional return
+        if current_user.username == "root":
+            return task_id
+        else:
+            return None
+
     except (HTTPException, APIError, OverflowError):
         raise
     except Exception as e:

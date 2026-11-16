@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from pydantic import BaseModel
 
 
@@ -5,3 +7,4 @@ from pydantic import BaseModel
 class TaskInputs(BaseModel):
     project_slug: str
     user: str
+    time: datetime = datetime.now(timezone.utc)

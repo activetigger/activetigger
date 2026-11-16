@@ -18,11 +18,12 @@ from activetigger.datamodels import PromptInModel, PromptOutModel, UserInDBModel
 from activetigger.errors import APIError
 from activetigger.orchestrator import get_orchestrator
 from activetigger.project import Project
+from activetigger.prompts import Prompts
 
 router = APIRouter(tags=["prompts"])
 
 
-def _require_prompts(project: Project):
+def _require_prompts(project: Project) -> Prompts:
     if project.prompts is None:
         raise HTTPException(
             status_code=400,
@@ -41,13 +42,15 @@ def post_prompt(
     test_rights(ProjectAction.ADD, current_user.username, project.name)
     prompts = _require_prompts(project)
     try:
-        unique_id = prompts.add(prompt.text, prompt.feature_name, current_user.username)
-        get_orchestrator().log_action(
+        task = prompts.get_compute_task(prompt.text, prompt.feature_name, current_user.username)
+        orchestrator = get_orchestrator()
+        task_id = orchestrator.create_task(task["name"], task["inputs"])
+        orchestrator.log_action(
             current_user.username,
             f"ADD PROMPT: {prompt.feature_name}",
             project.name,
         )
-        return {"unique_id": unique_id}
+        return {"unique_id": task_id}
     except (HTTPException, APIError, OverflowError):
         raise
     except Exception as e:
@@ -86,13 +89,16 @@ def compute_prompt_similarity(
     test_rights(ProjectAction.ADD, current_user.username, project.name)
     prompts = _require_prompts(project)
     try:
-        unique_id = prompts.compute_similarity(prompt_id, dataset, current_user.username)
-        get_orchestrator().log_action(
-            current_user.username,
-            f"COMPUTE PROMPT SIMILARITY: {prompt_id} on {dataset}",
-            project.name,
-        )
-        return {"unique_id": unique_id}
+        task = prompts.get_compute_similarity_task(prompt_id, dataset, current_user.username)
+        if task is not None:
+            orchestrator = get_orchestrator()
+            unique_id = orchestrator.create_task(task["name"], task["inputs"])
+            orchestrator.log_action(
+                current_user.username,
+                f"COMPUTE PROMPT SIMILARITY: {prompt_id} on {dataset}",
+                project.name,
+            )
+        return {"unique_id": unique_id or None}
     except (HTTPException, APIError, OverflowError):
         raise
     except Exception as e:

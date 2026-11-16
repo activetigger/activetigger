@@ -14,7 +14,7 @@ from transformers import (
     AutoTokenizer,  # ty: ignore[possibly-missing-import]
 )
 
-from task_manager.auto_callback_task import UpdateProgressMethod
+from task_manager.active_tigger_task import UpdateProgressMethod
 
 
 def _load_base_model_name(model_path: Path) -> str:

@@ -4,8 +4,9 @@ from typing import TypedDict
 from activetigger.datamodels import PrepareSplitModel
 from pydantic import BaseModel
 
-from task_manager.auto_callback_task import AbortableAutoCallbackTask, QueueName
+from task_manager.active_tigger_task import AbortableActiveTiggerTask, QueueName
 from task_manager.celery import celery_app
+from task_manager.task_names import TaskNames
 from task_manager.tasks.prepare_dataset import prepare_dataset
 
 
@@ -24,8 +25,8 @@ class PrepareDatasetTaskResult(TypedDict):
     result_path: str
 
 
-class PrepareDatasetTask(AbortableAutoCallbackTask):
-    name = "prepare dataset"
+class PrepareDatasetTask(AbortableActiveTiggerTask):
+    name: TaskNames = "prepare_dataset"
     # default queue; the dispatcher sends wtpsplit runs to the GPU queue
     queue = QueueName.CPU
 

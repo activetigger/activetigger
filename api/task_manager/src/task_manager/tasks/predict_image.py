@@ -32,7 +32,8 @@ from transformers import (
     AutoModelForImageClassification,  # ty: ignore[possibly-missing-import]
 )
 
-from task_manager.auto_callback_task import UpdateProgressMethod
+from task_manager.active_tigger_task import UpdateProgressMethod
+from task_manager.task_input import TaskInputs
 
 # Cap PIL's maximum decoded pixel count to ~64 megapixels. Without this a
 # small attacker-supplied JPEG can decompress to several GB and OOM the
@@ -111,7 +112,7 @@ class _ImagePredictDataset(Dataset[torch.Tensor]):
         return out["pixel_values"].squeeze(0)
 
 
-class PredictImageTaskInput(BaseModel):
+class PredictImageTaskInputs(TaskInputs):
     path: Path
     project_slug: str
     model_name: str
@@ -154,7 +155,7 @@ class PredictImage:
     def __init__(
         self,
         unique_id: str,
-        inputs: PredictImageTaskInput,
+        inputs: PredictImageTaskInputs,
         is_aborted: Callable[[], bool],
         update_progress: UpdateProgressMethod,
     ):

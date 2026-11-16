@@ -2,23 +2,25 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 import pandas as pd
+from activetigger.datamodels import ProjectionParametersModel, TaskComputing
 from pydantic import BaseModel
 
-from task_manager.auto_callback_task import AbortableAutoCallbackTask, QueueName
+from task_manager.active_tigger_task import AbortableActiveTiggerTask, QueueName
 from task_manager.celery import celery_app
+from task_manager.task_input import TaskInputs
+from task_manager.task_names import TaskNames
 from task_manager.tasks.compute_projection import compute_projection
 
 
-class ComputeProjectionTaskInput(BaseModel):
+class ComputeProjectionTaskInputs(TaskInputs):
     project_slug: str
     name: str
     # pickled features DataFrame, removed by the worker
     features_path: Path
     # directory receiving the coordinates parquet
     path_process: Path
-    method: str
-    parameters: dict[str, Any]
     normalize_features: bool = False
+    projection: ProjectionParametersModel
 
 
 # Return type must be a dict, a BaseModel would not be serialized by Celery
@@ -29,10 +31,14 @@ class ComputeProjectionTaskResult(TypedDict):
     coordinates_path: str
 
 
-class ComputeProjectionTask(AbortableAutoCallbackTask):
-    name = "compute projection"
+class ComputeProjectionTask(AbortableActiveTiggerTask):
+    name: TaskNames = "compute_projection"
     # umap/tsne on CPU (cuML picked up automatically when installed)
     queue = QueueName.CPU
+
+    @classmethod
+    def clean_temp_files(cls, computing_task: TaskComputing[ComputeProjectionTaskInputs]):
+        computing_task.inputs.features_path.unlink(missing_ok=True)
 
 
 @celery_app.task(
@@ -43,7 +49,7 @@ class ComputeProjectionTask(AbortableAutoCallbackTask):
     pydantic=True,
 )
 def compute_projection_task(
-    self: ComputeProjectionTask, inputs: ComputeProjectionTaskInput
+    self: ComputeProjectionTask, inputs: ComputeProjectionTaskInputs
 ) -> ComputeProjectionTaskResult:
     try:
         features = pd.read_pickle(inputs.features_path)
@@ -52,8 +58,8 @@ def compute_projection_task(
             raise Exception("Process interrupted by user")
         coordinates = compute_projection(
             features,
-            kind=inputs.method,
-            params=inputs.parameters,
+            kind=inputs.projection.method,
+            params=inputs.projection.parameters,
             normalize_features=inputs.normalize_features,
         )
     finally:

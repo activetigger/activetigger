@@ -3,34 +3,35 @@ import os
 import pickle
 import threading
 import uuid
-from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import pandas as pd
 import pyarrow.parquet as pq
 import regex
 from pandas import DataFrame, Series
+from task_manager.active_tigger_task import ActiveTiggerTask, QueueName
+from task_manager.task_input import TaskInputs
 from task_manager.tasks.compute_bert_embeddings_task import (
-    ComputeBertEmbeddingsTaskInput,
-    compute_bert_embeddings,
+    ComputeBertEmbeddingsTask,
+    ComputeBertEmbeddingsTaskInputs,
 )
 from task_manager.tasks.compute_clip_imagexp_task import (
-    ComputeClipImagexpTaskInput,
-    compute_clip_imagexp,
+    ComputeClipImagexpTask,
+    ComputeClipImagexpTaskInputs,
 )
-from task_manager.tasks.compute_dfm_task import ComputeDfmTaskInput, compute_dfm_task
+from task_manager.tasks.compute_dfm_task import ComputeDfmTask, ComputeDfmTaskInputs
 from task_manager.tasks.compute_fasttext_task import (
-    ComputeFasttextTaskInput,
-    compute_fasttext,
+    ComputeFasttextTask,
+    ComputeFasttextTaskInputs,
 )
 from task_manager.tasks.compute_features_from_specs import FeatureSpec
 from task_manager.tasks.compute_multimodal_task import (
-    ComputeMultimodalTaskInput,
-    compute_multimodal,
+    ComputeMultimodalTask,
+    ComputeMultimodalTaskInputs,
 )
-from task_manager.tasks.compute_sbert_task import ComputeSbertTaskInput, compute_sbert
+from task_manager.tasks.compute_sbert_task import ComputeSbertTask, ComputeSbertTaskInputs
 
 from activetigger.config import (
     DEFAULT_EMBEDDINGS_MODEL,
@@ -39,17 +40,13 @@ from activetigger.config import (
 )
 from activetigger.data import Data
 from activetigger.datamodels import (
-    FeatureComputing,
     FeatureDescriptionModelOut,
     FeaturesProjectStateModel,
+    TaskToBeRun,
 )
 from activetigger.db.projects import ProjectsService
 from activetigger.errors import AlreadyExistsError, InvalidInputError, NotFoundError
-from activetigger.tasks.task_manager_client import (
-    enqueue_celery_task,
-    get_celery_task_progress,
-    new_task_id,
-)
+from activetigger.tasks.task_manager_client import get_celery_task_progress
 
 # Experimental image projects: list of selectable image embedding models.
 # Each entry maps a UI label to (open_clip model name, pretrained tag).
@@ -690,7 +687,7 @@ class Features:
             pass
         return pretty_name
 
-    def compute(
+    def compute_or_get_task(
         self,
         df: pd.Series,
         name: str,
@@ -698,7 +695,7 @@ class Features:
         kind: str,
         parameters: dict,
         username: str,
-    ):
+    ) -> TaskToBeRun | None:
         """
         Compute new feature
         TODO : the parameters management is really bad
@@ -718,7 +715,6 @@ class Features:
         }:
             raise InvalidInputError("Kind not recognized")
 
-        abortable = None
         # pickles handed to the worker, removed with the process entry
         temp_files: list[Path] = []
 
@@ -787,7 +783,8 @@ class Features:
             return None
 
         # features computed on a worker
-        task, task_inputs = None, None
+        task: type[ActiveTiggerTask] | None = None
+        task_inputs: TaskInputs | None = None
 
         if kind == "sentence-embeddings":
             model = self.__sbert_choose_model(parameters)
@@ -802,10 +799,10 @@ class Features:
             df.to_pickle(texts_path)
             temp_files.append(texts_path)
             task, task_inputs = (
-                compute_sbert,
-                ComputeSbertTaskInput(
+                ComputeSbertTask,
+                ComputeSbertTaskInputs(
+                    user=username,
                     feature_name=name,
-                    username=username,
                     project_slug=self.project_slug,
                     texts_path=texts_path,
                     path_process=self.path_all.parent,
@@ -844,10 +841,10 @@ class Features:
             df.to_pickle(texts_path)
             temp_files.append(texts_path)
             task, task_inputs = (
-                compute_bert_embeddings,
-                ComputeBertEmbeddingsTaskInput(
+                ComputeBertEmbeddingsTask,
+                ComputeBertEmbeddingsTaskInputs(
                     feature_name=name,
-                    username=username,
+                    user=username,
                     project_slug=self.project_slug,  # generate an id to add it to computing
                     texts_path=texts_path,
                     path_process=self.path_all.parent,
@@ -884,10 +881,10 @@ class Features:
             df.to_pickle(paths_path)
             temp_files.append(paths_path)
             task, task_inputs = (
-                compute_clip_imagexp,
-                ComputeClipImagexpTaskInput(
+                ComputeClipImagexpTask,
+                ComputeClipImagexpTaskInputs(
                     feature_name=name,
-                    username=username,
+                    user=username,
                     project_slug=self.project_slug,
                     paths_path=paths_path,
                     path_process=self.path_all.parent,
@@ -920,10 +917,10 @@ class Features:
             df.to_pickle(paths_path)
             temp_files.append(paths_path)
             task, task_inputs = (
-                compute_multimodal,
-                ComputeMultimodalTaskInput(
+                ComputeMultimodalTask,
+                ComputeMultimodalTaskInputs(
                     feature_name=name,
-                    username=username,
+                    user=username,
                     project_slug=self.project_slug,
                     paths_path=paths_path,
                     path_process=self.path_all.parent,
@@ -948,10 +945,10 @@ class Features:
             df.to_pickle(texts_path)
             temp_files.append(texts_path)
             task, task_inputs = (
-                compute_fasttext,
-                ComputeFasttextTaskInput(
+                ComputeFasttextTask,
+                ComputeFasttextTaskInputs(
                     feature_name=name,
-                    username=username,
+                    user=username,
                     project_slug=self.project_slug,
                     texts_path=texts_path,
                     path_process=self.path_all.parent,
@@ -986,10 +983,10 @@ class Features:
             temp_files.append(texts_path)
             # NOTE: as before, the dfm_* UI values are recorded but the vectoriser runs with defaults
             task, task_inputs = (
-                compute_dfm_task,
-                ComputeDfmTaskInput(
+                ComputeDfmTask,
+                ComputeDfmTaskInputs(
                     feature_name=name,
-                    username=username,
+                    user=username,
                     project_slug=self.project_slug,
                     texts_path=texts_path,
                     path_process=self.path_all.parent,
@@ -999,24 +996,7 @@ class Features:
             )
 
         if task is not None and task_inputs is not None:
-            unique_id, abortable = new_task_id(task)
-            enqueue_celery_task(
-                task,
-                task_inputs,
-                self.computing,
-                FeatureComputing(
-                    unique_id=unique_id,
-                    kind="feature",
-                    parameters=parameters,
-                    type=kind,
-                    user=username,
-                    name=name,
-                    time=datetime.now(timezone.utc),
-                    abortable_celery_task=abortable,
-                    temp_files=temp_files,
-                ),
-            )
-            return None
+            return {"name": task.name, "inputs": task_inputs}
         raise ValueError("Error in the process")
 
     def pickle_for_task(self, obj: Any) -> Path:

@@ -17,7 +17,7 @@ class ComputeDfmCallback(TaskCallback):
     # it will be executed from the orchestrator allowing using its dependencies (db and all)
     @classmethod
     def on_complete_task_specific(
-        cls, task_id: str, task_result: ComputeDfmTaskResult, project_manager, process
+        cls, task_id: str, task_result: ComputeDfmTaskResult, project_manager, computing_task
     ):
         # load the matrix written by the worker and register it as a feature
         output_path = Path(task_result["features_path"])

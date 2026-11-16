@@ -1,10 +1,14 @@
+from activetigger.orchestrator import get_orchestrator
+from activetigger.datamodels import TaskComputing
+from activetigger.project import Project
 import json
 from pathlib import Path
 
 from fastapi.encoders import jsonable_encoder
 
 # use task specification to ensure name and return are in sync with task_manager
-from task_manager.tasks.add_evalset_task import AddEvalsetTask, AddEvalsetTaskResult
+from task_manager.tasks.add_evalset_task import AddEvalsetTask, AddEvalsetTaskResult, AddEvalsetTaskInputs
+)
 
 from activetigger.config import config
 
@@ -20,7 +24,7 @@ class AddEvalsetCallback(TaskCallback):
     # insert the labels, update the params and reload, all in one place
     @classmethod
     def on_complete_task_specific(
-        cls, task_id: str, task_result: AddEvalsetTaskResult, project_manager, process
+        cls, task_id: str, task_result: AddEvalsetTaskResult, project_manager:Project, computing_task:TaskComputing[AddEvalsetTaskInputs]
     ):
         eval_dataset = task_result["dataset"]
         user_name = task_result["username"]
@@ -52,7 +56,10 @@ class AddEvalsetCallback(TaskCallback):
         # load the new eval set before refreshing features so the
         # features file covers the full train+valid+test index
         project_manager.data.load_dataset(eval_dataset)
-        project_manager._refresh_features_after_evalset(eval_dataset, user_name)
+        subtask =project_manager._refresh_features_after_evalset(eval_dataset, user_name)
+        if subtask is not None:
+            orchestrator = get_orchestrator()
+            orchestrator.create_task(subtask['name'], subtask['inputs'])
 
     # the frontend matches the error on "add_evalset_<dataset>" (old in-process message)
     @classmethod

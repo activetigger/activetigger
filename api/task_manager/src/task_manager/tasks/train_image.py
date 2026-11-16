@@ -41,7 +41,8 @@ from transformers import (
     set_seed,
 )
 
-from task_manager.auto_callback_task import UpdateProgressMethod
+from task_manager.active_tigger_task import UpdateProgressMethod
+from task_manager.task_input import TaskInputs
 from task_manager.tasks.train_bert import (
     CustomTrainer,
     compute_class_weights,
@@ -118,12 +119,12 @@ def _open_image_rgb(path: str) -> Image.Image | None:
     return img
 
 
-class TrainImageTaskInput(BaseModel):
+class TrainImageTaskInputs(TaskInputs):
     path: Path
     path_df: Path
-    project_slug: str
     model_name: str
     training_kind: str
+    scheme: str
     scheme_labels: list[str]
     col_text: str  # holds the image path
     col_label: str
@@ -134,6 +135,7 @@ class TrainImageTaskInput(BaseModel):
     class_balance: bool = False
     class_min_freq: int = 1
     fp16: bool = True
+    exclude_labels: list[str]
 
 
 class TrainImage:
@@ -153,7 +155,7 @@ class TrainImage:
     def __init__(
         self,
         unique_id: str,
-        inputs: TrainImageTaskInput,
+        inputs: TrainImageTaskInputs,
         is_aborted: Callable[[], bool],
         update_progress: UpdateProgressMethod,
     ):

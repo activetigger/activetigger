@@ -43,7 +43,8 @@ from transformers import (
     set_seed,
 )
 
-from task_manager.auto_callback_task import UpdateProgressMethod
+from task_manager.active_tigger_task import UpdateProgressMethod
+from task_manager.task_input import TaskInputs
 from task_manager.tasks.train_bert import CustomLoggingCallback
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -306,7 +307,7 @@ def decode_spans(
     return spans
 
 
-class TrainNerTaskInput(BaseModel):
+class TrainNerTaskInputs(TaskInputs):
     path: Path
     path_df: Path
     project_slug: str
@@ -318,6 +319,7 @@ class TrainNerTaskInput(BaseModel):
     params: LMParametersModel
     test_size: float
     max_length: int = 512
+    scheme: str
 
 
 class TrainNer:
@@ -330,7 +332,7 @@ class TrainNer:
     def __init__(
         self,
         unique_id: str,
-        inputs: TrainNerTaskInput,
+        inputs: TrainNerTaskInputs,
         is_aborted: Callable[[], bool],
         update_progress: UpdateProgressMethod,
     ):

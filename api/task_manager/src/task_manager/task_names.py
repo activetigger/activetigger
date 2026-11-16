@@ -1,0 +1,42 @@
+from typing import Literal
+
+TaskNames = Literal[
+    "train_bert",
+    "predict_bert",
+    "train_image",
+    "predict_image",
+    "generation",
+    "predict_with_features",
+    "train_ner",
+    "predict_ner",
+    "extend_features",
+    "compute_bert_embeddings",
+    "compute_bertopic",
+    "add_evalset",
+    "compute_clip_imagexp",
+    "compute_dfm",
+    "compute_fasttext",
+    "compute_lexicometrics",
+    "compute_multimodal",
+    "compute_projection",
+    "compute_prompt_embedding",
+    "compute_sbert",
+    "compute_similarity_with features",
+    "create_project",
+    "duplicate_project",
+    "extend_features",
+    "predict_ml",
+    "prepare_dataset",
+    "train_ml",
+    "update_datasets",
+]
+
+
+# Meta categories ?
+#   "feature",
+#     "bertopic",
+#     "lexicometrics","projection",
+#     "predict_quickmodel",
+#     "prompt",
+#     "prompt_similarity",
+#     "train_quickmodel",

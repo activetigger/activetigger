@@ -2,16 +2,17 @@ from pathlib import Path
 from typing import TypedDict
 
 import pandas as pd
+from activetigger.datamodels import TaskComputing
 from pandas import DataFrame
-from pydantic import BaseModel
 
-from task_manager.auto_callback_task import AbortableAutoCallbackTask, QueueName
+from task_manager.active_tigger_task import AbortableActiveTiggerTask, QueueName
 from task_manager.celery import celery_app
+from task_manager.task_input import TaskInputs
+from task_manager.task_names import TaskNames
 from task_manager.tasks.compute_features_from_specs import FeatureSpec, compute_features_from_specs
 
 
-class ExtendFeaturesTaskInput(BaseModel):
-    project_slug: str
+class ExtendFeaturesTaskInputs(TaskInputs):
     specs: list[FeatureSpec]
     # pickled Series covering exactly the new eval rows (texts)
     data_path: Path
@@ -30,9 +31,14 @@ class ExtendFeaturesTaskResult(TypedDict):
     eval_dataset: str
 
 
-class ExtendFeaturesTask(AbortableAutoCallbackTask):
-    name = "extend features"
+class ExtendFeaturesTask(AbortableActiveTiggerTask):
+    name: TaskNames = "extend_features"
     queue = QueueName.CPU
+
+    @classmethod
+    def clean_temp_files(cls, computing_task: TaskComputing[ExtendFeaturesTaskInputs]):
+        computing_task.inputs.data_path.unlink(missing_ok=True)
+        computing_task.inputs.indexes_path.unlink(missing_ok=True)
 
 
 @celery_app.task(
@@ -43,7 +49,7 @@ class ExtendFeaturesTask(AbortableAutoCallbackTask):
     pydantic=True,
 )
 def extend_features(
-    self: ExtendFeaturesTask, inputs: ExtendFeaturesTaskInput
+    self: ExtendFeaturesTask, inputs: ExtendFeaturesTaskInputs
 ) -> ExtendFeaturesTaskResult:
     """
     Rewrite the features parquet after an eval set is imported (recompute the

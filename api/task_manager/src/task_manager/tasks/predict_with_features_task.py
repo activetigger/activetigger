@@ -5,18 +5,19 @@ from typing import TypedDict
 import numpy as np
 import pandas as pd
 from pandas import DataFrame
-from pydantic import BaseModel
 from scipy.stats import entropy
 
-from task_manager.auto_callback_task import AbortableAutoCallbackTask, QueueName
+from task_manager.active_tigger_task import AbortableActiveTiggerTask, QueueName
 from task_manager.celery import celery_app
+from task_manager.task_input import TaskInputs
+from task_manager.task_names import TaskNames
 from task_manager.tasks.compute_features_from_specs import (
     FeatureSpec,
     compute_features_from_specs,
 )
 
 
-class PredictWithFeaturesTaskInput(BaseModel):
+class PredictWithFeaturesTaskInputs(TaskInputs):
     project_slug: str
     # quickmodel name and dataset predicted, echoed to the callback
     name: str
@@ -40,8 +41,8 @@ class PredictWithFeaturesTaskResult(TypedDict):
     output_path: str
 
 
-class PredictWithFeaturesTask(AbortableAutoCallbackTask):
-    name = "predict with features"
+class PredictWithFeaturesTask(AbortableActiveTiggerTask):
+    name: TaskNames = "predict_with_features"
     # the embeddings may be recomputed here, but sklearn prediction is CPU
     queue = QueueName.CPU
 
@@ -82,7 +83,7 @@ def predict_proba(model, features: DataFrame) -> DataFrame:
     pydantic=True,
 )
 def predict_with_features(
-    self: PredictWithFeaturesTask, inputs: PredictWithFeaturesTaskInput
+    self: PredictWithFeaturesTask, inputs: PredictWithFeaturesTaskInputs
 ) -> PredictWithFeaturesTaskResult:
     try:
         data = pd.read_pickle(inputs.data_path)

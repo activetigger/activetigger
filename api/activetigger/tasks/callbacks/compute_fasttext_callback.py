@@ -20,7 +20,7 @@ class ComputeFasttextCallback(TaskCallback):
     # it will be executed from the orchestrator allowing using its dependencies (db and all)
     @classmethod
     def on_complete_task_specific(
-        cls, task_id: str, task_result: ComputeFasttextTaskResult, project_manager, process
+        cls, task_id: str, task_result: ComputeFasttextTaskResult, project_manager, computing_task
     ):
         # load the embeddings written by the worker and register them as a feature
         output_path = Path(task_result["features_path"])

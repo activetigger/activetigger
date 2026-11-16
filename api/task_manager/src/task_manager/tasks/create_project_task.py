@@ -20,11 +20,10 @@ from activetigger.functions_image import (
 )
 from celery import Task
 
-# from celery.utils.log import get_task_logger
-from pydantic import BaseModel
-
-from task_manager.auto_callback_task import AutoCallbackTask, QueueName, UpdateProgressMethod
+from task_manager.active_tigger_task import ActiveTiggerTask, QueueName, UpdateProgressMethod
 from task_manager.celery import celery_app
+from task_manager.task_input import TaskInputs
+from task_manager.task_names import TaskNames
 
 # TODO: is that necessary? we don't use csv lib in this code
 csv.field_size_limit(sys.maxsize)
@@ -40,9 +39,8 @@ class CreateProjectTaskResult(TypedDict):
 
 
 # input can be a BaseModel if pydantic is enabled in the Task decorator
-class CreateProjectTaskInput(BaseModel):
+class CreateProjectTaskInput(TaskInputs):
     image_project: bool
-    username: str
     project_slug: str
     params: ProjectBaseModel
     data_all: str
@@ -54,8 +52,8 @@ class CreateProjectTaskInput(BaseModel):
 
 
 # Task definition using the auto callback generic parent task class
-class CreateProjectTask(AutoCallbackTask):
-    name = "create project"
+class CreateProjectTask(ActiveTiggerTask):
+    name: TaskNames = "create_project"
     queue = QueueName.CPU
 
     def create_project(self: Task, props: CreateProjectTaskInput) -> CreateProjectTaskResult:
@@ -66,7 +64,7 @@ class CreateProjectTask(AutoCallbackTask):
         """
         # TODO us task logger
         # logger = get_task_logger(CreateProjectTask.name)
-        print(f"Start project creation {props.project_slug} for {props.username}")
+        print(f"Start project creation {props.project_slug} for {props.user}")
         # check if the directory already exists + file (should with the data)
         if props.params.dir is None or not props.params.dir.exists():
             print("The directory does not exist and should", props.params.dir)
@@ -348,7 +346,7 @@ class CreateProjectTask(AutoCallbackTask):
                 print(f"Warning: could not delete uploaded file: {e}")
 
         result = CreateProjectTaskResult(
-            username=props.username,
+            username=props.user,
             project=project_to_create.model_dump(mode="json"),
             import_trainset_path=str(import_trainset_path) if import_trainset_path else None,
             import_testset_path=str(import_testset_path) if import_testset_path else None,
@@ -367,7 +365,7 @@ class CreateProjectTask(AutoCallbackTask):
         Lives next to CreateProject to be easy to grep and eventually remove.
         """
 
-        print(f"Start queue image project {props.project_slug} for {props.username}")
+        print(f"Start queue image project {props.project_slug} for {props.user}")
 
         if props.params.dir is None or not props.params.dir.exists():
             raise Exception("The directory does not exist and should")
@@ -572,7 +570,7 @@ class CreateProjectTask(AutoCallbackTask):
             print(f"Warning: could not delete uploaded zip: {e}")
 
         result = CreateProjectTaskResult(
-            username=props.username,
+            username=props.user,
             project=project_to_create.model_dump(mode="json"),
             import_trainset_path=None,
             import_testset_path=None,

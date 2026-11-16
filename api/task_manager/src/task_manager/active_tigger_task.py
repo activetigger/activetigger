@@ -1,13 +1,14 @@
-from abc import abstractmethod
 from enum import StrEnum
 from typing import Generic, Protocol, TypedDict, TypeVar
 
+from activetigger.datamodels import TaskComputing
 from celery import Task
 from celery.contrib.abortable import ABORTED, AbortableTask
 from celery.states import REVOKED
 
 from task_manager.stop_signal import stop_requested
 from task_manager.task_input import TaskInputs
+from task_manager.task_names import TaskNames
 from task_manager.utils import (
     TaskFailureReportForCallback,
     TaskResultForCallback,
@@ -27,15 +28,10 @@ class UpdateProgressMethod(Protocol):
     def __call__(self, progress: float, label: str | None = None) -> None: ...
 
 
-class TaskProgressState(TypedDict):
-    progress: float
-    progress_label: str | None
-
-
 TInputs = TypeVar("TInputs", bound=TaskInputs)
 
 
-class AutoCallbackTask(Task, Generic[TInputs]):
+class ActiveTiggerTask(Task, Generic[TInputs]):
     """
     Base contract for tasks which need to callback the orchestrator.
 
@@ -44,11 +40,13 @@ class AutoCallbackTask(Task, Generic[TInputs]):
       - `on_success()` — send a callback request to orchestrator API
     """
 
+    name: TaskNames
+
     # Callback to orchestrator on task success
     def on_success(self, retval, task_id, args, kwargs):
         results = TaskResultForCallback(
             results=retval,
-            task_name=self.name,  # ty:ignore[invalid-argument-type]
+            task_name=self.name,
         )
         task_success_callback(task_id, results)
         return super().on_success(retval, task_id, args, kwargs)
@@ -59,7 +57,7 @@ class AutoCallbackTask(Task, Generic[TInputs]):
             exception=str(exc),
             task_args=args,
             task_kwargs=kwargs,
-            task_name=self.name,  # ty:ignore[invalid-argument-type]
+            task_name=self.name,
         )
         task_failure_callback(task_id, report)
         return super().on_failure(exc, task_id, args, kwargs, einfo)
@@ -70,11 +68,11 @@ class AutoCallbackTask(Task, Generic[TInputs]):
 
     # Clean temp files is used to remove temp files used to exchange data with orchestrator
     @classmethod
-    def clean_temp_files(cls, inputs: TInputs):
+    def clean_temp_files(cls, computing_task: TaskComputing[TInputs]):
         pass
 
 
-class AbortableAutoCallbackTask(AutoCallbackTask, AbortableTask, Generic[TInputs]):
+class AbortableActiveTiggerTask(ActiveTiggerTask, AbortableTask, Generic[TInputs]):
     def is_aborted(self, **kwargs) -> bool:
         task_id = kwargs.get("task_id", self.request.id)
         # the stop key is the reference: the task state is overwritten by update_progress

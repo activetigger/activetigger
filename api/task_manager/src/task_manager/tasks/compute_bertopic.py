@@ -25,7 +25,8 @@ from simplemma import lemmatize
 from sklearn.feature_extraction.text import CountVectorizer
 from slugify import slugify
 
-from task_manager.auto_callback_task import UpdateProgressMethod
+from task_manager.active_tigger_task import UpdateProgressMethod
+from task_manager.task_input import TaskInputs
 from task_manager.tasks.compute_sbert import encode_sbert
 
 nltk.download("stopwords", quiet=True)
@@ -197,7 +198,7 @@ class CustomLemmatizer:
         return out
 
 
-class ComputeBertopicTaskInput(BaseModel):
+class ComputeBertopicTaskInput(TaskInputs):
     path_bertopic: Path
     path_data: Path
     project_slug: str

@@ -7,7 +7,7 @@ import regex
 from pandas import DataFrame, Series
 from pydantic import BaseModel
 
-from task_manager.auto_callback_task import UpdateProgressMethod
+from task_manager.active_tigger_task import UpdateProgressMethod
 from task_manager.tasks.compute_bert_embeddings import encode_bert_embeddings
 from task_manager.tasks.compute_clip_imagexp import encode_clip
 from task_manager.tasks.compute_dfm import compute_dfm

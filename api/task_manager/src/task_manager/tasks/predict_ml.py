@@ -12,11 +12,12 @@ from activetigger.functions import get_metrics_multiclass
 from activetigger.monitoring import TaskTimer
 from pydantic import BaseModel
 
+from task_manager.task_input import TaskInputs
 
-class PredictMLTaskInput(BaseModel):
+
+class PredictMLTaskInputs(TaskInputs):
     path: Path  # model directory (model.pkl, training_data.parquet)
     path_df: Path
-    project_slug: str
     model_name: str
     col_dataset: str
     col_features: list[str]
@@ -41,7 +42,7 @@ class PredictMLMultiClass:
 
     kind = "predict_model"
 
-    def __init__(self, unique_id: str, inputs: PredictMLTaskInput, is_aborted: Callable[[], bool]):
+    def __init__(self, unique_id: str, inputs: PredictMLTaskInputs, is_aborted: Callable[[], bool]):
         self.path = inputs.path
         self.path_df = inputs.path_df
         self.file_name = inputs.file_name

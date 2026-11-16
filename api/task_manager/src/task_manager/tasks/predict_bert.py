@@ -34,12 +34,12 @@ from transformers import (
     AutoTokenizer,  # ty: ignore[possibly-missing-import]
 )
 
-from task_manager.auto_callback_task import UpdateProgressMethod
+from task_manager.active_tigger_task import UpdateProgressMethod
+from task_manager.task_input import TaskInputs
 
 
-class PredictBertTaskInput(BaseModel):
+class PredictBertTaskInputs(TaskInputs):
     path: Path
-    project_slug: str
     model_name: str
     dataset: str
     col_text: str
@@ -78,7 +78,7 @@ class PredictBertMultiClass:
     def __init__(
         self,
         unique_id: str,
-        inputs: PredictBertTaskInput,
+        inputs: PredictBertTaskInputs,
         is_aborted: Callable[[], bool],
         update_progress: UpdateProgressMethod,
     ):

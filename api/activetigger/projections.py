@@ -8,20 +8,20 @@ import pandas as pd
 from fastapi.responses import FileResponse
 from pandas import DataFrame
 from task_manager.tasks.compute_projection_task import (
-    ComputeProjectionTaskInput,
-    compute_projection_task,
+    ComputeProjectionTask,
+    ComputeProjectionTaskInputs,
 )
 
 from activetigger.datamodels import (
-    ProjectionComputing,
     ProjectionDataModel,
     ProjectionParametersModel,
     ProjectionsProjectStateModel,
+    TaskComputing,
+    TaskToBeRun,
 )
 from activetigger.db.languagemodels import ModelsService
 from activetigger.db.manager import DatabaseManager
 from activetigger.errors import AlreadyExistsError, NotFoundError
-from activetigger.tasks.task_manager_client import enqueue_celery_task, new_task_id
 
 
 class Projections:
@@ -89,16 +89,18 @@ class Projections:
         model = self.models_service.get_model(self.project_slug, name)
         return model is not None and model.kind == "projection"
 
-    def add(self, element: ProjectionComputing, results: DataFrame) -> None:
+    def add(
+        self, computing_task: TaskComputing[ComputeProjectionTaskInputs], results: DataFrame
+    ) -> None:
         """
         Register a computed projection: save the coordinates to a parquet
         file, then add the row in the database (file first, so a row
         never points to a missing file).
         """
-        name = element.params.name or element.name
+        name = computing_task.inputs.projection.name or computing_task.inputs.name
         # the file is keyed by the computation id to avoid deriving file
         # names from free-text projection names
-        file_path = self.path.joinpath(f"{element.unique_id}.parquet")
+        file_path = self.path.joinpath(f"{computing_task.id}.parquet")
         data = results.copy()
         # parquet requires string column names; axis columns are integers
         data.columns = data.columns.astype(str)
@@ -107,10 +109,13 @@ class Projections:
             kind="projection",
             project=self.project_slug,
             name=name,
-            user=element.user,
+            user=computing_task.user,
             status="trained",
             scheme=None,
-            params={"unique_id": element.unique_id, **element.params.model_dump()},
+            params={
+                "unique_id": computing_task.id,
+                **computing_task.inputs.projection.model_dump(),
+            },
             path=str(file_path),
         )
         self.loaded.pop(name, None)
@@ -126,14 +131,14 @@ class Projections:
         Path(model.path).unlink(missing_ok=True)
         self.loaded.pop(name, None)
 
-    def compute(
+    def get_compute_task(
         self,
         project_slug: str,
         username: str,
         projection: ProjectionParametersModel,
         features: DataFrame,
         normalize_features: bool = False,
-    ) -> None:
+    ) -> TaskToBeRun:
         """
         Launch the projection computation on the celery worker.
         """
@@ -151,36 +156,19 @@ class Projections:
         with open(features_path, "wb") as f:
             pickle.dump(features, f)
         try:
-            (unique_id, abortable) = new_task_id(compute_projection_task)
-            task_inputs = ComputeProjectionTaskInput(
+            task_inputs = ComputeProjectionTaskInputs(
+                user=username,
                 project_slug=project_slug,
                 name=projection.name,
                 features_path=features_path,
                 path_process=self.path,
-                method=projection.method,
-                parameters=projection.parameters,
+                projection=projection,
                 normalize_features=normalize_features,
             )
+            return {"name": ComputeProjectionTask.name, "inputs": task_inputs}
         except Exception:
             features_path.unlink(missing_ok=True)
             raise
-        enqueue_celery_task(
-            compute_projection_task,
-            task_inputs,
-            self.computing,
-            ProjectionComputing(
-                unique_id=unique_id,
-                name=projection.name,
-                user=username,
-                time=datetime.now(timezone.utc),
-                kind="projection",
-                method=projection.method,
-                params=projection,
-                normalize_features=normalize_features,
-                abortable_celery_task=abortable,
-                temp_files=[features_path],
-            ),
-        )
 
     def get(self, name: str) -> ProjectionDataModel | None:
         """

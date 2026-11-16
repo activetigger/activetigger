@@ -9,7 +9,7 @@ from activetigger.datamodels import PrepareSplitModel
 from activetigger.functions import concat_text_columns, get_device
 from wtpsplit import SaT
 
-from task_manager.auto_callback_task import UpdateProgressMethod
+from task_manager.active_tigger_task import UpdateProgressMethod
 
 WTPSPLIT_MODEL = "sat-3l-sm"
 WTPSPLIT_BATCH_CHARS = 500_000

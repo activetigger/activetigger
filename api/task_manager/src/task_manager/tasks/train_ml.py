@@ -14,6 +14,8 @@ from activetigger.config import config
 from activetigger.datamodels import (
     EventsDict,
     KnnParams,
+    LMParametersDbModel,
+    LMParametersModel,
     LogisticL1Params,
     LogisticL2Params,
     MLStatisticsModel,
@@ -35,9 +37,10 @@ from sklearn.model_selection import (
 from sklearn.naive_bayes import MultinomialNB
 from sklearn.neighbors import KNeighborsClassifier
 
+from task_manager.task_input import TaskInputs
 
-class TrainMLMultiClassInput(BaseModel):
-    project_slug: str
+
+class TrainMLMultiClassInputs(TaskInputs):
     path: Path
     path_df: Path
     col_Y: str
@@ -57,6 +60,7 @@ class TrainMLMultiClassInput(BaseModel):
     test_size: float = 0.2
     retrain: bool = False
     random_seed: int = 42
+    dataset: str = "train"
 
 
 # models for which balance_classes is not supported
@@ -132,7 +136,7 @@ class TrainMLMultiClass:
     kind = "train_ml"
 
     def __init__(
-        self, unique_id: str, inputs: TrainMLMultiClassInput, is_aborted: Callable[[], bool]
+        self, unique_id: str, inputs: TrainMLMultiClassInputs, is_aborted: Callable[[], bool]
     ):
         self.unique_id = unique_id
         self.random_seed = inputs.random_seed

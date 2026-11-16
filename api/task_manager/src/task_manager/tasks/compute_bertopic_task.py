@@ -1,7 +1,8 @@
 from activetigger.datamodels import EventsDict
 
-from task_manager.auto_callback_task import AbortableAutoCallbackTask, QueueName
+from task_manager.active_tigger_task import AbortableActiveTiggerTask, QueueName
 from task_manager.celery import celery_app
+from task_manager.task_names import TaskNames
 from task_manager.tasks.compute_bertopic import ComputeBertopic, ComputeBertopicTaskInput
 
 
@@ -10,8 +11,8 @@ class ComputeBertopicTaskResult(EventsDict):
     project_slug: str
 
 
-class ComputeBertopicTask(AbortableAutoCallbackTask):
-    name = "compute bertopic"
+class ComputeBertopicTask(AbortableActiveTiggerTask):
+    name: TaskNames = "compute_bertopic"
     # embeddings come from an existing feature; UMAP/HDBSCAN run on CPU
     queue = QueueName.CPU
 

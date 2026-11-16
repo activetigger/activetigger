@@ -13,7 +13,7 @@ os.environ.setdefault("PYTORCH_NVML_BASED_CUDA_CHECK", "1")
 from celery.signals import worker_process_init  # noqa: E402
 
 from task_manager import config  # noqa: E402
-from task_manager.auto_callback_task import QueueName  # noqa: E402
+from task_manager.active_tigger_task import QueueName  # noqa: E402
 from task_manager.celery import celery_app  # noqa: E402
 
 

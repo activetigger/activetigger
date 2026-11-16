@@ -3,12 +3,14 @@ from typing import Any, TypedDict
 
 from pydantic import BaseModel
 
-from task_manager.auto_callback_task import AbortableAutoCallbackTask, QueueName
+from task_manager.active_tigger_task import AbortableActiveTiggerTask, QueueName
 from task_manager.celery import celery_app
+from task_manager.task_input import TaskInputs
+from task_manager.task_names import TaskNames
 from task_manager.tasks.duplicate_project import duplicate_project_files
 
 
-class DuplicateProjectTaskInput(BaseModel):
+class DuplicateProjectTaskInputs(TaskInputs):
     # everything the callback needs to clone the DB rows, so it survives an API restart
     source_slug: str
     target_slug: str
@@ -31,8 +33,8 @@ class DuplicateProjectTaskResult(TypedDict):
     target_params: dict[str, Any]
 
 
-class DuplicateProjectTask(AbortableAutoCallbackTask):
-    name = "duplicate project"
+class DuplicateProjectTask(AbortableActiveTiggerTask):
+    name: TaskNames = "duplicate_project"
     queue = QueueName.CPU
 
 
@@ -44,7 +46,7 @@ class DuplicateProjectTask(AbortableAutoCallbackTask):
     pydantic=True,
 )
 def duplicate_project_task(
-    self: DuplicateProjectTask, inputs: DuplicateProjectTaskInput
+    self: DuplicateProjectTask, inputs: DuplicateProjectTaskInputs
 ) -> DuplicateProjectTaskResult:
     # a copy cannot be interrupted midway, only skipped before it starts
     if self.is_aborted():

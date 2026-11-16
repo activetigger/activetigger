@@ -3,17 +3,16 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 import pandas as pd
-from pydantic import BaseModel
 
-from task_manager.auto_callback_task import AbortableAutoCallbackTask, QueueName
+from task_manager.active_tigger_task import AbortableActiveTiggerTask, QueueName
 from task_manager.celery import celery_app
+from task_manager.task_input import TaskInputs
+from task_manager.task_names import TaskNames
 from task_manager.tasks.compute_dfm import compute_dfm
 
 
-class ComputeDfmTaskInput(BaseModel):
+class ComputeDfmTaskInputs(TaskInputs):
     feature_name: str
-    username: str
-    project_slug: str
     texts_path: Path
     path_process: Path
     # stored as the feature parameters once registered
@@ -36,8 +35,8 @@ class ComputeDfmTaskResult(TypedDict):
     parameters: dict[str, Any]
 
 
-class ComputeDfmTask(AbortableAutoCallbackTask):
-    name = "compute dfm"
+class ComputeDfmTask(AbortableActiveTiggerTask):
+    name: TaskNames = "compute_dfm"
     # sklearn vectorizer, never uses the GPU
     queue = QueueName.CPU
 
@@ -49,7 +48,7 @@ class ComputeDfmTask(AbortableAutoCallbackTask):
     base=ComputeDfmTask,
     pydantic=True,
 )
-def compute_dfm_task(self: ComputeDfmTask, inputs: ComputeDfmTaskInput) -> ComputeDfmTaskResult:
+def compute_dfm_task(self: ComputeDfmTask, inputs: ComputeDfmTaskInputs) -> ComputeDfmTaskResult:
     texts = pd.read_pickle(inputs.texts_path)
     try:
         # one-shot vectoriser: no progress, abort only before starting
@@ -72,7 +71,7 @@ def compute_dfm_task(self: ComputeDfmTask, inputs: ComputeDfmTaskInput) -> Compu
     dtm.to_parquet(features_path)
     return {
         "project_slug": inputs.project_slug,
-        "username": inputs.username,
+        "username": inputs.user,
         "features_path": str(features_path),
         "parameters": inputs.parameters,
     }

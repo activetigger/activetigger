@@ -15,7 +15,7 @@ class ExtendFeaturesCallback(TaskCallback):
     # the worker rewrote the features file: refresh the in-memory map
     @classmethod
     def on_complete_task_specific(
-        cls, task_id: str, task_result: ExtendFeaturesTaskResult, project_manager, process
+        cls, task_id: str, task_result: ExtendFeaturesTaskResult, project_manager, computing_task
     ):
         features = project_manager.features
         features.map, features.n = features.get_map()

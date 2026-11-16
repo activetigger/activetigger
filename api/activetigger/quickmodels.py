@@ -5,26 +5,27 @@ import uuid
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import pandas as pd
 from fastapi.responses import FileResponse
 from pandas import DataFrame
 from sklearn.preprocessing import StandardScaler
-from task_manager.tasks.predict_ml_task import PredictMLTaskInput, predict_ml
+from task_manager.tasks.predict_ml_task import PredictMLTask, PredictMLTaskInputs
 from task_manager.tasks.predict_with_features_task import (
-    PredictWithFeaturesTaskInput,
-    predict_with_features,
+    PredictWithFeaturesTask,
+    PredictWithFeaturesTaskInputs,
 )
 from task_manager.tasks.train_ml import MODELS_WITHOUT_BALANCE
-from task_manager.tasks.train_ml_task import TrainMLMultiClassInput, train_ml
+from task_manager.tasks.train_ml_task import TrainMLMultiClassInputs, TrainMLTask
 
 from activetigger.config import config
 from activetigger.data import Data
 from activetigger.datamodels import (
     KnnParams,
     LMComputingOutModel,
+    LMParametersModel,
     LogisticL1Params,
     LogisticL2Params,
     ModelDescriptionModel,
@@ -36,6 +37,8 @@ from activetigger.datamodels import (
     QuickModelComputing,
     QuickModelsProjectStateModel,
     RandomforestParams,
+    TaskComputing,
+    TaskToBeRun,
     TextDatasetModel,
 )
 from activetigger.db.languagemodels import ModelsService
@@ -49,9 +52,7 @@ from activetigger.functions import (
 )
 from activetigger.monitoring import Monitoring
 from activetigger.tasks.task_manager_client import (
-    enqueue_celery_task,
     get_celery_task_progress,
-    new_task_id,
 )
 
 if TYPE_CHECKING:
@@ -109,7 +110,7 @@ class QuickModels:
 
         self.loaded = {}
 
-    def compute_quickmodel(
+    def get_quickmodel_task(
         self,
         project_slug: str,
         user: str,
@@ -128,7 +129,7 @@ class QuickModels:
         test_size: float = 0.2,
         retrain: bool = False,
         texts: pd.Series | None = None,
-    ) -> str:
+    ) -> TaskToBeRun:
         """
         Add a new quickmodel for a user and a scheme
         """
@@ -159,7 +160,7 @@ class QuickModels:
         del df_task
 
         # queue celery task
-        inputs = TrainMLMultiClassInput(
+        inputs = TrainMLMultiClassInputs(
             project_slug=project_slug,
             path=self.path,
             path_df=path_df,
@@ -180,53 +181,33 @@ class QuickModels:
             test_size=test_size,
             retrain=retrain,
             random_seed=config.random_seed,
-        )
-        (unique_id, abortable) = new_task_id(train_ml)
-
-        req = QuickModelComputing(
-            status="training",
-            user=user,
-            unique_id=unique_id,
-            time=datetime.now(timezone.utc),
-            kind="train_quickmodel",
-            scheme=scheme,
-            model_type=model_type,
-            name=name,
-            features=features,
-            labels=labels,
-            model_params=model_params,
-            standardize=standardize,
-            cv10=cv10,
-            balance_classes=balance_classes,
-            exclude_labels=exclude_labels,
-            test_size=test_size,
-            retrain=retrain,
             dataset="train",
-            abortable_celery_task=abortable,
-            temp_files=[path_df],
         )
-        # registered before the send: a fast task calls back at once
-        self.monitoring.register_process(
-            process_name=unique_id, kind="train_quickmodel", parameters={}, user_name=user
-        )
-        enqueue_celery_task(train_ml, inputs, self.computing, req)
-        return unique_id
 
-    def add(self, element: QuickModelComputing) -> None:
+        return {"name": TrainMLTask.name, "inputs": inputs}
+
+    def add(self, computing_task: TaskComputing[TrainMLMultiClassInputs]) -> None:
         """
         Add computed model in the database
         """
-        model_path = self.path.joinpath(element.name)
+        model_path = self.path.joinpath(computing_task.inputs.name)
+        params = cast(
+            LMParametersModel,
+            {
+                **computing_task.inputs.model_params,
+                "exclude_labels": computing_task.inputs.exclude_labels,
+            },
+        )
         self.language_models_service.add_model(
             kind="quickmodel",
-            name=element.name,
-            user=element.user,
+            name=computing_task.inputs.name,
+            user=computing_task.user,
             project=self.project_slug,
-            scheme=element.scheme,
-            params={**element.model_params, "exclude_labels": element.exclude_labels},
+            scheme=computing_task.inputs.scheme,
+            params=params,
             path=str(model_path),
             status="trained",
-            retrain=element.retrain,
+            retrain=computing_task.inputs.retrain,
         )
 
     def available(self) -> dict[str, list[ModelDescriptionModel]]:
@@ -439,7 +420,7 @@ class QuickModels:
         col_label: str | None = None,
         col_text: str | None = None,
         statistics: list[str] | None = None,
-    ) -> None:
+    ) -> TaskToBeRun:
         """
         Start the predicting process for a specific model
         """
@@ -453,7 +434,8 @@ class QuickModels:
         df.to_parquet(path_df)
 
         # queue celery task (the worker loads model.pkl from the model directory)
-        inputs = PredictMLTaskInput(
+        inputs = PredictMLTaskInputs(
+            user=username,
             path=self.path.joinpath(name),
             path_df=path_df,
             project_slug=self.project_slug,
@@ -466,37 +448,17 @@ class QuickModels:
             col_text=col_text,
             exclude_labels=sm.exclude_labels,
         )
-        (unique_id, abortable) = new_task_id(predict_ml)
-        del df
-        enqueue_celery_task(
-            predict_ml,
-            inputs,
-            self.computing,
-            QuickModelComputing(
-                user=username,
-                unique_id=unique_id,
-                time=datetime.now(timezone.utc),
-                kind="predict_quickmodel",
-                status="predicting",
-                name=name,
-                dataset=dataset,
-                features=sm.features,
-                scheme=sm.scheme,
-                model_type=sm.model_type,
-                model_params=sm.model_params,
-                labels=sm.labels,
-                abortable_celery_task=abortable,
-                temp_files=[path_df],
-            ),
-        )
-        print("Predicting process started")
 
-    def predict_on_dataset(
+        del df
+        print("Predicting process started")
+        return {"name": PredictMLTask.name, "inputs": inputs}
+
+    def get_predict_on_dataset_task(
         self,
         name: str,
         username: str,
         dataset: str = "all",
-    ) -> str:
+    ) -> TaskToBeRun:
         """
         Enqueue a `PredictWithFeatures` task that (re)computes the
         features the quickmodel was trained on for the requested dataset
@@ -506,14 +468,14 @@ class QuickModels:
         """
         sm = self._get_sm_for_predict(name)
         data = self._dataset_texts(dataset)
-        return self._enqueue_predict_with_features(sm, username, dataset, data)
+        return self._get_predict_with_features_task(sm, username, dataset, data)
 
-    def predict_on_external_dataset(
+    def get_predict_on_external_dataset_task(
         self,
         name: str,
         username: str,
         external_dataset: TextDatasetModel,
-    ) -> str:
+    ) -> TaskToBeRun:
         """
         Enqueue a `PredictWithFeatures` task on an uploaded external
         dataset. Mirrors the BERT flow: the file lives under the
@@ -553,7 +515,7 @@ class QuickModels:
                 f"Duplicate values in id column '{external_dataset.id}' — ids must be unique"
             )
 
-        return self._enqueue_predict_with_features(sm, username, "external", texts)
+        return self._get_predict_with_features_task(sm, username, "external", texts)
 
     def mark_prediction_done(self, name: str, dataset: str) -> None:
         """
@@ -582,13 +544,13 @@ class QuickModels:
             raise ValueError(f"Quickmodel '{name}' has no features attached")
         return sm
 
-    def _enqueue_predict_with_features(
+    def _get_predict_with_features_task(
         self,
         sm: QuickModelComputed,
         username: str,
         dataset: str,
         data: pd.Series,
-    ) -> str:
+    ) -> TaskToBeRun:
         """
         Shared dispatch path for `predict_on_dataset` and
         `predict_on_external_dataset`. Builds the PredictWithFeatures
@@ -598,8 +560,8 @@ class QuickModels:
         assert self.features is not None
         specs, data_path = self.features.build_compute_specs(sm.features, data)
 
-        (unique_id, abortable) = new_task_id(predict_with_features)
-        task_inputs = PredictWithFeaturesTaskInput(
+        task_inputs = PredictWithFeaturesTaskInputs(
+            user=username,
             project_slug=self.project_slug,
             name=sm.name,
             dataset=dataset,
@@ -612,28 +574,7 @@ class QuickModels:
             file_name=f"predict_{dataset}.parquet",
         )
 
-        enqueue_celery_task(
-            predict_with_features,
-            task_inputs,
-            self.computing,
-            QuickModelComputing(
-                user=username,
-                unique_id=unique_id,
-                time=datetime.now(timezone.utc),
-                kind="predict_with_features",
-                abortable_celery_task=abortable,
-                temp_files=[data_path],
-                status="predicting",
-                name=sm.name,
-                dataset=dataset,
-                features=sm.features,
-                scheme=sm.scheme,
-                model_type=sm.model_type,
-                model_params=sm.model_params,
-                labels=sm.labels,
-            ),
-        )
-        return unique_id
+        return {"name": PredictWithFeaturesTask.name, "inputs": task_inputs}
 
     def _dataset_texts(self, dataset: str) -> pd.Series:
         """

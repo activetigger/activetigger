@@ -17,7 +17,7 @@ from activetigger.functions_image import (
     generate_thumbnail,
 )
 
-from task_manager.auto_callback_task import UpdateProgressMethod
+from task_manager.active_tigger_task import UpdateProgressMethod
 
 # (n_rows, [(scheme_name, [{element_id, annotation, comment}, ...]), ...])
 EvalSetResult = tuple[int, list[tuple[str, list]]]

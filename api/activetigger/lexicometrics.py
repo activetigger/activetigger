@@ -3,20 +3,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from task_manager.tasks.compute_lexicometrics_task import (
-    ComputeLexicometricsTaskInput,
-    compute_lexicometrics_task,
+    ComputeLexicometricsTask,
+    ComputeLexicometricsTaskInputs,
 )
 
 from activetigger.config import config
 from activetigger.datamodels import (
-    LexicometricsComputing,
     LexicometricsModel,
     LexicometricsParametersModel,
     LexicometricsProjectStateModel,
     LexicometricsStatisticsModel,
+    TaskComputing,
+    TaskToBeRun,
 )
 from activetigger.errors import AlreadyExistsError
-from activetigger.tasks.task_manager_client import enqueue_celery_task, new_task_id
 
 
 class Lexicometrics:
@@ -73,7 +73,7 @@ class Lexicometrics:
         """
         return {e.user: "computing" for e in self.computing if e.kind == "lexicometrics"}
 
-    def compute(self, project_slug: str, username: str, language: str) -> None:
+    def get_compute_task(self, project_slug: str, username: str, language: str) -> TaskToBeRun:
         """
         Launch the lexicometrics computation as a celery task.
 
@@ -83,10 +83,10 @@ class Lexicometrics:
             raise AlreadyExistsError("Lexicometrics are already being computed")
 
         parameters = LexicometricsParametersModel(language=language)
-        (unique_id, abortable) = new_task_id(compute_lexicometrics_task)
-        task_inputs = ComputeLexicometricsTaskInput(
+
+        task_inputs = ComputeLexicometricsTaskInputs(
             project_slug=project_slug,
-            username=username,
+            user=username,
             path_data=self.path,
             train_file=config.train_file,
             language=parameters.language,
@@ -97,29 +97,20 @@ class Lexicometrics:
             tfidf_n_words_per_doc=parameters.tfidf_n_words_per_doc,
             tfidf_min_term_freq=parameters.tfidf_min_term_freq,
             tfidf_max_documents=parameters.tfidf_max_documents,
+            parameters=parameters,
         )
-        enqueue_celery_task(
-            compute_lexicometrics_task,
-            task_inputs,
-            self.computing,
-            LexicometricsComputing(
-                unique_id=unique_id,
-                user=username,
-                time=datetime.now(timezone.utc),
-                kind="lexicometrics",
-                parameters=parameters,
-                abortable_celery_task=abortable,
-            ),
-        )
+        return {"name": ComputeLexicometricsTask.name, "inputs": task_inputs}
 
-    def add(self, element: LexicometricsComputing, results: dict) -> None:
+    def add(
+        self, task_computing: TaskComputing[ComputeLexicometricsTaskInputs], results: dict
+    ) -> None:
         """
         Store statistics after computation.
         """
         self.available = LexicometricsModel(
             computed_at=datetime.now(timezone.utc).isoformat(),
-            user=element.user,
-            parameters=element.parameters,
+            user=task_computing.user,
+            parameters=task_computing.inputs.parameters,
             statistics=LexicometricsStatisticsModel(**results),
         )
         self._save()

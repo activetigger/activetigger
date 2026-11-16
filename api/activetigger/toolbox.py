@@ -12,7 +12,7 @@ from celery.result import AsyncResult
 from celery.states import FAILURE, PENDING, REVOKED
 from fastapi import HTTPException
 from fastapi.responses import FileResponse
-from task_manager.auto_callback_task import QueueName
+from task_manager.active_tigger_task import QueueName
 from task_manager.celery import celery_app
 from task_manager.stop_signal import stop_requested
 from task_manager.tasks.prepare_dataset_task import PrepareDatasetTaskInput, prepare_dataset_task
@@ -232,6 +232,7 @@ class Toolbox:
         session_dir.joinpath("result.parquet").unlink(missing_ok=True)
 
         try:
+            # TODO: add an abstraction over create_task to allow task outside project boundaries
             (task_id, _) = enqueue_celery_task(
                 prepare_dataset_task,
                 PrepareDatasetTaskInput(

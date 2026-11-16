@@ -10,8 +10,8 @@ from typing import Any, Tuple, cast
 import pandas as pd
 from fastapi.responses import FileResponse
 from pandas import DataFrame
-from task_manager.tasks.predict_ner_task import PredictNerTaskInput, predict_ner
-from task_manager.tasks.train_ner_task import TrainNerTaskInput, train_ner
+from task_manager.tasks.predict_ner_task import PredictNerTask, PredictNerTaskInputs
+from task_manager.tasks.train_ner_task import TrainNerTask, TrainNerTaskInputs
 
 import activetigger.functions as functions
 from activetigger.config import config
@@ -25,6 +25,8 @@ from activetigger.datamodels import (
     ModelScoresModel,
     NerModelsProjectStateModel,
     StaticFileModel,
+    TaskComputing,
+    TaskToBeRun,
     TextDatasetModel,
 )
 from activetigger.db.languagemodels import ModelsService
@@ -33,9 +35,7 @@ from activetigger.errors import AlreadyExistsError, NotFoundError
 from activetigger.functions import get_model_metrics
 from activetigger.monitoring import Monitoring
 from activetigger.tasks.task_manager_client import (
-    enqueue_celery_task,
     get_celery_task_progress,
-    new_task_id,
 )
 
 
@@ -148,7 +148,7 @@ class NerModels:
             return 3
         return 0
 
-    def start_training_process(
+    def get_training_task(
         self,
         name: str,
         project: str,
@@ -163,7 +163,7 @@ class NerModels:
         test_size: float = 0.2,
         num_min_annotations: int = 10,
         max_length: int = 512,
-    ) -> str:
+    ) -> TaskToBeRun:
         if len(df.dropna()) < num_min_annotations:
             raise Exception(f"Less than {num_min_annotations} elements annotated")
         if self.models_service.model_exists(project, name):
@@ -175,13 +175,13 @@ class NerModels:
             if self.estimate_memory_use(name, kind="train") > mem.available_memory:
                 raise Exception("Not enough GPU memory available. Wait or reduce batch.")
 
-        current_date = datetime.now(timezone.utc)
         # write df on disk on a temporary file read by the worker
         path_df = self.path.joinpath("train_ner_" + uuid.uuid4().hex + ".parquet")
         df.to_parquet(path_df)
 
         # queue celery task
-        inputs = TrainNerTaskInput(
+        inputs = TrainNerTaskInputs(
+            user=user,
             path=self.path,
             path_df=path_df,
             project_slug=project,
@@ -193,34 +193,11 @@ class NerModels:
             params=params,
             test_size=test_size,
             max_length=max_length,
+            scheme=scheme,
         )
-        (unique_id, abortable) = new_task_id(train_ner)
+
         del df
-        params_db = LMParametersDbModel(**params.model_dump(), exclude_labels=[])
-        # registered before the send: a fast task calls back at once
-        self.monitoring.register_process(
-            process_name=unique_id, kind="train_ner", parameters={}, user_name=user
-        )
-        enqueue_celery_task(
-            train_ner,
-            inputs,
-            self.computing,
-            LMComputing(
-                user=user,
-                model_name=name,
-                unique_id=unique_id,
-                time=current_date,
-                kind="train_ner",
-                training_kind="ner",
-                status="training",
-                scheme=scheme,
-                dataset=None,
-                params=params_db.model_dump(),
-                abortable_celery_task=abortable,
-                temp_files=[path_df],
-            ),
-        )
-        return unique_id
+        return {"name": TrainNerTask.name, "inputs": inputs}
 
     def start_predicting_process(
         self,
@@ -239,7 +216,7 @@ class NerModels:
         path_train: Path | None = None,
         path_valid: Path | None = None,
         path_test: Path | None = None,
-    ) -> str:
+    ) -> TaskToBeRun:
         if not (self.path.joinpath(name)).exists():
             raise NotFoundError("The model does not exist")
 
@@ -255,7 +232,8 @@ class NerModels:
             df.to_parquet(path_df)
 
         # queue celery task
-        inputs = PredictNerTaskInput(
+        inputs = PredictNerTaskInputs(
+            user=user,
             path=self.path.joinpath(name),
             path_df=path_df,
             project_slug=project_slug,
@@ -275,30 +253,11 @@ class NerModels:
             path_valid=path_valid,
             path_test=path_test,
         )
-        (unique_id, abortable) = new_task_id(predict_ner)
+        # do we need :
+        # status=status,
+        # training_kind="ner",
         del df
-        # registered before the send: a fast task calls back at once
-        self.monitoring.register_process(
-            process_name=unique_id, kind="predict_ner", parameters={}, user_name=user
-        )
-        enqueue_celery_task(
-            predict_ner,
-            inputs,
-            self.computing,
-            LMComputing(
-                user=user,
-                model_name=name,
-                unique_id=unique_id,
-                time=datetime.now(timezone.utc),
-                kind="predict_ner",
-                training_kind="ner",
-                dataset=dataset,
-                status=status,
-                abortable_celery_task=abortable,
-                temp_files=[path_df] if path_df else [],
-            ),
-        )
-        return unique_id
+        return {"name": PredictNerTask.name, "inputs": inputs}
 
     def delete(self, name: str) -> None:
         if not name:
@@ -335,36 +294,39 @@ class NerModels:
         new_path = model_path.parent / model_path.name.replace(former_name, new_name)
         os.rename(model_path, new_path)
 
-    def add(self, element: LMComputing) -> None:
-        if element.status == "training":
-            self.models_service.add_model(
-                kind="ner",
-                name=element.model_name,
-                user=element.user,
-                project=self.project_slug,
-                scheme=element.scheme or "default",
-                params=element.params or {},
-                path=str(self.path.joinpath(element.model_name)),
-                status="trained",
-            )
+    def add_prediction(self, computing_task: TaskComputing[PredictNerTaskInputs]):
+        if computing_task.inputs.dataset == "annotable":
             self.models_service.set_model_params(
-                self.project_slug, element.model_name, "compressed", True
+                self.project_slug, computing_task.inputs.model_name, "predicted", True
             )
-            print("NER model trained")
-        if element.status == "predicting":
-            if element.dataset == "annotable":
-                self.models_service.set_model_params(
-                    self.project_slug, element.model_name, "predicted", True
-                )
-            if element.dataset == "all":
-                self.models_service.set_model_params(
-                    self.project_slug, element.model_name, "predicted_all", True
-                )
-            if element.dataset == "external":
-                self.models_service.set_model_params(
-                    self.project_slug, element.model_name, "predicted_external", True
-                )
-            print("NER prediction finished")
+        if computing_task.inputs.dataset == "all":
+            self.models_service.set_model_params(
+                self.project_slug, computing_task.inputs.model_name, "predicted_all", True
+            )
+        if computing_task.inputs.dataset == "external":
+            self.models_service.set_model_params(
+                self.project_slug, computing_task.inputs.model_name, "predicted_external", True
+            )
+        print("NER prediction finished")
+
+    def add_train(self, computing_task: TaskComputing[TrainNerTaskInputs]) -> None:
+        params_db = LMParametersDbModel(
+            **computing_task.inputs.params.model_dump(), exclude_labels=[]
+        )
+        self.models_service.add_model(
+            kind="ner",
+            name=computing_task.inputs.model_name,
+            user=computing_task.inputs.user,
+            project=self.project_slug,
+            scheme=computing_task.inputs.scheme or "default",
+            params=params_db,
+            path=str(self.path.joinpath(computing_task.inputs.model_name)),
+            status="trained",
+        )
+        self.models_service.set_model_params(
+            self.project_slug, computing_task.inputs.model_name, "compressed", True
+        )
+        print("NER model trained")
 
     def export_prediction(
         self,

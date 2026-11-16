@@ -5,10 +5,13 @@ from fastapi.encoders import jsonable_encoder
 # use task specification to ensure name and return are in sync with task_manager
 from task_manager.tasks.update_datasets_task import (
     UpdateDatasetsTask,
+    UpdateDatasetsTaskInputs,
     UpdateDatasetsTaskResult,
 )
 
 from activetigger.config import config
+from activetigger.datamodels import TaskComputing
+from activetigger.project import Project
 
 # ensure the callback definition is what we expect by using the TaskCallback abstraction
 from activetigger.tasks.task_callback import TaskCallback
@@ -22,7 +25,11 @@ class UpdateDatasetsCallback(TaskCallback):
     # params and reload the data, all in one place so they never disagree
     @classmethod
     def on_complete_task_specific(
-        cls, task_id: str, task_result: UpdateDatasetsTaskResult, project_manager, process
+        cls,
+        task_id: str,
+        task_result: UpdateDatasetsTaskResult,
+        project_manager: Project,
+        computing_task: TaskComputing[UpdateDatasetsTaskInputs],
     ):
         params = project_manager.params
         changed = task_result["train_path"] is not None

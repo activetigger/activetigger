@@ -43,7 +43,8 @@ def compute_bertopic(
     if project.params.kind == "image":
         raise HTTPException(status_code=400, detail="BERTopic is not supported for image projects")
     try:
-        unique_id = project.bertopic.compute(
+        orchestrator = get_orchestrator()
+        task = project.bertopic.get_compute_task(
             path_data=project.params.dir,
             col_id=None,
             col_text="text",
@@ -51,7 +52,8 @@ def compute_bertopic(
             name=bertopic.name,
             user=current_user.username,
         )
-        get_orchestrator().log_action(
+        unique_id = orchestrator.create_task(task["name"], task["inputs"])
+        orchestrator.log_action(
             current_user.username, f"COMPUTE BERTopic MODEL: {bertopic.name}", project.name
         )
         return unique_id

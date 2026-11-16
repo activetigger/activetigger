@@ -10,8 +10,11 @@ from typing import Any, Tuple, cast
 import pandas as pd
 from fastapi.responses import FileResponse
 from pandas import DataFrame
-from task_manager.tasks.predict_image_task import PredictImageTaskInput, predict_image
-from task_manager.tasks.train_image_task import TrainImageTaskInput, train_image
+from task_manager.tasks.predict_image_task import (
+    PredictImageTask,
+    PredictImageTaskInputs,
+)
+from task_manager.tasks.train_image_task import TrainImageTask, TrainImageTaskInputs
 
 import activetigger.functions as functions
 from activetigger.config import config
@@ -19,12 +22,13 @@ from activetigger.datamodels import (
     ImageModelsProjectStateModel,
     LMComputing,
     LMComputingOutModel,
-    LMParametersDbModel,
     LMParametersModel,
     LMStatusModel,
     ModelInformationsModel,
     ModelScoresModel,
     StaticFileModel,
+    TaskComputing,
+    TaskToBeRun,
 )
 from activetigger.db.languagemodels import ModelsService
 from activetigger.db.manager import DatabaseManager
@@ -32,9 +36,7 @@ from activetigger.errors import AlreadyExistsError, NotFoundError
 from activetigger.functions import get_model_metrics
 from activetigger.monitoring import Monitoring
 from activetigger.tasks.task_manager_client import (
-    enqueue_celery_task,
     get_celery_task_progress,
-    new_task_id,
 )
 
 
@@ -168,7 +170,7 @@ class ImageModels:
             return 4
         return 0
 
-    def start_training_process(
+    def get_training_task(
         self,
         name: str,
         project: str,
@@ -188,9 +190,9 @@ class ImageModels:
         class_min_freq: int = 1,
         exclude_labels: list[str] | None = None,
         fp16: bool = True,
-    ) -> str:
+    ) -> TaskToBeRun:
         """
-        Launch a training process
+        create a training task
         """
         if len(df.dropna()) < num_min_annotations:
             raise Exception(f"Less than {num_min_annotations} elements annotated")
@@ -222,12 +224,14 @@ class ImageModels:
         df.to_parquet(path_df)
 
         # queue celery task
-        inputs = TrainImageTaskInput(
+        inputs = TrainImageTaskInputs(
+            user=user,
             path=self.path,
             path_df=path_df,
             project_slug=project,
             model_name=model_name,
             training_kind=training_kind,
+            scheme=scheme,
             scheme_labels=scheme_labels,
             col_label=col_label,
             col_text=col_text,
@@ -238,37 +242,13 @@ class ImageModels:
             class_balance=class_balance,
             class_min_freq=class_min_freq,
             fp16=fp16,
+            exclude_labels=exclude_labels or [],
         )
-        (unique_id, abortable) = new_task_id(train_image)
         del df
 
-        params_db = LMParametersDbModel(**params.model_dump(), exclude_labels=exclude_labels or [])
-        # registered before the send: a fast task calls back at once
-        self.monitoring.register_process(
-            process_name=unique_id, kind="train_imagemodel", parameters={}, user_name=user
-        )
-        enqueue_celery_task(
-            train_image,
-            inputs,
-            self.computing,
-            LMComputing(
-                user=user,
-                model_name=model_name,
-                unique_id=unique_id,
-                time=current_date,
-                kind="train_image",
-                training_kind=training_kind,
-                status="training",
-                scheme=scheme,
-                dataset=None,
-                params=params_db.model_dump(),
-                abortable_celery_task=abortable,
-                temp_files=[path_df],
-            ),
-        )
-        return unique_id
+        return {"name": TrainImageTask.name, "inputs": inputs}
 
-    def start_predicting_process(
+    def get_predicting_task(
         self,
         project_slug: str,
         name: str,
@@ -279,15 +259,14 @@ class ImageModels:
         scheme_labels: list[str],
         col_label: str | None = None,
         batch_size: int = 32,
-        status: str = "predicting",
         statistics: list | None = None,
         path_data: Path | None = None,
         path_train: Path | None = None,
         path_valid: Path | None = None,
         path_test: Path | None = None,
-    ) -> None:
+    ) -> TaskToBeRun:
         """
-        Initiate a prediction process with a model
+        create a prediction task with a model
         """
 
         if not (self.path.joinpath(name)).exists():
@@ -305,7 +284,8 @@ class ImageModels:
             df.to_parquet(path_df)
 
         # queue celery task
-        inputs = PredictImageTaskInput(
+        inputs = PredictImageTaskInputs(
+            user=user,
             path=self.path.joinpath(name),
             path_df=path_df,
             project_slug=project_slug,
@@ -326,25 +306,9 @@ class ImageModels:
             path_valid=path_valid,
             path_test=path_test,
         )
-        (unique_id, abortable) = new_task_id(predict_image)
+
         del df
-        enqueue_celery_task(
-            predict_image,
-            inputs,
-            self.computing,
-            LMComputing(
-                user=user,
-                model_name=name,
-                unique_id=unique_id,
-                time=datetime.now(timezone.utc),
-                kind="predict_image",
-                training_kind=training_kind,
-                dataset=dataset,
-                status=status,
-                abortable_celery_task=abortable,
-                temp_files=[path_df] if path_df else [],
-            ),
-        )
+        return {"name": PredictImageTask.name, "inputs": inputs}
 
     def delete(self, name: str) -> None:
         """
@@ -381,38 +345,38 @@ class ImageModels:
         new_path = model_path.parent / model_path.name.replace(former_name, new_name)
         os.rename(model_path, new_path)
 
-    def add(self, element: LMComputing) -> None:
+    def add_prediction(self, task_computing: TaskComputing[PredictImageTaskInputs]) -> None:
+        if task_computing.inputs.dataset == "annotable":
+            self.models_service.set_model_params(
+                self.project_slug, task_computing.inputs.model_name, "predicted", True
+            )
+        if task_computing.inputs.dataset == "all":
+            self.models_service.set_model_params(
+                self.project_slug, task_computing.inputs.model_name, "predicted_all", True
+            )
+        print("Image prediction finished")
+
+    def add_training(self, task_computing: TaskComputing[TrainImageTaskInputs]) -> None:
         """
         Persist completed image-classification model events.
         """
-        if element.status == "training":
-            self.models_service.add_model(
-                kind="image",
-                name=element.model_name,
-                user=element.user,
-                project=self.project_slug,
-                scheme=element.scheme or "default",
-                params=element.params or {},
-                path=str(self.path.joinpath(element.model_name)),
-                status="trained",
-            )
-            self.models_service.set_model_params(
-                self.project_slug,
-                element.model_name,
-                "compressed",
-                True,
-            )
-            print("Image model trained")
-        if element.status == "predicting":
-            if element.dataset == "annotable":
-                self.models_service.set_model_params(
-                    self.project_slug, element.model_name, "predicted", True
-                )
-            if element.dataset == "all":
-                self.models_service.set_model_params(
-                    self.project_slug, element.model_name, "predicted_all", True
-                )
-            print("Image prediction finished")
+        self.models_service.add_model(
+            kind="image",
+            name=task_computing.inputs.model_name,
+            user=task_computing.user,
+            project=self.project_slug,
+            scheme=task_computing.inputs.scheme or "default",
+            params=task_computing.inputs.params,
+            path=str(self.path.joinpath(task_computing.inputs.model_name)),
+            status="trained",
+        )
+        self.models_service.set_model_params(
+            self.project_slug,
+            task_computing.inputs.model_name,
+            "compressed",
+            True,
+        )
+        print("Image model trained")
 
     def export_prediction(
         self,

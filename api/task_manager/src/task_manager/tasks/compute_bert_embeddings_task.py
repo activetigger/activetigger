@@ -4,8 +4,10 @@ from typing import Literal, TypedDict
 import pandas as pd
 from pydantic import BaseModel
 
-from task_manager.auto_callback_task import AbortableAutoCallbackTask, QueueName
+from task_manager.active_tigger_task import AbortableActiveTiggerTask, QueueName
 from task_manager.celery import celery_app
+from task_manager.task_input import TaskInputs
+from task_manager.task_names import TaskNames
 from task_manager.tasks.compute_bert_embeddings import encode_bert_embeddings
 
 
@@ -27,10 +29,8 @@ class ComputeBertEmbeddingsTaskResult(TypedDict):
     parameters: ComputeBertEmbeddingsTaskParameters
 
 
-class ComputeBertEmbeddingsTaskInput(BaseModel):
+class ComputeBertEmbeddingsTaskInputs(TaskInputs):
     feature_name: str
-    username: str
-    project_slug: str
     texts_path: Path
     path_process: Path
     model_name: str
@@ -41,8 +41,8 @@ class ComputeBertEmbeddingsTaskInput(BaseModel):
     min_gpu: int = 6
 
 
-class ComputeBertEmbeddingsTask(AbortableAutoCallbackTask):
-    name = "compute bert embeddings"
+class ComputeBertEmbeddingsTask(AbortableActiveTiggerTask):
+    name: TaskNames = "compute_bert_embeddings"
     # GPU task unless CPU_only mode
     queue = QueueName.GPU
 
@@ -55,7 +55,7 @@ class ComputeBertEmbeddingsTask(AbortableAutoCallbackTask):
     pydantic=True,
 )
 def compute_bert_embeddings(
-    self: ComputeBertEmbeddingsTask, props: ComputeBertEmbeddingsTaskInput
+    self: ComputeBertEmbeddingsTask, props: ComputeBertEmbeddingsTaskInputs
 ) -> ComputeBertEmbeddingsTaskResult:
     try:
         texts = pd.read_pickle(props.texts_path)
@@ -76,14 +76,14 @@ def compute_bert_embeddings(
     emb.to_parquet(embeddings_path)
     return {
         "project_slug": props.project_slug,
-        "username": props.username,
+        "username": props.user,
         "embeddings_path": str(embeddings_path),
         "parameters": {
             "model": props.model_name,
             "pooling": props.pooling,
             "name": props.feature_name,
             "kind": "bert-embeddings",
-            "username": props.username,
+            "username": props.user,
             "max_length_tokens": props.max_tokens,
             "batch_size": props.batch_size,
         },

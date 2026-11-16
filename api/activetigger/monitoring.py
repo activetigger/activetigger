@@ -318,7 +318,7 @@ class Monitoring:
             user_name=user_name,
         )
 
-    def close_process(self, process_name: str, list_events: EventsModel) -> None:
+    def close_process(self, process_name: str, list_events: EventsModel | None) -> None:
         """
         Close a monitored process
         """

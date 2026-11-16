@@ -42,7 +42,7 @@ from transformers import (
     set_seed,
 )
 
-from task_manager.auto_callback_task import UpdateProgressMethod
+from task_manager.active_tigger_task import UpdateProgressMethod
 from task_manager.task_input import TaskInputs
 
 pd.set_option("future.no_silent_downcasting", True)
@@ -158,6 +158,7 @@ class TrainBertTaskInputs(TaskInputs):
     model_name: str
     # df: DataFrame | datasets.Dataset
     training_kind: str
+    scheme: str
     scheme_labels: list[str]
     use_dichotomization: bool
     col_text: str
@@ -171,6 +172,7 @@ class TrainBertTaskInputs(TaskInputs):
     auto_max_length: bool = False
     class_balance: bool = False
     class_min_freq: int = 1
+    exclude_labels: list[str]
 
 
 class TrainBert:

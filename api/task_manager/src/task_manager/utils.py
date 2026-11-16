@@ -6,29 +6,30 @@ from celery.utils.log import get_task_logger
 from pydantic import BaseModel
 
 from task_manager import config
+from task_manager.task_names import TaskNames
 
 
 class TaskResultForCallback[R](BaseModel):
     results: R
-    task_name: str
+    task_name: TaskNames
 
 
 class TaskFailureReportForCallback(BaseModel):
     exception: str
-    task_name: str
+    task_name: TaskNames
     task_args: Any
     task_kwargs: Any
 
 
 class SuccessCallbackPayload(BaseModel):
     task_id: str
-    task_name: str
+    task_name: TaskNames
     results: Any
 
 
 class FailureCallbackPayload(BaseModel):
     task_id: str
-    task_name: str
+    task_name: TaskNames
     report: TaskFailureReportForCallback
 
 

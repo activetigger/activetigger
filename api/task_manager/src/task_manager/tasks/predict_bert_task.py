@@ -1,9 +1,10 @@
-from task_manager.auto_callback_task import AbortableAutoCallbackTask, QueueName
+from task_manager.active_tigger_task import AbortableActiveTiggerTask, QueueName
 from task_manager.celery import celery_app
+from task_manager.task_names import TaskNames
 from task_manager.tasks.predict_bert import (
     PredictBertMultiClass,
     PredictBertResult,
-    PredictBertTaskInput,
+    PredictBertTaskInputs,
 )
 
 
@@ -12,8 +13,8 @@ class PredictBertTaskResult(PredictBertResult):
     project_slug: str
 
 
-class PredictBertTask(AbortableAutoCallbackTask):
-    name = "predict bert"
+class PredictBertTask(AbortableActiveTiggerTask):
+    name: TaskNames = "predict_bert"
     # GPU task unless CPU_only mode
     queue = QueueName.GPU
 
@@ -25,7 +26,7 @@ class PredictBertTask(AbortableAutoCallbackTask):
     base=PredictBertTask,
     pydantic=True,
 )
-def predict_bert(self: PredictBertTask, inputs: PredictBertTaskInput) -> PredictBertTaskResult:
+def predict_bert(self: PredictBertTask, inputs: PredictBertTaskInputs) -> PredictBertTaskResult:
     predict_bert = PredictBertMultiClass(
         self.request.id, inputs, is_aborted=self.is_aborted, update_progress=self.update_progress
     )

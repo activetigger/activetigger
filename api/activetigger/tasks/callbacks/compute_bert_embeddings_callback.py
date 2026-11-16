@@ -27,7 +27,7 @@ class ComputeBertEmbeddingsCallback(TaskCallback):
         task_id: str,
         task_result: ComputeBertEmbeddingsTaskResult,
         project_manager: Project,
-        process,
+        computing_task,
     ):
         embeddings_path = Path(task_result["embeddings_path"])
         try:

@@ -3,10 +3,12 @@ from typing import cast
 # use task specification to ensure name and return are in sync with task_manager
 from task_manager.tasks.train_bert_task import (
     TrainBertTask,
+    TrainBertTaskInputs,
     TrainBertTaskResult,
 )
 
-from activetigger.datamodels import EventsModel, LMComputing
+from activetigger.datamodels import EventsModel, TaskComputing
+from activetigger.project import Project
 
 # ensure the callback definition is what we expect by using the TaskCallback abstraction
 from activetigger.tasks.task_callback import TaskCallback
@@ -20,9 +22,12 @@ class TrainBertCallback(TaskCallback):
     # it will be executed from the orchestrator allowing using its dependencies (db and all)
     @classmethod
     def on_complete_task_specific(
-        cls, task_id: str, task_result: TrainBertTaskResult, project_manager, process
+        cls,
+        task_id: str,
+        task_result: TrainBertTaskResult,
+        project_manager: Project,
+        computing_task: TaskComputing[TrainBertTaskInputs],
     ):
-        model = cast(LMComputing, process)
-        events = EventsModel(events=task_result["events"])
-        project_manager.languagemodels.add(model)
-        project_manager.monitoring.close_process(model.unique_id, events)
+        project_manager.languagemodels.add_training_result(computing_task)
+    
+       

@@ -10,6 +10,7 @@ from task_manager.tasks.create_project_task import (
 from typing_extensions import override
 
 from activetigger.datamodels import ProjectModel
+from activetigger.project import Project
 
 # ensure the callback definition is what we expect by using the TaskCallback abstraction
 from activetigger.tasks.task_callback import TaskCallback
@@ -30,7 +31,11 @@ class CreateProjectCallback(TaskCallback):
     @classmethod
     @override
     def on_complete_task_specific(
-        cls, task_id: str, task_result: CreateProjectTaskResult, project_manager, process
+        cls,
+        task_id: str,
+        task_result: CreateProjectTaskResult,
+        project_manager: Project,
+        computing_task,
     ):
         # create project model from the dump version
         project = ProjectModel(**task_result["project"])

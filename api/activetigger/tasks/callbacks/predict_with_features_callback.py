@@ -15,7 +15,11 @@ class PredictWithFeaturesCallback(TaskCallback):
     # the proba parquet is already on disk; only flag the quickmodel row
     @classmethod
     def on_complete_task_specific(
-        cls, task_id: str, task_result: PredictWithFeaturesTaskResult, project_manager, process
+        cls,
+        task_id: str,
+        task_result: PredictWithFeaturesTaskResult,
+        project_manager,
+        computing_task,
     ):
         project_manager.quickmodels.mark_prediction_done(
             task_result["name"], task_result["dataset"]

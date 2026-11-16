@@ -3,18 +3,17 @@ from pathlib import Path
 from typing import TypedDict
 
 import pandas as pd
-from activetigger.datamodels import EvalSetDataModel, EvalSetImageModel
-from pydantic import BaseModel
+from activetigger.datamodels import EvalSetDataModel, EvalSetImageModel, TaskComputing
 
-from task_manager.auto_callback_task import AbortableAutoCallbackTask, QueueName
+from task_manager.active_tigger_task import AbortableActiveTiggerTask, QueueName
 from task_manager.celery import celery_app
+from task_manager.task_input import TaskInputs
+from task_manager.task_names import TaskNames
 from task_manager.tasks.add_evalset import add_evalset, add_evalset_image
 
 
-class AddEvalsetTaskInput(BaseModel):
-    project_slug: str
+class AddEvalsetTaskInputs(TaskInputs):
     dataset: str
-    username: str
     path_project: Path
     # pickled Index of every id already in the project
     index_path: Path
@@ -36,9 +35,19 @@ class AddEvalsetTaskResult(TypedDict):
     evalset_path: str
 
 
-class AddEvalsetTask(AbortableAutoCallbackTask):
-    name = "add evalset"
+class AddEvalsetTask(AbortableActiveTiggerTask):
+    name: TaskNames = "add_evalset"
     queue = QueueName.CPU
+
+    @classmethod
+    def clean_temp_files(cls, computing_task: TaskComputing[AddEvalsetTaskInputs]):
+        computing_task.inputs.index_path.unlink(missing_ok=True)
+        computing_task.inputs.path_project.joinpath(
+            f"eval_{computing_task.inputs.dataset}_{computing_task.id}.parquet"
+        ).unlink(missing_ok=True)
+        computing_task.inputs.path_project.joinpath(f"add_evalset_{computing_task.id}.json").unlink(
+            missing_ok=True
+        )
 
 
 @celery_app.task(
@@ -48,7 +57,7 @@ class AddEvalsetTask(AbortableAutoCallbackTask):
     base=AddEvalsetTask,
     pydantic=True,
 )
-def add_evalset_task(self: AddEvalsetTask, inputs: AddEvalsetTaskInput) -> AddEvalsetTaskResult:
+def add_evalset_task(self: AddEvalsetTask, inputs: AddEvalsetTaskInputs) -> AddEvalsetTaskResult:
     # provisional file
     output_path = inputs.path_project.joinpath(f"eval_{inputs.dataset}_{self.request.id}.parquet")
     try:
@@ -87,7 +96,7 @@ def add_evalset_task(self: AddEvalsetTask, inputs: AddEvalsetTaskInput) -> AddEv
     return {
         "project_slug": inputs.project_slug,
         "dataset": inputs.dataset,
-        "username": inputs.username,
+        "username": inputs.user,
         "n_rows": n_rows,
         "annotations_path": str(annotations_path),
         "evalset_path": str(output_path),

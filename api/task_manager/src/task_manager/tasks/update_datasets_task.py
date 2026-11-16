@@ -1,16 +1,17 @@
 from pathlib import Path
 from typing import TypedDict
 
-from activetigger.datamodels import ProjectUpdateModel
+from activetigger.datamodels import ProjectUpdateModel, TaskComputing
 from pydantic import BaseModel
 
-from task_manager.auto_callback_task import AbortableAutoCallbackTask, QueueName
+from task_manager.active_tigger_task import AbortableActiveTiggerTask, QueueName
 from task_manager.celery import celery_app
+from task_manager.task_input import TaskInputs
+from task_manager.task_names import TaskNames
 from task_manager.tasks.update_datasets import update_datasets
 
 
-class UpdateDatasetsTaskInput(BaseModel):
-    project_slug: str
+class UpdateDatasetsTaskInputs(TaskInputs):
     path_project: Path
     # current columns, to detect what actually changes
     cols_context: list[str]
@@ -28,9 +29,15 @@ class UpdateDatasetsTaskResult(TypedDict):
     train_path: str | None
 
 
-class UpdateDatasetsTask(AbortableAutoCallbackTask):
-    name = "update datasets"
+class UpdateDatasetsTask(AbortableActiveTiggerTask):
+    name: TaskNames = "update_datasets"
     queue = QueueName.CPU
+
+    @classmethod
+    def clean_temp_files(cls, computing_task: TaskComputing[UpdateDatasetsTaskInputs]):
+        computing_task.inputs.path_project.joinpath(f"train_{computing_task.id}.parquet").unlink(
+            missing_ok=True
+        )
 
 
 @celery_app.task(
@@ -41,7 +48,7 @@ class UpdateDatasetsTask(AbortableAutoCallbackTask):
     pydantic=True,
 )
 def update_datasets_task(
-    self: UpdateDatasetsTask, inputs: UpdateDatasetsTaskInput
+    self: UpdateDatasetsTask, inputs: UpdateDatasetsTaskInputs
 ) -> UpdateDatasetsTaskResult:
     # the parquet rewrite cannot be interrupted midway, only skipped before it starts
     if self.is_aborted():

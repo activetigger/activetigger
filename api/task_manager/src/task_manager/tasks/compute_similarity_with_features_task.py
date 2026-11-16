@@ -3,19 +3,21 @@ from typing import TypedDict
 
 import numpy as np
 import pandas as pd
+from activetigger.datamodels import TaskComputing
 from pandas import DataFrame
 from pydantic import BaseModel
 
-from task_manager.auto_callback_task import AbortableAutoCallbackTask, QueueName
+from task_manager.active_tigger_task import AbortableActiveTiggerTask, QueueName
 from task_manager.celery import celery_app
+from task_manager.task_input import TaskInputs
+from task_manager.task_names import TaskNames
 from task_manager.tasks.compute_features_from_specs import (
     FeatureSpec,
     compute_features_from_specs,
 )
 
 
-class ComputeSimilarityWithFeaturesTaskInput(BaseModel):
-    project_slug: str
+class ComputeSimilarityWithFeaturesTaskInputs(TaskInputs):
     prompt_id: str
     dataset: str
     specs: list[FeatureSpec]
@@ -27,6 +29,8 @@ class ComputeSimilarityWithFeaturesTaskInput(BaseModel):
     prompt_vector: list[float]
     path_output: Path
     file_name: str
+    text: str
+    feature_name: str
 
 
 # Return type must be a dict, a BaseModel would not be serialized by Celery
@@ -37,10 +41,16 @@ class ComputeSimilarityWithFeaturesTaskResult(TypedDict):
     output_path: str
 
 
-class ComputeSimilarityWithFeaturesTask(AbortableAutoCallbackTask):
-    name = "compute similarity with features"
+class ComputeSimilarityWithFeaturesTask(AbortableActiveTiggerTask):
+    name: TaskNames = "compute_similarity_with features"
     # recomputes an embedding feature on the complete dataset
     queue = QueueName.GPU
+
+    @classmethod
+    def clean_temp_files(
+        cls, computing_task: TaskComputing[ComputeSimilarityWithFeaturesTaskInputs]
+    ):
+        computing_task.inputs.data_path.unlink(missing_ok=True)
 
 
 def cosine_similarity_ranking(features: DataFrame, prompt_vector: np.ndarray) -> DataFrame:
@@ -71,7 +81,7 @@ def cosine_similarity_ranking(features: DataFrame, prompt_vector: np.ndarray) ->
     pydantic=True,
 )
 def compute_similarity_with_features(
-    self: ComputeSimilarityWithFeaturesTask, inputs: ComputeSimilarityWithFeaturesTaskInput
+    self: ComputeSimilarityWithFeaturesTask, inputs: ComputeSimilarityWithFeaturesTaskInputs
 ) -> ComputeSimilarityWithFeaturesTaskResult:
     try:
         data = pd.read_pickle(inputs.data_path)

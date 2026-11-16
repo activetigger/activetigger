@@ -17,10 +17,14 @@ class ComputePromptEmbeddingCallback(TaskCallback):
     # append the prompt row (text, user, feature from the process entry) to prompts.parquet
     @classmethod
     def on_complete_task_specific(
-        cls, task_id: str, task_result: ComputePromptEmbeddingTaskResult, project_manager, process
+        cls,
+        task_id: str,
+        task_result: ComputePromptEmbeddingTaskResult,
+        project_manager,
+        computing_task,
     ):
         if project_manager.prompts is None:
             return
         project_manager.prompts.receive_result(
-            process, np.asarray(task_result["embedding"], dtype=float)
+            computing_task, np.asarray(task_result["embedding"], dtype=float)
         )

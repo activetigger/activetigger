@@ -8,7 +8,7 @@ from activetigger.functions import tokenize
 from fasttext.util import download_model
 from pandas import DataFrame, Series
 
-from task_manager.auto_callback_task import UpdateProgressMethod
+from task_manager.active_tigger_task import UpdateProgressMethod
 
 
 def encode_fasttext(

@@ -12,7 +12,7 @@ from activetigger.generation.openapi import OpenAPI
 from activetigger.generation.openrouter import OpenRouter
 from pandas import DataFrame, Series
 
-from task_manager.auto_callback_task import UpdateProgressMethod
+from task_manager.active_tigger_task import UpdateProgressMethod
 
 # Flush in-memory results to a recovery file every N rows so a crash loses at
 # most FLUSH_EVERY - 1 paid generations instead of the whole batch.

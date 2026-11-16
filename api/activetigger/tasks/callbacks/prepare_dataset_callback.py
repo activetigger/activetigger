@@ -25,7 +25,7 @@ class PrepareDatasetCallback(TaskCallback):
         logger.info(f"prepare dataset {task_id} failed: {task_report.exception}")
 
     @classmethod
-    def on_complete_task_specific(cls, task_id, task_result, project_manager, process):
+    def on_complete_task_specific(cls, task_id, task_result, project_manager, computing_task):
         pass
 
     @classmethod

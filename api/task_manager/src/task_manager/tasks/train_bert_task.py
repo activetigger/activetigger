@@ -1,8 +1,8 @@
 from typing import cast
 
-from activetigger.datamodels import EventsDict
+from activetigger.datamodels import EventsDict, TaskComputing
 
-from task_manager.auto_callback_task import AbortableAutoCallbackTask, QueueName
+from task_manager.active_tigger_task import AbortableActiveTiggerTask, QueueName, TaskNames
 from task_manager.celery import celery_app
 from task_manager.tasks.train_bert import TrainBert, TrainBertTaskInputs
 
@@ -13,14 +13,14 @@ class TrainBertTaskResult(EventsDict):
 
 
 # Task definition using the auto callback generic parent task class
-class TrainBertTask(AbortableAutoCallbackTask[TrainBertTaskInputs]):
-    name = "train bert"
+class TrainBertTask(AbortableActiveTiggerTask[TrainBertTaskInputs]):
+    name: TaskNames = "train_bert"
     # GPU task unless CPU_only mode
-    queue = QueueName.GPU  # if os.environ.get("GPU") == "true" else QueueName.CPU
+    queue: QueueName = QueueName.GPU  # if os.environ.get("GPU") == "true" else QueueName.CPU
 
     @classmethod
-    def clean_temp_files(cls, inputs: TrainBertTaskInputs):
-        inputs.path_df.unlink(missing_ok=True)
+    def clean_temp_files(cls, computing_task: TaskComputing[TrainBertTaskInputs]):
+        computing_task.inputs.path_df.unlink(missing_ok=True)
 
 
 # Task registration

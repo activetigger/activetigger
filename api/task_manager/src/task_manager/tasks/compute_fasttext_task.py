@@ -3,17 +3,16 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 import pandas as pd
-from pydantic import BaseModel
 
-from task_manager.auto_callback_task import AbortableAutoCallbackTask, QueueName
+from task_manager.active_tigger_task import AbortableActiveTiggerTask, QueueName
 from task_manager.celery import celery_app
+from task_manager.task_input import TaskInputs
+from task_manager.task_names import TaskNames
 from task_manager.tasks.compute_fasttext import encode_fasttext
 
 
-class ComputeFasttextTaskInput(BaseModel):
+class ComputeFasttextTaskInputs(TaskInputs):
     feature_name: str
-    username: str
-    project_slug: str
     texts_path: Path
     path_process: Path
     path_models: Path
@@ -29,8 +28,8 @@ class ComputeFasttextTaskResult(TypedDict):
     parameters: dict[str, Any]
 
 
-class ComputeFasttextTask(AbortableAutoCallbackTask):
-    name = "compute fasttext"
+class ComputeFasttextTask(AbortableActiveTiggerTask):
+    name: TaskNames = "compute_fasttext"
     # fasttext runs on CPU only
     queue = QueueName.CPU
 
@@ -43,7 +42,7 @@ class ComputeFasttextTask(AbortableAutoCallbackTask):
     pydantic=True,
 )
 def compute_fasttext(
-    self: ComputeFasttextTask, inputs: ComputeFasttextTaskInput
+    self: ComputeFasttextTask, inputs: ComputeFasttextTaskInputs
 ) -> ComputeFasttextTaskResult:
     texts = pd.read_pickle(inputs.texts_path)
     try:
@@ -61,12 +60,12 @@ def compute_fasttext(
     emb.to_parquet(features_path)
     return {
         "project_slug": inputs.project_slug,
-        "username": inputs.username,
+        "username": inputs.user,
         "features_path": str(features_path),
         "parameters": {
             "model": inputs.model,
             "name": inputs.feature_name,
             "kind": "fasttext",
-            "username": inputs.username,
+            "username": inputs.user,
         },
     }

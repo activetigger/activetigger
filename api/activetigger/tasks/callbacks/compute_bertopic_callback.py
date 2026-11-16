@@ -22,12 +22,9 @@ class ComputeBertopicCallback(TaskCallback):
     # it will be executed from the orchestrator allowing using its dependencies (db and all)
     @classmethod
     def on_complete_task_specific(
-        cls, task_id: str, task_result: ComputeBertopicTaskResult, project_manager, process
+        cls, task_id: str, task_result: ComputeBertopicTaskResult, project_manager, computing_task
     ):
-        bertopic_model = cast(BertopicComputing, process)
-        events = EventsModel(events=task_result["events"])
-        project_manager.bertopic.add(bertopic_model)
-        project_manager.monitoring.close_process(bertopic_model.unique_id, events)
+        project_manager.bertopic.add(computing_task)
 
     # a run killed before its own cleanup must not leave a half-written run directory,
     # but a run this task did not create (name already taken) must be kept

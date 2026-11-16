@@ -1,13 +1,13 @@
 import datetime
 from enum import Enum, StrEnum
 from pathlib import Path
-from typing import Annotated, Any, Literal, TypedDict
+from typing import Annotated, Any, Generic, Literal, TypedDict, TypeVar
 
 from pandas import DataFrame
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field  # for dataframe
 from sklearn.base import BaseEstimator
-from task_manager.auto_callback_task import TaskProgressState
 from task_manager.task_input import TaskInputs
+from task_manager.task_names import TaskNames
 
 # Data model to use of the API
 
@@ -15,6 +15,11 @@ from task_manager.task_input import TaskInputs
 # Used as a Pydantic constraint
 
 MODEL_NAME_PATTERN = r"^[A-Za-z0-9_\-]{1,64}$"
+
+
+class TaskProgressState(TypedDict):
+    progress: float
+    progress_label: str | None
 
 
 class ChangePasswordModel(BaseModel):
@@ -686,20 +691,29 @@ class ProjectUpdateModel(BaseModel):
     add_n_train: int | None = None
 
 
+ProjectStatus = Literal["up", "down", "creating", "duplicating", "not existing"]
+
 # --------------------
 # CLASS FOR COMPUTING
 # --------------------
 
+TaskInputsGeneric = TypeVar("TaskInputsGeneric", bound=TaskInputs)
+
 
 # ongoing Celery Task representation
-class TaskComputing(BaseModel):
+class TaskComputing(BaseModel, Generic[TaskInputsGeneric]):
     id: str
-    kind: str  # from task name in celery
+    kind: TaskNames  # from task name in celery
     user: str  # duplicated from input
     project_slug: str  # duplicated from input
-    input: TaskInputs
+    inputs: TaskInputsGeneric
     # abortable_celery_task: bool | None = None # can be deduce from name > celery_app registry > class isinstance(Abortable)
     # temp_files should be registered in the Task class
+
+
+class TaskToBeRun(TypedDict):
+    name: TaskNames
+    inputs: TaskInputs
 
 
 class ProcessComputing(BaseModel):
@@ -1430,11 +1444,6 @@ class GeneratedElementsIn(BaseModel):
 
 class ExportGenerationsParams(BaseModel):
     filters: list[str] = []
-
-
-class ProjectCreatingModel(ProcessComputing):
-    project_slug: str
-    kind: Literal["create_project"]
 
 
 class TopicsOutModel(BaseModel):
