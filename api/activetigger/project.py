@@ -1818,6 +1818,9 @@ class Project:
         # Row-level columns are shared across schemes (one value per row).
         # Annotation-level columns are produced per scheme and prefixed.
         SHARED_COLS = ["dataset", "text", "id_external"]
+        # no text in the export when raw export is disabled
+        if not config.allow_export:
+            SHARED_COLS.remove("text")
         SCHEME_COLS = ["labels", "user", "timestamp", "comment"]
 
         if format not in ["csv", "parquet", "xlsx"]:

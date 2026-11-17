@@ -141,6 +141,7 @@ class Config(metaclass=_Singleton):
         "yes",
     )
     carbon_country: str | None = os.environ.get("CARBON_COUNTRY", None)
+    allow_export: bool = os.environ.get("ALLOW_EXPORT", "true").lower() in ("true", "1", "yes")
 
     def __init__(self):
         # for variables which needs cast or other treatment we do that work in the constructor

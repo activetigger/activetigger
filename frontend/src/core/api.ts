@@ -2416,6 +2416,7 @@ export function useGetServer(projectState: ProjectStateModel | null) {
     memory: data?.memory,
     disk: data?.disk,
     mail_available: data?.mail_available,
+    allow_export: data?.allow_export,
     messages: data?.messages,
     reFetchQueueState: reFetch,
   };

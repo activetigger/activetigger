@@ -213,6 +213,8 @@ def export_raw(
     which serves the file from the static volume.
     """
     test_rights(ProjectAction.EXPORT_DATA, current_user.username, project.name)
+    if not config.allow_export:
+        raise HTTPException(status_code=403, detail="Raw dataset export is disabled on this server")
     try:
         file_path = project.export_raw(project.name)
         if "sqlite" in config.database_url:

@@ -16,6 +16,7 @@ import {
   useGetProjectSummary,
   useGetPromptSimilarityFile,
   useGetRawDataFile,
+  useGetServer,
 } from '../core/api';
 import { downloadSummaryJson, downloadSummaryMd, ProjectSummary } from '../core/projectSummary';
 import { useAppContext } from '../core/useAppContext';
@@ -199,6 +200,7 @@ export const ProjectExportPage: FC = () => {
   const { getPredictionsFile } = useGetPredictionsFile(projectName || null);
   const { getModelFile } = useGetModelFile(projectName || null);
   const { getRawDataFile } = useGetRawDataFile(projectName || null);
+  const { allow_export } = useGetServer(null);
   const { getProjectionFile } = useGetProjectionFile(projectName || null);
   const getProjectSummary = useGetProjectSummary();
   const [summaryLoading, setSummaryLoading] = useState<'json' | 'md' | null>(null);
@@ -240,6 +242,12 @@ export const ProjectExportPage: FC = () => {
             <section className="mt-4">
               <h5 className="fw-semibold">Annotations</h5>
               <hr className="mt-1" />
+              {allow_export === false && (
+                <div className="text-muted small mb-2">
+                  Text export is disabled on this server: files contain annotations without the text
+                  column.
+                </div>
+              )}
               <div className="d-flex flex-wrap gap-2">
                 <button
                   className="btn-secondary-action"
@@ -488,9 +496,18 @@ export const ProjectExportPage: FC = () => {
             <section className="mt-4">
               <h5 className="fw-semibold">Raw dataset</h5>
               <hr className="mt-1" />
-              <button className="btn-secondary-action" onClick={() => getRawDataFile()}>
+              <button
+                className="btn-secondary-action"
+                disabled={allow_export === false}
+                onClick={() => getRawDataFile()}
+              >
                 Export raw dataset in parquet
               </button>
+              {allow_export === false && (
+                <div className="text-muted small mt-2">
+                  Raw dataset export is disabled on this server.
+                </div>
+              )}
             </section>
 
             <section className="mt-4">

@@ -1312,6 +1312,7 @@ class ServerStateModel(BaseModel):
     memory: dict
     disk: dict
     mail_available: bool
+    allow_export: bool = True
     messages: list[MessagesOutModel]
 
 

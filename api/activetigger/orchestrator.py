@@ -510,6 +510,7 @@ class Orchestrator:
             memory=stats["memory"],
             disk=stats["disk"],
             mail_available=self.messages.mail_available,
+            allow_export=config.allow_export,
             messages=self.messages.get_messages_system(),
         )
 
