@@ -169,7 +169,7 @@ def new_project(
         raise HTTPException(status_code=400, detail="No upload_id provided for the data file")
 
     # add a delay if projects are already being created
-    if len(orchestrator.project_creation_ongoing) >= 3:
+    if len(orchestrator.project_creation_ongoing_computing_tasks()) >= 3:
         time.sleep(random.randint(1, 4))
 
     try:

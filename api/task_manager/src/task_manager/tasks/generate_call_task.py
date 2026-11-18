@@ -11,7 +11,7 @@ from task_manager.task_names import TaskNames
 from task_manager.tasks.generate_call import generate_call
 
 
-class GenerateCallTaskInputs(TaskInputs):
+class GenerateCallTaskInputs(TaskInputs[str]):
     dataset: str
     prompt_name: str
     prompt: str

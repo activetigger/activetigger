@@ -11,7 +11,7 @@ from task_manager.task_names import TaskNames
 from task_manager.tasks.update_datasets import update_datasets
 
 
-class UpdateDatasetsTaskInputs(TaskInputs):
+class UpdateDatasetsTaskInputs(TaskInputs[str]):
     path_project: Path
     # current columns, to detect what actually changes
     cols_context: list[str]

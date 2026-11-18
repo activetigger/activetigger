@@ -11,7 +11,7 @@ from task_manager.task_names import TaskNames
 from task_manager.tasks.compute_dfm import compute_dfm
 
 
-class ComputeDfmTaskInputs(TaskInputs):
+class ComputeDfmTaskInputs(TaskInputs[str]):
     feature_name: str
     texts_path: Path
     path_process: Path

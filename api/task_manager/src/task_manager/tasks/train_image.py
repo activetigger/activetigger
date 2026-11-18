@@ -119,7 +119,7 @@ def _open_image_rgb(path: str) -> Image.Image | None:
     return img
 
 
-class TrainImageTaskInputs(TaskInputs):
+class TrainImageTaskInputs(TaskInputs[str]):
     path: Path
     path_df: Path
     model_name: str

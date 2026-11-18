@@ -1,5 +1,5 @@
 from enum import StrEnum
-from typing import Generic, Protocol, TypedDict, TypeVar
+from typing import Generic, Literal, Protocol, TypedDict, TypeVar
 
 from activetigger.datamodels import TaskComputing
 from celery import Task
@@ -30,6 +30,8 @@ class UpdateProgressMethod(Protocol):
 
 TInputs = TypeVar("TInputs", bound=TaskInputs)
 
+TaskScope = Literal["project", "orchestrator"]
+
 
 class ActiveTiggerTask(Task, Generic[TInputs]):
     """
@@ -41,6 +43,7 @@ class ActiveTiggerTask(Task, Generic[TInputs]):
     """
 
     name: TaskNames
+    scope: TaskScope = "project"
 
     # Callback to orchestrator on task success
     def on_success(self, retval, task_id, args, kwargs):

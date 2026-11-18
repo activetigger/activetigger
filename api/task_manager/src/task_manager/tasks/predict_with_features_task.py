@@ -17,7 +17,7 @@ from task_manager.tasks.compute_features_from_specs import (
 )
 
 
-class PredictWithFeaturesTaskInputs(TaskInputs):
+class PredictWithFeaturesTaskInputs(TaskInputs[str]):
     project_slug: str
     # quickmodel name and dataset predicted, echoed to the callback
     name: str

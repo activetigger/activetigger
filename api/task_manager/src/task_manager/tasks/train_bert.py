@@ -152,7 +152,7 @@ class CustomTrainer(Trainer):
         return (loss, outputs) if return_outputs else loss
 
 
-class TrainBertTaskInputs(TaskInputs):
+class TrainBertTaskInputs(TaskInputs[str]):
     path: Path
     path_df: Path
     model_name: str

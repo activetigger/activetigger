@@ -12,7 +12,7 @@ from task_manager.task_names import TaskNames
 from task_manager.tasks.add_evalset import add_evalset, add_evalset_image
 
 
-class AddEvalsetTaskInputs(TaskInputs):
+class AddEvalsetTaskInputs(TaskInputs[str]):
     dataset: str
     path_project: Path
     # pickled Index of every id already in the project

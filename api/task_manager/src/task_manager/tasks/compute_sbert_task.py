@@ -12,7 +12,7 @@ from task_manager.task_names import TaskNames
 from task_manager.tasks.compute_sbert import encode_sbert
 
 
-class ComputeSbertTaskInputs(TaskInputs):
+class ComputeSbertTaskInputs(TaskInputs[str]):
     feature_name: str
     texts_path: Path
     path_process: Path

@@ -307,7 +307,7 @@ def decode_spans(
     return spans
 
 
-class TrainNerTaskInputs(TaskInputs):
+class TrainNerTaskInputs(TaskInputs[str]):
     path: Path
     path_df: Path
     project_slug: str

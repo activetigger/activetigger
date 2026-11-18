@@ -12,7 +12,7 @@ from task_manager.task_names import TaskNames
 from task_manager.tasks.compute_features_from_specs import FeatureSpec, compute_features_from_specs
 
 
-class ExtendFeaturesTaskInputs(TaskInputs):
+class ExtendFeaturesTaskInputs(TaskInputs[str]):
     specs: list[FeatureSpec]
     # pickled Series covering exactly the new eval rows (texts)
     data_path: Path

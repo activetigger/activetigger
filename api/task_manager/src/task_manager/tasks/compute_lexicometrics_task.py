@@ -12,7 +12,7 @@ from task_manager.task_names import TaskNames
 from task_manager.tasks.compute_lexicometrics import compute_lexicometrics
 
 
-class ComputeLexicometricsTaskInputs(TaskInputs):
+class ComputeLexicometricsTaskInputs(TaskInputs[str]):
     # project directory holding the train file
     path_data: Path
     train_file: str = "train.parquet"

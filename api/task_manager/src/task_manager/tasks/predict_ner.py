@@ -33,7 +33,7 @@ from task_manager.task_input import TaskInputs
 from task_manager.tasks.train_ner import decode_spans, parse_spans
 
 
-class PredictNerTaskInputs(TaskInputs):
+class PredictNerTaskInputs(TaskInputs[str]):
     path: Path
     model_name: str
     dataset: str

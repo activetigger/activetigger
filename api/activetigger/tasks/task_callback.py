@@ -26,19 +26,11 @@ class TaskCallback(ABC):
         return str(task_result["project_slug"])
 
     @staticmethod
-    def get_project_manager(project_slug: str, task_id: str | None = None) -> Project:
+    def get_project_manager(project_slug: str) -> Project:
         orchestrator = get_orchestrator()
         if project_slug in orchestrator.projects:
             return orchestrator.projects[project_slug]
-        # a project still being created is not yet in orchestrator.projects
-        if project_slug in orchestrator.project_creation_ongoing:
-            return orchestrator.project_creation_ongoing[project_slug]
-        # the entry outlives the Project object: do not leave it stale
-        if task_id is not None:
-            orchestrator.drop_process(task_id)
-        raise ProjectNotTrackedError(
-            f"Project {project_slug} not listed in orchestrator, we can't finish task"
-        )
+        return orchestrator._new_project(project_slug)
 
     @classmethod
     def on_complete(cls, task_id: str, task_result: Any) -> Any:
@@ -49,11 +41,11 @@ class TaskCallback(ABC):
         orchestrator.callbacks_in_progress.add(task_id)
         try:
             project_slug = cls.get_project_slug(task_result)
-            project_manager = cls.get_project_manager(project_slug, task_id)
+            project_manager = cls.get_project_manager(project_slug)
             # copy: clean_process mutates the list
             # always drop the entry, a raising hook must not leave a stale process
             try:
-                computing_task = orchestrator.__computing_tasks_by_project[project_slug][task_id]
+                computing_task = orchestrator.get_computing_task(task_id, project_slug)
                 cls.on_complete_task_specific(task_id, task_result, project_manager, computing_task)
                 events = (
                     EventsModel(events=task_result["events"]) if "events" in task_result else None
@@ -64,7 +56,8 @@ class TaskCallback(ABC):
                 print(f"Error in {computing_task.kind} callback {task_id}: {ex}")
                 project_manager.errors.add(f"Error in {computing_task.kind} : {ex}")
                 # a creation is only cleaned by the orchestrator loop on "error"
-                if project_slug in orchestrator.project_creation_ongoing:
+                # TODO: we can remoe that probably
+                if project_slug in get_orchestrator().project_creation_ongoing_computing_tasks():
                     project_manager.status = "error"
             finally:
                 orchestrator.on_task_end(task_id, project_slug, events)
@@ -92,12 +85,13 @@ class TaskCallback(ABC):
         task_input = task_report.task_args[0]
         project_slug = task_input["project_slug"]
         try:
-            project_manager = cls.get_project_manager(project_slug, task_id)
+            project_manager = cls.get_project_manager(project_slug)
             specific_message = cls.on_failure_task_specific(task_id, task_report, project_manager)
             # a stopped task is not an error (same as the in-process "cancelled" state)
             if "Process interrupted by user" in task_report.exception or was_stopped(task_id):
                 # except for a creation: the loop only cleans a creating project on "error"
-                if project_slug in get_orchestrator().project_creation_ongoing:
+                # TODO: we probably can remove that
+                if project_slug in get_orchestrator().project_creation_ongoing_computing_tasks():
                     project_manager.errors.add("Project creation stopped by user")
                     project_manager.status = "error"
                 return

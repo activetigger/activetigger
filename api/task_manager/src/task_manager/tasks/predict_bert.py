@@ -38,7 +38,7 @@ from task_manager.active_tigger_task import UpdateProgressMethod
 from task_manager.task_input import TaskInputs
 
 
-class PredictBertTaskInputs(TaskInputs):
+class PredictBertTaskInputs(TaskInputs[str]):
     path: Path
     model_name: str
     dataset: str

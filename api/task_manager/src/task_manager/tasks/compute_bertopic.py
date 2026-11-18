@@ -198,7 +198,7 @@ class CustomLemmatizer:
         return out
 
 
-class ComputeBertopicTaskInput(TaskInputs):
+class ComputeBertopicTaskInput(TaskInputs[str]):
     path_bertopic: Path
     path_data: Path
     project_slug: str

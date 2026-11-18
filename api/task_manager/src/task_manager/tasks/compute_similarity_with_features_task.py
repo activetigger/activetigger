@@ -17,7 +17,7 @@ from task_manager.tasks.compute_features_from_specs import (
 )
 
 
-class ComputeSimilarityWithFeaturesTaskInputs(TaskInputs):
+class ComputeSimilarityWithFeaturesTaskInputs(TaskInputs[str]):
     prompt_id: str
     dataset: str
     specs: list[FeatureSpec]

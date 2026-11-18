@@ -15,7 +15,6 @@ from fastapi.responses import FileResponse
 from pandas import DataFrame
 from task_manager.tasks.add_evalset_task import AddEvalsetTask, AddEvalsetTaskInputs
 from task_manager.tasks.compute_features_from_specs import FeatureSpec
-from task_manager.tasks.create_project_task import CreateProjectTask, CreateProjectTaskInput
 from task_manager.tasks.extend_features_task import ExtendFeaturesTask, ExtendFeaturesTaskInputs
 from task_manager.tasks.generate_call_task import GenerateCallTask, GenerateCallTaskInputs
 from task_manager.tasks.update_datasets_task import (
@@ -35,7 +34,6 @@ from activetigger.datamodels import (
     EvalSetDataModel,
     EvalSetImageModel,
     ExportGenerationsParams,
-    ExtendFeaturesComputing,
     FeatureComputing,
     GenerationComputing,
     GenerationModel,
@@ -46,7 +44,6 @@ from activetigger.datamodels import (
     NextProjectStateModel,
     PredictedLabel,
     ProcessComputing,
-    ProjectBaseModel,
     ProjectDescriptionModel,
     ProjectionOutModel,
     ProjectionOutModelNode,
@@ -365,62 +362,6 @@ class Project:
             for jsonl_path in self.params.dir.glob("gen_*.jsonl"):
                 if jsonl_path.stem.removeprefix("gen_") not in running:
                     self._recover_generations_from_jsonl(jsonl_path)
-
-    def get_project_creation_task(
-        self, params: ProjectBaseModel, username: str, path: Path
-    ) -> TaskToBeRun:
-        """
-        Start the project creation task on a worker
-        """
-        self.status = "creating"
-
-        # test if the name of the column is specified
-        if params.col_id is None or params.col_id == "":
-            raise InvalidInputError("No column selected for the id")
-        if params.cols_text is None or len(params.cols_text) == 0:
-            raise InvalidInputError("No column selected for the text")
-
-        # add the dedicated directory
-        params.dir = path.joinpath(self.project_slug)
-        # start a create project task
-        task_inputs = CreateProjectTaskInput(
-            image_project=False,
-            project_slug=self.project_slug,
-            params=params,
-            user=username,
-            data_all=config.data_all,
-            train_file=config.train_file,
-            valid_file=config.valid_file,
-            test_file=config.test_file,
-            features_file=config.features_file,
-            random_seed=params.seed,
-        )
-        return {"name": CreateProjectTask.name, "inputs": task_inputs}
-
-    def get_project_creation_imagexp_task(
-        self, params: ProjectBaseModel, username: str, path: Path
-    ) -> TaskToBeRun:
-        """
-        Experimental: enqueue creation of an image project.
-        See docs/image-projects-strategy.md.
-        """
-        self.status = "creating"
-        params.dir = path.joinpath(self.project_slug)
-
-        # start a create project task
-        task_inputs = CreateProjectTaskInput(
-            image_project=True,
-            project_slug=self.project_slug,
-            params=params,
-            user=username,
-            data_all=config.data_all,
-            train_file=config.train_file,
-            valid_file=config.valid_file,
-            test_file=config.test_file,
-            features_file=config.features_file,
-            random_seed=params.seed,
-        )
-        return {"name": CreateProjectTask.name, "inputs": task_inputs}
 
     def finish_project_creation(
         self,

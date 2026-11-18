@@ -11,7 +11,7 @@ from task_manager.task_names import TaskNames
 from task_manager.tasks.compute_fasttext import encode_fasttext
 
 
-class ComputeFasttextTaskInputs(TaskInputs):
+class ComputeFasttextTaskInputs(TaskInputs[str]):
     feature_name: str
     texts_path: Path
     path_process: Path

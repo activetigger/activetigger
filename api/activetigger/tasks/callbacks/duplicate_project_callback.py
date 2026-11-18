@@ -5,7 +5,6 @@ from task_manager.tasks.duplicate_project_task import (
     DuplicateProjectTask,
     DuplicateProjectTaskResult,
 )
-from task_manager.utils import TaskFailureReportForCallback
 
 from activetigger.orchestrator import get_orchestrator
 
@@ -17,9 +16,16 @@ class DuplicateProjectCallback(TaskCallback):
     # task_name is used to identify which callback to execute
     task_name = DuplicateProjectTask.name
 
-    # the target project does not exist yet, so the generic project hooks do not apply
+    @staticmethod
+    def _clean_target(target_dir: str, target_static_dir: str | None) -> None:
+        shutil.rmtree(target_dir, ignore_errors=True)
+        if target_static_dir:
+            shutil.rmtree(target_static_dir, ignore_errors=True)
+
     @classmethod
-    def on_complete(cls, task_id: str, task_result: DuplicateProjectTaskResult):
+    def on_complete_task_specific(
+        cls, task_id, task_result: DuplicateProjectTaskResult, project_manager, computing_task
+    ):
         orchestrator = get_orchestrator()
         target_slug = task_result["target_slug"]
         try:
@@ -40,11 +46,9 @@ class DuplicateProjectCallback(TaskCallback):
         except Exception as e:
             cls._clean_target(task_result["target_dir"], task_result["target_static_dir"])
             orchestrator.creation_errors[target_slug] = f"DB duplication failed: {e}"
-        finally:
-            orchestrator.project_duplication_ongoing.pop(target_slug, None)
 
     @classmethod
-    def on_failure(cls, task_id: str, task_report: TaskFailureReportForCallback):
+    def on_failure_task_specific(cls, task_id, task_report, project_manager):
         orchestrator = get_orchestrator()
         task_input = task_report.task_args[0]
         target_slug = task_input["target_slug"]
@@ -55,18 +59,3 @@ class DuplicateProjectCallback(TaskCallback):
             orchestrator.creation_errors[target_slug] = (
                 f"Duplication failed: {task_report.exception}"
             )
-        orchestrator.project_duplication_ongoing.pop(target_slug, None)
-
-    @staticmethod
-    def _clean_target(target_dir: str, target_static_dir: str | None) -> None:
-        shutil.rmtree(target_dir, ignore_errors=True)
-        if target_static_dir:
-            shutil.rmtree(target_static_dir, ignore_errors=True)
-
-    @classmethod
-    def on_complete_task_specific(cls, task_id, task_result, project_manager, computing_task):
-        pass
-
-    @classmethod
-    def on_failure_task_specific(cls, task_id, task_report, project_manager):
-        return None

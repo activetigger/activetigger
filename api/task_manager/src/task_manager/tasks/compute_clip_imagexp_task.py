@@ -12,7 +12,7 @@ from task_manager.task_names import TaskNames
 from task_manager.tasks.compute_clip_imagexp import encode_clip
 
 
-class ComputeClipImagexpTaskInputs(TaskInputs):
+class ComputeClipImagexpTaskInputs(TaskInputs[str]):
     feature_name: str
     paths_path: Path
     path_process: Path

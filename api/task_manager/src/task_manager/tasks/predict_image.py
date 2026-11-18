@@ -112,7 +112,7 @@ class _ImagePredictDataset(Dataset[torch.Tensor]):
         return out["pixel_values"].squeeze(0)
 
 
-class PredictImageTaskInputs(TaskInputs):
+class PredictImageTaskInputs(TaskInputs[str]):
     path: Path
     project_slug: str
     model_name: str

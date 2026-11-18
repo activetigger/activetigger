@@ -15,7 +15,7 @@ from pydantic import BaseModel
 from task_manager.task_input import TaskInputs
 
 
-class PredictMLTaskInputs(TaskInputs):
+class PredictMLTaskInputs(TaskInputs[str]):
     path: Path  # model directory (model.pkl, training_data.parquet)
     path_df: Path
     model_name: str

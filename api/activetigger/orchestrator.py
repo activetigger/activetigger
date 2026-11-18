@@ -25,7 +25,8 @@ from task_manager.active_tigger_task import ActiveTiggerTask, QueueName
 from task_manager.celery import celery_app
 from task_manager.stop_signal import stop_requested
 from task_manager.task_input import TaskInputs
-from task_manager.task_names import PROJECT_CREATION_TASKS, TaskNames
+from task_manager.task_names import TaskNames
+from task_manager.tasks.create_project_task import CreateProjectTask, CreateProjectTaskInputs
 from task_manager.tasks.duplicate_project_task import (
     DuplicateProjectTask,
     DuplicateProjectTaskInputs,
@@ -36,7 +37,7 @@ from activetigger.config import config
 from activetigger.datamodels import (
     DatasetModel,
     EventsModel,
-    LMComputing,
+    OrchestratorTasks,
     ProcessComputing,
     ProjectBaseModel,
     ProjectStatus,
@@ -87,10 +88,9 @@ class Orchestrator:
     users: Users
     messages: Messages
     max_projects: int
-    project_creation_ongoing: dict[str, Project]
+
     computing: dict[str, list[ProcessComputing]]
-    # we might need to have orchestrator tasks on top of projects one
-    __computing_tasks_by_project: dict[str, dict[str, TaskComputing]]
+    __computing_tasks: OrchestratorTasks
     monitoring: Monitoring
     toolbox: Toolbox
 
@@ -133,14 +133,8 @@ class Orchestrator:
         # projects in memory
         self.projects = {}
 
-        # projects in creation
-        self.project_creation_ongoing = {}
-
         # processes in flight per project slug; shared by reference with the Project
         self.computing = {}
-
-        # projects being duplicated (copy on a celery worker, DB clone in the callback)
-        self.project_duplication_ongoing: dict[str, TaskComputing[DuplicateProjectTaskInputs]] = {}
 
         # store creation errors so they survive project cleanup
         self.creation_errors: dict[str, str] = {}
@@ -218,12 +212,7 @@ class Orchestrator:
         """
         for project_slug in list(self.computing):
             self.stop_project_tasks(project_slug, username)
-        # duplications are tracked apart from computing
-        for dup in list(self.project_duplication_ongoing.values()):
-            stop_celery_task(dup["task_id"], True)
         self.projects = {}
-        self.project_creation_ongoing = {}
-        self.project_duplication_ongoing = {}
         self.computing = {}
 
     def _new_project(self, project_slug: str) -> Project:
@@ -259,21 +248,30 @@ class Orchestrator:
         # client-provided name to the same form or the task won't find the file
         if project.filename is not None:
             project.filename = sanitize_uploaded_filename(project.filename)
-        self.project_creation_ongoing[project_slug] = self._new_project(project_slug)
-        # dispatch on kind before enqueuing (see docs/image-projects-strategy.md)
-        task = (
-            self.project_creation_ongoing[project_slug].get_project_creation_imagexp_task(
-                params=project, username=username, path=self.path
-            )
-            if getattr(project, "kind", "text") == "image"
-            else self.project_creation_ongoing[project_slug].get_project_creation_task(
-                params=project,
-                username=username,
-                path=self.path,
-            )
+
+        # test if the name of the column is specified
+        if project.col_id is None or project.col_id == "":
+            raise InvalidInputError("No column selected for the id")
+        if project.cols_text is None or len(project.cols_text) == 0:
+            raise InvalidInputError("No column selected for the text")
+
+        project.dir = self.path.joinpath(project_slug)
+
+        # start a create project task
+        task_inputs = CreateProjectTaskInputs(
+            image_project=getattr(project, "kind", "text") == "image",
+            project_slug=project_slug,
+            params=project,
+            user=username,
+            data_all=config.data_all,
+            train_file=config.train_file,
+            valid_file=config.valid_file,
+            test_file=config.test_file,
+            features_file=config.features_file,
+            random_seed=project.seed,
         )
 
-        self.create_task(task["name"], task["inputs"])
+        self.create_task(CreateProjectTask.name, task_inputs)
         return project_slug
 
     def _sync_update_processes(self, project_lifetime: int) -> None:
@@ -293,28 +291,6 @@ class Orchestrator:
                     to_del.append(p)
         for p in to_del:
             del self.projects[p]
-
-        # loop on creating projects
-        to_del = []
-        for p, project in list(self.project_creation_ongoing.items()):
-            try:
-                if project.status == "created":
-                    to_del.append(p)
-                if project.status == "error":
-                    errors = project.errors.state()
-                    if errors:
-                        self.creation_errors[p] = errors[-1][0]
-                    else:
-                        self.creation_errors[p] = "Unknown error during project creation"
-                    self.clean_unfinished_project(project_slug=p)
-                    to_del.append(p)
-            except Exception as e:
-                print(f"Error while updating project {p}: {e}")
-                self.creation_errors[p] = str(e)
-                self.clean_unfinished_project(project_slug=p)
-                to_del.append(p)
-        for p in to_del:
-            self.project_creation_ongoing.pop(p, None)
 
         # drop abandoned chunked-upload staging sessions
         try:
@@ -345,8 +321,8 @@ class Orchestrator:
         for slug, processes in self.computing.items():
             for process in processes:
                 tracked[process.unique_id] = (slug, process.kind)
-        for slug, ct in self.project_duplication_ongoing.items():
-            tracked[ct.id] = (slug, "duplicate_project")
+        # for slug, ct in self.project_duplication_ongoing.items():
+        #     tracked[ct.id] = (slug, "duplicate_project")
 
         for task_id, (slug, kind) in tracked.items():
             # its result is being stored by a callback: not lost
@@ -377,27 +353,17 @@ class Orchestrator:
         Remove a lost task from memory and surface it like a failure
         """
         stopped = stop_requested(task_id)
-        if kind == "duplicate_project":
-            self.project_duplication_ongoing.pop(slug, None)
-            shutil.rmtree(self.path.joinpath(slug), ignore_errors=True)
-            self.creation_errors[slug] = (
-                "Duplication cancelled" if stopped else f"Duplication lost ({reason})"
-            )
-            return
-        project = self.projects.get(slug) or self.project_creation_ongoing.get(slug)
-        if project is None:
-            self.drop_process(task_id)
-            return
-        for process in list(project.computing):
-            if process.unique_id == task_id:
-                project.clean_process(process)
-        if slug in self.project_creation_ongoing:
-            project.errors.add(
-                "Project creation stopped by user" if stopped else f"Creation lost ({reason})"
-            )
-            project.status = "error"
-        elif not stopped:
-            project.errors.add(f"Task {kind} lost: no result received ({reason})")
+        self.stop_task_by_id_and_project(task_id, slug)
+
+        project = self.projects.get(slug)
+        if project is not None:
+            if kind == "create_project":
+                project.errors.add(
+                    "Project creation stopped by user" if stopped else f"Creation lost ({reason})"
+                )
+                project.status = "error"
+            elif not stopped:
+                project.errors.add(f"Task {kind} lost: no result received ({reason})")
 
     def _collect_heavy_stats(self) -> dict:
         """
@@ -547,23 +513,12 @@ class Orchestrator:
         """
         if not self.exists(project_slug):
             return "not existing"
-        if project_slug in self.project_duplication_ongoing:
+        if project_slug in self.project_duplication_ongoing_computing_tasks():
             return "duplicating"
 
-        computing_tasks: list[TaskComputing] = (
-            list(self.__computing_tasks_by_project[project_slug].values())
-            if project_slug in self.__computing_tasks_by_project
-            else []
-        )
-        # creating case
-        creating = len([ct for ct in computing_tasks if ct.kind == "create_project"]) > 1
-        if creating:
+        if project_slug in self.project_creation_ongoing_computing_tasks():
             return "creating"
-        # duplicating
-        # duplicate: TaskNames = 'duplicate_project'
-        # duplicating = len([ct for ct in computing_tasks if ct.kind == duplicate])>1
-        # if duplicating:
-        #     return 'duplicating'
+
         # down
         if project_slug not in self.projects:
             return "down"
@@ -679,17 +634,18 @@ class Orchestrator:
         # create TaskComputing from tasks input
         task_class = cast(ActiveTiggerTask, celery_app.tasks[task_name])
         task_id = uuid()
-        task_computing = TaskComputing(
+        computing_task = TaskComputing(
             id=task_id,
             kind=task_name,
             user=inputs.user,
             project_slug=inputs.project_slug,
             inputs=inputs,
         )
-        if task_name == "duplicate_project":
-            self.project_duplication_ongoing[inputs.project_slug] = task_computing
+        # or in project_slug none case in case orchestrator_tasks_names is out of sync + typings
+        if task_class.scope == "orchestrator" or inputs.project_slug is None:
+            self.__computing_tasks.orchestrator_tasks[task_id] = computing_task
         else:
-            self.__computing_tasks_by_project[inputs.project_slug][task_id] = task_computing
+            self.__computing_tasks.projects_tasks[inputs.project_slug][task_id] = computing_task
 
         # TODO: should se use monitoring for all tasks or only a subset?
         # registered before the send: a fast task calls back at once
@@ -704,89 +660,149 @@ class Orchestrator:
                 task_id=task_id, **options
             )
         except Exception:
-            task_class.clean_temp_files(
-                self.__computing_tasks_by_project[inputs.project_slug][task_id]
-            )
-            del self.__computing_tasks_by_project[inputs.project_slug][task_id]
+            self.on_task_end(computing_task.id, computing_task.project_slug)
             raise
         return task_id
 
     def on_task_end(
-        self, task_id: str, project_slug: str, events: EventsModel | None = None
-    ) -> bool:
+        self, task_id: str, project_slug: str | None, events: EventsModel | None = None
+    ) -> None:
         """
         When task ends, this method must be called to delete the task representation from the orchestrator memory
         """
-        if project_slug not in self.__computing_tasks_by_project:
-            raise Exception(f"Project {project_slug} not registered in orchestrator")
-        if task_id not in self.__computing_tasks_by_project[project_slug]:
-            print(f"on_task_end called on an untracked task {task_id}")
-        else:
-            # clean temp files if needed
-            computing_task = self.__computing_tasks_by_project[project_slug][task_id]
-            task_class = cast(ActiveTiggerTask, celery_app.tasks[computing_task.kind])
-            if task_class.clean_temp_files:
-                task_class.clean_temp_files(computing_task)
-
+        computing_task = self.get_computing_task(task_id, project_slug)
+        if computing_task:
             self.monitoring.close_process(task_id, events)
-            del self.__computing_tasks_by_project[project_slug][task_id]
-        return True
+            self.__drop_computing_task(computing_task)
 
-    def find_task_by_id(self, task_id: str) -> TaskComputing | None:
-        """
-        Locate a task by its id across tracked projects
-        """
-        for tasks_by_id in self.__computing_tasks_by_project.values():
-            if task_id in tasks_by_id:
-                return tasks_by_id[task_id]
-        return None
+    def __drop_computing_task(self, computing_task: TaskComputing):
+        task_class = cast(ActiveTiggerTask, celery_app.tasks[computing_task.kind])
+        # clean temp files
+        if task_class.clean_temp_files:
+            task_class.clean_temp_files(computing_task)
 
-    def stop_task(self, task_id: str, project_slug: str | None = None, username: str = "system"):
-        if project_slug and project_slug not in self.__computing_tasks_by_project:
+        if (
+            task_class.scope == "orchestrator" or computing_task.inputs.project_slug is None
+        ) and computing_task.id in self.__computing_tasks.orchestrator_tasks:
+            del self.__computing_tasks.orchestrator_tasks[computing_task.id]
+        elif (
+            computing_task.id
+            in self.__computing_tasks.projects_tasks[computing_task.inputs.project_slug]
+        ):
+            del self.__computing_tasks.projects_tasks[computing_task.inputs.project_slug][
+                computing_task.id
+            ]
+
+    # get computing_task object from tis id and scope
+    def get_computing_task(self, task_id: str, project_slug: str | None):
+        computing_task: TaskComputing | None = None
+        # project scope
+        if project_slug:
+            if project_slug not in self.__computing_tasks:
+                raise Exception(f"Project {project_slug} not registered in orchestrator")
+            if task_id not in self.__computing_tasks.projects_tasks[project_slug]:
+                print(
+                    f"on_task_end called on an untracked task {task_id} in project {project_slug} scope"
+                )
+            else:
+                computing_task = self.__computing_tasks.projects_tasks[project_slug][task_id]
+        # orchestrator scope
+        if project_slug is None and task_id not in self.__computing_tasks.orchestrator_tasks:
+            print(f"on_task_end called on an untracked task {task_id} in orchestrator scope")
+        else:
+            computing_task = self.__computing_tasks.orchestrator_tasks[task_id]
+        return computing_task
+
+    # Stop one task by its id + project if appropriate
+    def stop_task_by_id_and_project(
+        self, task_id: str, project_slug: str | None = None, username: str = "system"
+    ):
+        if project_slug and project_slug not in self.__computing_tasks.projects_tasks:
             raise Exception(f"Project {project_slug} not registered in orchestrator")
-        computing_task = (
-            self.__computing_tasks_by_project[project_slug][task_id]
-            if project_slug
-            else self.find_task_by_id(task_id)
-        )
+        computing_task = self.get_computing_task(task_id, project_slug)
 
         if computing_task is None:
             # we don't raise here as it looks like the job has already been done
-            print(f"Could not find task {task_id} in Orchestrator task list")
+            print(f"Could not find task {task_id} scope {project_slug} in Orchestrator")
         else:
-            try:
-                task_class = cast(ActiveTiggerTask, celery_app.tasks[computing_task.kind])
-                if isinstance(task_class, AbortableTask):
-                    task = AbortableAsyncResult(task_id, app=celery_app)
-                    print(f"Aborting {task_id} {type(task).__name__}")
-                    # abort() is a fallback flag; revoke drops a task still in the queue
-                    task.abort()
-                    celery_app.control.revoke(task_id)
-                else:
-                    print(f"Revoke task {task_id}")
-                    celery_app.control.revoke(task_id, terminate=True, signal="SIGKILL")
-            finally:
-                self.on_task_end(task_id, computing_task.project_slug)
-                self.log_action(username, f"KILL PROCESS: {task_id}", "all")
+            self.stop_task(computing_task)
 
-    def stop_process(self, process: ProcessComputing, project_slug: str, username: str) -> None:
+    def stop_task(self, computing_task: TaskComputing, username: str = "system"):
+        try:
+            task_class = cast(ActiveTiggerTask, celery_app.tasks[computing_task.kind])
+            if isinstance(task_class, AbortableTask):
+                task = AbortableAsyncResult(computing_task.id, app=celery_app)
+                print(f"Aborting {computing_task.id} {type(task).__name__}")
+                # abort() is a fallback flag; revoke drops a task still in the queue
+                task.abort()
+                celery_app.control.revoke(computing_task.id)
+            else:
+                print(f"Revoke task {computing_task.id}")
+                celery_app.control.revoke(computing_task.id, terminate=True, signal="SIGKILL")
+        finally:
+            # we don't wait for task failure callback as it can never arrive in case of revoke or hard kill
+            self.on_task_end(computing_task.id, computing_task.project_slug)
+            self.log_action(username, f"KILL PROCESS: {computing_task.id}", "all")
+
+            # special cases
+            # TODO: discusss where to put those bookkeeping in task definition and not orchestrator
+            if computing_task.kind == "create_project" and computing_task.project_slug:
+                self.creation_errors[computing_task.project_slug] = (
+                    "Project creation stopped by user"
+                )
+                self.clean_unfinished_project(project_slug=computing_task.project_slug)
+            if (
+                computing_task.kind in ("train_bert", "train_image", "train_ner")
+                and computing_task.project_slug
+            ):
+                self.db_manager.language_models_service.delete_model(
+                    computing_task.project_slug, computing_task.inputs.model_name
+                )
+            self.log_action(username, f"KILL PROCESS: {computing_task.id}", "all")
+
+    def stop_user_tasks(
+        self,
+        username: str,
+        only_project_slug: str | None = None,
+        only_task_names: list[TaskNames] | None = None,
+    ) -> None:
         """
-        Stop a specific process
+        Stop all tasks created by a user with two options to restrict to project and/or kind
         """
-        stop_celery_task(process.unique_id, process.abortable_celery_task)
-        # a revoked task never calls back: drop it from the project now
-        if project_slug in self.projects:
-            self.projects[project_slug].clean_process(process)
-        elif project_slug in self.project_creation_ongoing:
-            # a stopped creation would otherwise stay "creating" forever
-            project = self.project_creation_ongoing[project_slug]
-            project.clean_process(process)
-            project.errors.add("Project creation stopped by user")
-            project.status = "error"
-        if process.kind in ("train_bert", "train_image", "train_ner"):
-            process = cast(LMComputing, process)
-            self.db_manager.language_models_service.delete_model(project_slug, process.model_name)
-        self.log_action(username, f"KILL PROCESS: {process.unique_id}", "all")
+
+        def should_stop_computing_task(ct: TaskComputing):
+            return (
+                ct.user == username
+                and (only_project_slug is None or ct.project_slug == only_project_slug)
+                and (only_task_names is None or ct.kind in only_task_names)
+            )
+
+        # find matching computing_tasks
+        computing_tasks_to_stop: list[TaskComputing] = []
+        # orchestrator scope
+        for ct in self.__computing_tasks.orchestrator_tasks.values():
+            if should_stop_computing_task(ct):
+                computing_tasks_to_stop.append(ct)
+
+        # project scope
+        all_project_computing_tasks = (
+            # only the one for the project in params
+            (ct for ct in self.__computing_tasks.projects_tasks[only_project_slug].values())
+            if only_project_slug
+            else (
+                # add all computing_task from all projects
+                ct
+                for cts in self.__computing_tasks.projects_tasks.values()
+                for ct in cts.values()
+            )
+        )
+        for ct in all_project_computing_tasks:
+            if should_stop_computing_task(ct):
+                computing_tasks_to_stop.append(ct)
+
+        for ct in computing_tasks_to_stop:
+            self.stop_task(ct)
+        # TODO: this could return the number of tasks stopped
 
     def stop_project_tasks(self, project_slug: str, username: str = "system") -> None:
         """
@@ -794,71 +810,37 @@ class Orchestrator:
         """
         # copy: stop_process removes entries from the list
         for computing_task in list(
-            self.__computing_tasks_by_project.get(project_slug, {}).values()
+            self.__computing_tasks.projects_tasks.get(project_slug, {}).values()
         ):
-            self.stop_task(computing_task.id, project_slug)
-
-    def stop_user_processes(
-        self, username: str, project_slug: str | None = None, kind: str | list[str] | None = None
-    ) -> None:
-        """
-        Stop all the processes of a user
-        """
-
-        # define the processes to kill
-        if kind == "all":
-            kind = [
-                "train_bert",
-                "predict_bert",
-                "train_image",
-                "predict_image",
-                "generation",
-                "feature",
-                "bertopic",
-                "train_quickmodel",
-                "predict_quickmodel",
-                "predict_with_features",
-                "train_ner",
-                "predict_ner",
-                "projection",
-                "lexicometrics",
-                "prompt",
-                "prompt_similarity",
-                "extend_features",
-            ]
-        if kind == "bert":
-            kind = ["train_bert", "predict_bert"]
-        if kind == "ner":
-            kind = ["train_ner", "predict_ner"]
-        if kind == "image":
-            kind = ["train_image", "predict_image"]
-        if kind in ("quick", "quickmodel"):
-            kind = ["train_quickmodel", "predict_quickmodel", "predict_with_features"]
-        if kind is None:
-            kind = "all"
-        if isinstance(kind, str) and kind != "all":
-            kind = [kind]
-
-        # kill all the processes of the user
-        if project_slug is None:
-            processes = {p: self.projects[p].get_process(kind, username) for p in self.projects}
-            for project in processes:
-                for process in processes[project]:
-                    self.stop_process(process, project, username)
-
-        # kill all the processes of the user for a specific project
-        else:
-            if project_slug not in self.projects:
-                raise NotFoundError("This project is not loaded in memory")
-            processes_project = self.projects[project_slug].get_process(kind, username)
-            for process in processes_project:
-                self.stop_process(process, project_slug, username)
+            self.stop_task(computing_task, project_slug)
 
     def existing_projects(self) -> list:
         """
         Get existing projects
         """
         return self.db_manager.projects_service.existing_projects()
+
+    def project_creation_ongoing_computing_tasks(
+        self,
+    ) -> set[str]:
+        return set(
+            (
+                ct.project_slug
+                for ct in self.__computing_tasks.orchestrator_tasks.values()
+                if ct.kind == "create_project" and ct.project_slug
+            )
+        )
+
+    def project_duplication_ongoing_computing_tasks(
+        self,
+    ) -> set[str]:
+        return set(
+            (
+                ct.project_slug
+                for ct in self.__computing_tasks.orchestrator_tasks.values()
+                if ct.kind == "duplicate_project" and ct.project_slug
+            )
+        )
 
     def delete_project(self, project_slug: str, username: str = "system") -> None:
         """
@@ -915,8 +897,13 @@ class Orchestrator:
 
         # find an available target slug, accounting for in-flight duplications
         existing = set(self.existing_projects())
-        existing.update(self.project_creation_ongoing.keys())
-        existing.update(self.project_duplication_ongoing.keys())
+        in_flight_project_creation_duplications = (
+            ct.project_slug
+            for ct in self.__computing_tasks.orchestrator_tasks.values()
+            if ct.project_slug and ct.kind in ["create_project", "duplicate_project"]
+        )
+        existing.update(in_flight_project_creation_duplications)
+
         base = f"{source_slug}-copy"
         target_slug = base
         n = 2
@@ -988,11 +975,6 @@ class Orchestrator:
             ## remove static files
             if Path(f"{config.data_path}/projects/static/{project_slug_verif}").exists():
                 shutil.rmtree(f"{config.data_path}/projects/static/{project_slug_verif}")
-
-        # remove from memory
-        if project_slug_verif in self.project_creation_ongoing:
-            del self.project_creation_ongoing[project_slug_verif]
-        self.computing.pop(project_slug_verif, None)
 
     def create_demo_project(self, project_name: str, username: str) -> None:
         """

@@ -10,7 +10,7 @@ from task_manager.task_names import TaskNames
 from task_manager.tasks.compute_prompt_embedding import encode_prompt
 
 
-class ComputePromptEmbeddingTaskInputs(TaskInputs):
+class ComputePromptEmbeddingTaskInputs(TaskInputs[str]):
     prompt_id: str
     text: str
     model_name: str

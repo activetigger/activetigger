@@ -4,15 +4,15 @@ from typing import TypedDict
 from activetigger.datamodels import PrepareSplitModel
 from pydantic import BaseModel
 
-from task_manager.active_tigger_task import AbortableActiveTiggerTask, QueueName
+from task_manager.active_tigger_task import AbortableActiveTiggerTask, QueueName, TaskScope
 from task_manager.celery import celery_app
+from task_manager.task_input import TaskInputs
 from task_manager.task_names import TaskNames
 from task_manager.tasks.prepare_dataset import prepare_dataset
 
 
-class PrepareDatasetTaskInput(BaseModel):
+class PrepareDatasetTaskInput(TaskInputs[None]):
     # toolbox tasks belong to a user session, not to a project
-    username: str
     session_id: str
     path_session: Path
     params: PrepareSplitModel
@@ -29,6 +29,7 @@ class PrepareDatasetTask(AbortableActiveTiggerTask):
     name: TaskNames = "prepare_dataset"
     # default queue; the dispatcher sends wtpsplit runs to the GPU queue
     queue = QueueName.CPU
+    scope: TaskScope = "orchestrator"
 
 
 @celery_app.task(

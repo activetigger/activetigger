@@ -11,7 +11,7 @@ from task_manager.task_names import TaskNames
 from task_manager.tasks.compute_multimodal import encode_multimodal
 
 
-class ComputeMultimodalTaskInputs(TaskInputs):
+class ComputeMultimodalTaskInputs(TaskInputs[str]):
     feature_name: str
     paths_path: Path
     path_process: Path

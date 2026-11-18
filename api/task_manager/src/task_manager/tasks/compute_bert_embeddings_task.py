@@ -29,7 +29,7 @@ class ComputeBertEmbeddingsTaskResult(TypedDict):
     parameters: ComputeBertEmbeddingsTaskParameters
 
 
-class ComputeBertEmbeddingsTaskInputs(TaskInputs):
+class ComputeBertEmbeddingsTaskInputs(TaskInputs[str]):
     feature_name: str
     texts_path: Path
     path_process: Path

@@ -40,7 +40,7 @@ from sklearn.neighbors import KNeighborsClassifier
 from task_manager.task_input import TaskInputs
 
 
-class TrainMLMultiClassInputs(TaskInputs):
+class TrainMLMultiClassInputs(TaskInputs[str]):
     path: Path
     path_df: Path
     col_Y: str

@@ -12,7 +12,7 @@ from task_manager.task_names import TaskNames
 from task_manager.tasks.compute_projection import compute_projection
 
 
-class ComputeProjectionTaskInputs(TaskInputs):
+class ComputeProjectionTaskInputs(TaskInputs[str]):
     project_slug: str
     name: str
     # pickled features DataFrame, removed by the worker

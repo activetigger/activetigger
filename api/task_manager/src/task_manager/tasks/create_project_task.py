@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 import pandas as pd
-from activetigger.datamodels import ProjectBaseModel, ProjectModel
+from activetigger.datamodels import ProjectBaseModel, ProjectModel, TaskComputing
 from activetigger.functions import concat_text_columns, slugify
 from activetigger.functions_image import (
     ALLOWED_EXT as IMAGE_ALLOWED_EXT,
@@ -20,7 +20,12 @@ from activetigger.functions_image import (
 )
 from celery import Task
 
-from task_manager.active_tigger_task import ActiveTiggerTask, QueueName, UpdateProgressMethod
+from task_manager.active_tigger_task import (
+    ActiveTiggerTask,
+    QueueName,
+    TaskScope,
+    UpdateProgressMethod,
+)
 from task_manager.celery import celery_app
 from task_manager.task_input import TaskInputs
 from task_manager.task_names import TaskNames
@@ -39,9 +44,8 @@ class CreateProjectTaskResult(TypedDict):
 
 
 # input can be a BaseModel if pydantic is enabled in the Task decorator
-class CreateProjectTaskInput(TaskInputs):
+class CreateProjectTaskInputs(TaskInputs[str]):
     image_project: bool
-    project_slug: str
     params: ProjectBaseModel
     data_all: str
     train_file: str
@@ -55,8 +59,9 @@ class CreateProjectTaskInput(TaskInputs):
 class CreateProjectTask(ActiveTiggerTask):
     name: TaskNames = "create_project"
     queue = QueueName.CPU
+    scope: TaskScope = "orchestrator"
 
-    def create_project(self: Task, props: CreateProjectTaskInput) -> CreateProjectTaskResult:
+    def create_project(self: Task, props: CreateProjectTaskInputs) -> CreateProjectTaskResult:
         """
         Create the project with the given name and file
         Define an internal and external index
@@ -356,7 +361,7 @@ class CreateProjectTask(ActiveTiggerTask):
 
     # TODO: refacto those two sibblings method by factoring code between image/normal project
     def create_image_project(
-        self: Task, props: CreateProjectTaskInput, update_progress: UpdateProgressMethod
+        self: Task, props: CreateProjectTaskInputs, update_progress: UpdateProgressMethod
     ) -> CreateProjectTaskResult:
         """
         Experimental task for creating an "image" project.
@@ -587,7 +592,7 @@ class CreateProjectTask(ActiveTiggerTask):
     base=CreateProjectTask,
     pydantic=True,
 )
-def create_project_task(self, props: CreateProjectTaskInput):
+def create_project_task(self, props: CreateProjectTaskInputs):
     if props.image_project:
         return CreateProjectTask.create_image_project(
             self=self, props=props, update_progress=self.update_progress

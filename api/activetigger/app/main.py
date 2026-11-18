@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
+from task_manager.task_names import TaskNames
 
 from activetigger import __version__
 from activetigger.app.dependencies import (
@@ -289,7 +290,7 @@ def stop_process(
     current_user: Annotated[UserInDBModel, Depends(verified_user)],
     unique_id: str | None = None,
     project_slug: str | None = None,
-    kind: str | None = None,
+    kind: str | None = None,  # TODO type with TaskNames + category?
 ) -> None:
     """
     Stop processes either by unique_id or by kind for a user
@@ -302,10 +303,45 @@ def stop_process(
         orchestrator = get_orchestrator()
         if unique_id is not None and kind is None:
             test_rights(ServerAction.MANAGE_SERVER, current_user.username)
-            orchestrator.stop_task(unique_id, project_slug)
+            orchestrator.stop_task_by_id_and_project(unique_id, project_slug)
         if project_slug is not None:
             # rights already checked
-            orchestrator.stop_user_processes(current_user.username, project_slug, kind)
+            # define the processes to kill
+            task_names: list[TaskNames] | None = None
+
+            if kind == "all":
+                # TODO: is all really all or a subset to be declared
+                task_names = [
+                    "train_bert",
+                    "predict_bert",
+                    "train_image",
+                    "predict_image",
+                    "generation",
+                    # deprecated tasks
+                    # "feature",
+                    # "bertopic",
+                    # "train_quickmodel",
+                    # "predict_quickmodel",
+                    "predict_with_features",
+                    "train_ner",
+                    "predict_ner",
+                    # deprecated tasks
+                    # "projection",
+                    # "lexicometrics",
+                    # "prompt",
+                    # "prompt_similarity",
+                    "extend_features",
+                ]
+            if kind == "bert":
+                task_names = ["train_bert", "predict_bert"]
+            if kind == "ner":
+                task_names = ["train_ner", "predict_ner"]
+            if kind == "image":
+                task_names = ["train_image", "predict_image"]
+            if kind in ("quick", "quickmodel"):
+                task_names = ["predict_with_features"]  # "train_quickmodel", "predict_quickmodel",
+
+            orchestrator.stop_user_tasks(current_user.username, project_slug, task_names)
         orchestrator.log_action(
             current_user.username,
             f"STOP PROCESS: {kind if kind is not None else unique_id}",

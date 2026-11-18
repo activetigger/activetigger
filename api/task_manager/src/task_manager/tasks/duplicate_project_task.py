@@ -3,14 +3,14 @@ from typing import Any, TypedDict
 
 from pydantic import BaseModel
 
-from task_manager.active_tigger_task import AbortableActiveTiggerTask, QueueName
+from task_manager.active_tigger_task import AbortableActiveTiggerTask, QueueName, TaskScope
 from task_manager.celery import celery_app
 from task_manager.task_input import TaskInputs
 from task_manager.task_names import TaskNames
 from task_manager.tasks.duplicate_project import duplicate_project_files
 
 
-class DuplicateProjectTaskInputs(TaskInputs):
+class DuplicateProjectTaskInputs(TaskInputs[str]):
     # everything the callback needs to clone the DB rows, so it survives an API restart
     source_slug: str
     target_slug: str
@@ -36,6 +36,7 @@ class DuplicateProjectTaskResult(TypedDict):
 class DuplicateProjectTask(AbortableActiveTiggerTask):
     name: TaskNames = "duplicate_project"
     queue = QueueName.CPU
+    scope: TaskScope = "orchestrator"
 
 
 @celery_app.task(
