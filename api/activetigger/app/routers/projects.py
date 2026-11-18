@@ -112,13 +112,13 @@ def compute_lexicometrics(
     """
     test_rights(ProjectAction.ADD, current_user.username, project.project_slug)
     try:
-        task = project.lexicometrics.get_compute_task(
+        task_id = project.lexicometrics.get_compute_task(
             project_slug=project.name,
             username=current_user.username,
             language=project.params.language,
         )
         orchestrator = get_orchestrator()
-        orchestrator.create_task(task["name"], task["inputs"])
+
         orchestrator.log_action(
             current_user.username, "COMPUTE LEXICOMETRICS", project.project_slug
         )
@@ -169,7 +169,7 @@ def new_project(
         raise HTTPException(status_code=400, detail="No upload_id provided for the data file")
 
     # add a delay if projects are already being created
-    if len(orchestrator.project_creation_ongoing_computing_tasks()) >= 3:
+    if len(orchestrator.task_registry.project_creation_ongoing_computing_tasks()) >= 3:
         time.sleep(random.randint(1, 4))
 
     try:
@@ -232,8 +232,8 @@ def update_project(
     test_rights(ProjectAction.UPDATE, current_user.username, project.project_slug)
     try:
         orchestrator = get_orchestrator()
-        task = project.get_update_project_task(update, current_user.username)
-        orchestrator.create_task(task["name"], task["inputs"])
+        task_id = project.start_update_project_task(update, current_user.username)
+
         orchestrator.log_action(
             current_user.username,
             f"INFO UPDATE PROJECT: {project.project_slug}",
@@ -339,10 +339,8 @@ def delete_evalset(
     """
     test_rights(ProjectAction.UPDATE, current_user.username, project.project_slug)
     try:
-        task = project.drop_evalset(dataset=dataset)
+        task_id = project.drop_evalset(dataset=dataset)
         orchestrator = get_orchestrator()
-        if task is not None:
-            orchestrator.create_task(task["name"], task["inputs"])
         orchestrator.log_action(
             current_user.username, f"DELETE EVALSET {dataset}", project.project_slug
         )
@@ -389,11 +387,11 @@ def add_testdata(
         evalset.labels_filename = labels_target.name
 
     try:
-        task = project.get_add_evalset_task(
+        task_id = project.start_add_evalset_task(
             dataset, evalset, current_user.username, project.project_slug
         )
         orchestrator = get_orchestrator()
-        task_id = orchestrator.create_task(task["name"], task["inputs"])
+
         orchestrator.log_action(
             current_user.username, f"ADD EVALSET {dataset}", project.project_slug
         )

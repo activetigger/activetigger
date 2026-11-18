@@ -17,11 +17,11 @@ from activetigger.datamodels import (
     ProjectionParametersModel,
     ProjectionsProjectStateModel,
     TaskComputing,
-    TaskToBeRun,
 )
 from activetigger.db.languagemodels import ModelsService
 from activetigger.db.manager import DatabaseManager
 from activetigger.errors import AlreadyExistsError, NotFoundError
+from activetigger.task_registry import TaskRegistry
 
 
 class Projections:
@@ -43,19 +43,19 @@ class Projections:
     models_service: ModelsService
     loaded: dict[str, ProjectionDataModel]
     options: dict[str, dict[str, Any]]
-    computing: list
+    task_registry: TaskRegistry
 
     def __init__(
         self,
         project_slug: str,
         path: Path,
-        computing: list,
+        task_registry: TaskRegistry,
         db_manager: DatabaseManager,
     ) -> None:
         self.project_slug = project_slug
         self.path = path.joinpath("projections")
         self.path.mkdir(parents=True, exist_ok=True)
-        self.computing = computing
+        self.task_registry = task_registry
         self.models_service = db_manager.language_models_service
         self.loaded = {}
         self.options = {
@@ -73,14 +73,16 @@ class Projections:
             },
         }
 
-    def current_computing(self):
-        return [e.name for e in self.computing if e.kind == "projection"]
-
     def training(self) -> dict[str, str]:
         """
         Currently under training, keyed by projection name.
         """
-        return {e.name: e.method for e in self.computing if e.kind == "projection"}
+        return {
+            e.inputs.name: e.inputs.projection.method
+            for e in self.task_registry.project_computing_tasks(
+                self.project_slug, kinds=["compute_projection"]
+            ).values()
+        }
 
     def exists(self, name: str) -> bool:
         """
@@ -138,7 +140,7 @@ class Projections:
         projection: ProjectionParametersModel,
         features: DataFrame,
         normalize_features: bool = False,
-    ) -> TaskToBeRun:
+    ) -> str:
         """
         Launch the projection computation on the celery worker.
         """
@@ -146,7 +148,12 @@ class Projections:
             raise Exception("A projection name is required")
         if self.models_service.model_exists(self.project_slug, projection.name):
             raise Exception(f"A model named '{projection.name}' already exists")
-        if projection.name in [e.name for e in self.computing if e.kind == "projection"]:
+        if projection.name in [
+            e.inputs.name
+            for e in self.task_registry.project_computing_tasks(
+                self.project_slug, kinds=["compute_projection"]
+            ).values()
+        ]:
             raise AlreadyExistsError(
                 f"A projection named '{projection.name}' is already being computed"
             )
@@ -165,7 +172,7 @@ class Projections:
                 projection=projection,
                 normalize_features=normalize_features,
             )
-            return {"name": ComputeProjectionTask.name, "inputs": task_inputs}
+            return self.task_registry.start_task(ComputeProjectionTask.name, task_inputs)
         except Exception:
             features_path.unlink(missing_ok=True)
             raise

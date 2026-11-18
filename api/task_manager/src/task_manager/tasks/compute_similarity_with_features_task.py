@@ -42,7 +42,7 @@ class ComputeSimilarityWithFeaturesTaskResult(TypedDict):
 
 
 class ComputeSimilarityWithFeaturesTask(AbortableActiveTiggerTask):
-    name: TaskNames = "compute_similarity_with features"
+    name: TaskNames = "compute_similarity_with_features"
     # recomputes an embedding feature on the complete dataset
     queue = QueueName.GPU
 

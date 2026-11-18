@@ -42,9 +42,9 @@ def post_prompt(
     test_rights(ProjectAction.ADD, current_user.username, project.name)
     prompts = _require_prompts(project)
     try:
-        task = prompts.get_compute_task(prompt.text, prompt.feature_name, current_user.username)
+        task_id = prompts.compute_task(prompt.text, prompt.feature_name, current_user.username)
         orchestrator = get_orchestrator()
-        task_id = orchestrator.create_task(task["name"], task["inputs"])
+
         orchestrator.log_action(
             current_user.username,
             f"ADD PROMPT: {prompt.feature_name}",
@@ -89,16 +89,15 @@ def compute_prompt_similarity(
     test_rights(ProjectAction.ADD, current_user.username, project.name)
     prompts = _require_prompts(project)
     try:
-        task = prompts.get_compute_similarity_task(prompt_id, dataset, current_user.username)
-        if task is not None:
+        unique_id = prompts.get_compute_similarity_task(prompt_id, dataset, current_user.username)
+        if unique_id is not None:
             orchestrator = get_orchestrator()
-            unique_id = orchestrator.create_task(task["name"], task["inputs"])
             orchestrator.log_action(
                 current_user.username,
                 f"COMPUTE PROMPT SIMILARITY: {prompt_id} on {dataset}",
                 project.name,
             )
-        return {"unique_id": unique_id or None}
+        return {"unique_id": unique_id}
     except (HTTPException, APIError, OverflowError):
         raise
     except Exception as e:

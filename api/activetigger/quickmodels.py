@@ -2,7 +2,6 @@ import os
 import pickle
 import shutil
 import uuid
-from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -12,6 +11,7 @@ import pandas as pd
 from fastapi.responses import FileResponse
 from pandas import DataFrame
 from sklearn.preprocessing import StandardScaler
+from task_manager.task_names import TaskNames
 from task_manager.tasks.predict_ml_task import PredictMLTask, PredictMLTaskInputs
 from task_manager.tasks.predict_with_features_task import (
     PredictWithFeaturesTask,
@@ -34,11 +34,9 @@ from activetigger.datamodels import (
     Multi_naivebayesParams,
     PredictedLabel,
     QuickModelComputed,
-    QuickModelComputing,
     QuickModelsProjectStateModel,
     RandomforestParams,
     TaskComputing,
-    TaskToBeRun,
     TextDatasetModel,
 )
 from activetigger.db.languagemodels import ModelsService
@@ -51,9 +49,7 @@ from activetigger.functions import (
     serve_temp_export,
 )
 from activetigger.monitoring import Monitoring
-from activetigger.tasks.task_manager_client import (
-    get_celery_task_progress,
-)
+from activetigger.task_registry import TaskRegistry
 
 if TYPE_CHECKING:
     from activetigger.features import Features
@@ -69,7 +65,7 @@ class QuickModels:
 
     path: Path
     available_models: dict[str, Any]
-    computing: list
+    task_registry: TaskRegistry
     loaded: dict
     language_models_service: ModelsService
     features: "Features | None"
@@ -78,7 +74,7 @@ class QuickModels:
         self,
         project_slug: str,
         path: Path,
-        computing: list,
+        task_registry: TaskRegistry,
         db_manager: DatabaseManager,
         features: "Features | None" = None,
     ) -> None:
@@ -96,7 +92,7 @@ class QuickModels:
         self.project_slug = project_slug
         self.monitoring = Monitoring(db_manager, project_slug)
         self.language_models_service = db_manager.language_models_service
-        self.computing = computing
+        self.task_registry = task_registry
         self.features = features
 
         # Models and default parameters
@@ -110,7 +106,7 @@ class QuickModels:
 
         self.loaded = {}
 
-    def get_quickmodel_task(
+    def start_train_ml_task(
         self,
         project_slug: str,
         user: str,
@@ -129,7 +125,7 @@ class QuickModels:
         test_size: float = 0.2,
         retrain: bool = False,
         texts: pd.Series | None = None,
-    ) -> TaskToBeRun:
+    ) -> str:
         """
         Add a new quickmodel for a user and a scheme
         """
@@ -184,20 +180,18 @@ class QuickModels:
             dataset="train",
         )
 
-        return {"name": TrainMLTask.name, "inputs": inputs}
+        return self.task_registry.start_task(TrainMLTask.name, inputs)
 
     def add(self, computing_task: TaskComputing[TrainMLMultiClassInputs]) -> None:
         """
         Add computed model in the database
         """
         model_path = self.path.joinpath(computing_task.inputs.name)
-        params = cast(
-            LMParametersModel,
-            {
-                **computing_task.inputs.model_params,
-                "exclude_labels": computing_task.inputs.exclude_labels,
-            },
-        )
+        params = {
+            **computing_task.inputs.model_params,
+            "exclude_labels": computing_task.inputs.exclude_labels,
+        }
+
         self.language_models_service.add_model(
             kind="quickmodel",
             name=computing_task.inputs.name,
@@ -273,15 +267,15 @@ class QuickModels:
         so the frontend can render a progress bar for either kind of
         quickmodel process (train_quickmodel or predict_with_features).
         """
-        kinds = {"train_quickmodel", "predict_with_features", "predict_quickmodel"}
+        kinds: list[TaskNames] = ["train_ml", "predict_with_features", "predict_ml"]
         r: dict[str, LMComputingOutModel] = {}
-        for e in self.computing:
-            if getattr(e, "kind", None) not in kinds:
-                continue
+        for e in self.task_registry.project_computing_tasks(
+            self.project_slug, kinds=kinds
+        ).values():
             r[e.user] = LMComputingOutModel(
                 name=getattr(e, "name", ""),
-                status=getattr(e, "status", "training"),
-                progress=get_celery_task_progress(e.unique_id),
+                status="training" if e.kind == "train_ml" else "predicting",
+                progress=self.task_registry.task_progress(e.id),
             )
         return r
 
@@ -420,7 +414,7 @@ class QuickModels:
         col_label: str | None = None,
         col_text: str | None = None,
         statistics: list[str] | None = None,
-    ) -> TaskToBeRun:
+    ) -> str:
         """
         Start the predicting process for a specific model
         """
@@ -451,14 +445,14 @@ class QuickModels:
 
         del df
         print("Predicting process started")
-        return {"name": PredictMLTask.name, "inputs": inputs}
+        return self.task_registry.start_task(PredictMLTask.name, inputs)
 
     def get_predict_on_dataset_task(
         self,
         name: str,
         username: str,
         dataset: str = "all",
-    ) -> TaskToBeRun:
+    ) -> str:
         """
         Enqueue a `PredictWithFeatures` task that (re)computes the
         features the quickmodel was trained on for the requested dataset
@@ -475,7 +469,7 @@ class QuickModels:
         name: str,
         username: str,
         external_dataset: TextDatasetModel,
-    ) -> TaskToBeRun:
+    ) -> str:
         """
         Enqueue a `PredictWithFeatures` task on an uploaded external
         dataset. Mirrors the BERT flow: the file lives under the
@@ -550,7 +544,7 @@ class QuickModels:
         username: str,
         dataset: str,
         data: pd.Series,
-    ) -> TaskToBeRun:
+    ) -> str:
         """
         Shared dispatch path for `predict_on_dataset` and
         `predict_on_external_dataset`. Builds the PredictWithFeatures
@@ -574,7 +568,7 @@ class QuickModels:
             file_name=f"predict_{dataset}.parquet",
         )
 
-        return {"name": PredictWithFeaturesTask.name, "inputs": task_inputs}
+        return self.task_registry.start_task(PredictWithFeaturesTask.name, task_inputs)
 
     def _dataset_texts(self, dataset: str) -> pd.Series:
         """

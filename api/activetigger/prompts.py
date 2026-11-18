@@ -35,18 +35,13 @@ from task_manager.tasks.compute_similarity_with_features_task import (
 )
 
 from activetigger.datamodels import (
-    PromptComputing,
     PromptOutModel,
-    PromptSimilarityComputing,
     PromptsProjectStateModel,
     TaskComputing,
-    TaskToBeRun,
 )
 from activetigger.errors import InvalidInputError, NotFoundError
 from activetigger.features import Features
-from activetigger.tasks.task_manager_client import (
-    get_celery_task_progress,
-)
+from activetigger.task_registry import TaskRegistry
 
 # Feature kinds whose vectors live in a space we can encode a text query into.
 BINDABLE_FEATURE_KINDS = {"multimodal-embeddings", "sentence-embeddings"}
@@ -69,13 +64,13 @@ class Prompts:
         self,
         project_slug: str,
         path_dir: Path,
-        computing: list,
+        task_registry: TaskRegistry,
         features: Features,
     ) -> None:
         self.project_slug = project_slug
         self.path_dir = path_dir
         self.path_file = path_dir.joinpath(PROMPTS_FILE)
-        self.computing = computing
+        self.task_registry = task_registry
         self.features = features
         # Cache of sorted rankings keyed by (prompt_id, dataset). Each entry
         # is a pd.Series indexed by element_id with cosine similarity values,
@@ -128,7 +123,7 @@ class Prompts:
 
     # ---------- public API ----------
 
-    def get_compute_task(self, text: str, feature_name: str, user: str) -> TaskToBeRun:
+    def compute_task(self, text: str, feature_name: str, user: str) -> str:
         """
         Enqueue the encoding of a new prompt on the GPU worker. Returns the
         task unique_id. The parquet row is appended by `receive_result`
@@ -151,7 +146,7 @@ class Prompts:
             feature_name=feature_name,
             hf_name=model_name,
         )
-        return {"name": ComputePromptEmbeddingTask.name, "inputs": task_inputs}
+        return self.task_registry.start_task(ComputePromptEmbeddingTask.name, task_inputs)
 
     def receive_result(
         self, computing: TaskComputing[ComputePromptEmbeddingTaskInputs], vec: np.ndarray
@@ -340,7 +335,7 @@ class Prompts:
 
     def get_compute_similarity_task(
         self, prompt_id: str, dataset: str, username: str
-    ) -> TaskToBeRun | None:
+    ) -> str | None:
         """
         Compute the cosine similarity between a prompt and every element
         of the requested dataset, persisted as a parquet exportable from
@@ -367,12 +362,13 @@ class Prompts:
             return None
 
         # only one similarity computation per prompt at a time
-        for e in self.computing:
-            if (
-                getattr(e, "kind", None) == "prompt_similarity"
-                and getattr(e, "prompt_id", None) == prompt_id
-            ):
-                raise ValueError("A similarity computation is already running for this prompt")
+        similarity_computing: list[TaskComputing[ComputeSimilarityWithFeaturesTaskInputs]] = list(
+            self.task_registry.project_computing_tasks(
+                self.project_slug, kinds=["compute_similarity_with_features"]
+            ).values()
+        )
+        if any(sc.inputs.prompt_id == prompt_id for sc in similarity_computing):
+            raise ValueError("A similarity computation is already running for this prompt")
 
         # resolve everything that can fail before pickling the data for the worker
         prompt_row = self._read().loc[prompt_id]
@@ -400,7 +396,7 @@ class Prompts:
             feature_name=feature_name,
         )
 
-        return {"name": ComputeSimilarityWithFeaturesTask.name, "inputs": task_inputs}
+        return self.task_registry.start_task(ComputeSimilarityWithFeaturesTask.name, task_inputs)
 
     def export_similarity(
         self, prompt_id: str, dataset: str, format: str, col_id: str | None
@@ -454,30 +450,31 @@ class Prompts:
 
     def current_similarity_computing(self) -> dict[str, dict[str, str | None]]:
         out: dict[str, dict[str, str | None]] = {}
-        for e in self.computing:
-            if e.kind != "prompt_similarity":
-                continue
-            progress = get_celery_task_progress(e.unique_id)
-            out[e.prompt_id] = {
-                "prompt_id": e.prompt_id,
-                "text": e.text,
-                "feature_name": e.feature_name,
-                "dataset": e.dataset,
+        for e in self.task_registry.project_computing_tasks(
+            self.project_slug, kinds=["compute_similarity_with_features"]
+        ).values():
+            e = cast(TaskComputing[ComputeSimilarityWithFeaturesTaskInputs], e)
+            progress = self.task_registry.task_progress(e.id)
+            out[e.inputs.prompt_id] = {
+                "prompt_id": e.inputs.prompt_id,
+                "text": e.inputs.text,
+                "feature_name": e.inputs.feature_name,
+                "dataset": e.inputs.dataset,
                 "progress": str(progress["progress"]) if progress is not None else None,
             }
         return out
 
     def current_computing(self) -> dict[str, dict[str, str | None]]:
         out: dict[str, dict[str, str | None]] = {}
-        for e in self.computing:
-            if e.kind != "prompt":
-                continue
-            e = cast(PromptComputing, e)
-            progress = get_celery_task_progress(e.unique_id)
-            out[e.prompt_id] = {
-                "prompt_id": e.prompt_id,
-                "text": e.text,
-                "feature_name": e.feature_name,
+        for e in self.task_registry.project_computing_tasks(
+            self.project_slug, kinds=["compute_prompt_embedding"]
+        ).values():
+            e = cast(TaskComputing[ComputePromptEmbeddingTaskInputs], e)
+            progress = self.task_registry.task_progress(e.id)
+            out[e.inputs.prompt_id] = {
+                "prompt_id": e.inputs.prompt_id,
+                "text": e.inputs.text,
+                "feature_name": e.inputs.feature_name,
                 "progress": str(progress["progress"]) if progress else None,
             }
         return out
@@ -488,6 +485,7 @@ class Prompts:
         except Exception:
             available = {}
         bindable = [name for name, feat in available.items() if feat.kind in BINDABLE_FEATURE_KINDS]
+
         return PromptsProjectStateModel(
             available=self.list(),
             bindable_features=bindable,

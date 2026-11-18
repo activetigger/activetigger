@@ -14,9 +14,9 @@ from activetigger.datamodels import (
     LexicometricsProjectStateModel,
     LexicometricsStatisticsModel,
     TaskComputing,
-    TaskToBeRun,
 )
 from activetigger.errors import AlreadyExistsError
+from activetigger.task_registry import TaskRegistry
 
 
 class Lexicometrics:
@@ -27,13 +27,15 @@ class Lexicometrics:
     file so new statistics can be added later without a schema migration.
     """
 
+    project_slug: str
     path: Path
-    computing: list
+    task_registry: TaskRegistry
     available: LexicometricsModel | None
 
-    def __init__(self, path: Path, computing: list) -> None:
+    def __init__(self, project_slug: str, path: Path, task_registry: TaskRegistry) -> None:
+        self.project_slug = project_slug
         self.path = path
-        self.computing = computing
+        self.task_registry = task_registry
         self.available = None
         self.load()
 
@@ -71,9 +73,14 @@ class Lexicometrics:
         """
         Currently computing, keyed by username.
         """
-        return {e.user: "computing" for e in self.computing if e.kind == "lexicometrics"}
+        return {
+            e.user: "computing"
+            for e in self.task_registry.project_computing_tasks(
+                self.project_slug, kinds=["compute_lexicometrics"]
+            ).values()
+        }
 
-    def get_compute_task(self, project_slug: str, username: str, language: str) -> TaskToBeRun:
+    def get_compute_task(self, project_slug: str, username: str, language: str) -> str:
         """
         Launch the lexicometrics computation as a celery task.
 
@@ -99,7 +106,7 @@ class Lexicometrics:
             tfidf_max_documents=parameters.tfidf_max_documents,
             parameters=parameters,
         )
-        return {"name": ComputeLexicometricsTask.name, "inputs": task_inputs}
+        return self.task_registry.start_task(ComputeLexicometricsTask.name, task_inputs)
 
     def add(
         self, task_computing: TaskComputing[ComputeLexicometricsTaskInputs], results: dict

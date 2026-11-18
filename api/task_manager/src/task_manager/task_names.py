@@ -21,22 +21,33 @@ TaskNames = Literal[
     "compute_projection",
     "compute_prompt_embedding",
     "compute_sbert",
-    "compute_similarity_with features",
+    "compute_similarity_with_features",
     "create_project",
     "duplicate_project",
     "extend_features",
     "predict_ml",
     "prepare_dataset",
-    "train_ml",
+    "train_ml",  # was quickmodel
     "update_datasets",
 ]
 
+# TODO: moves those in dedicated module?
+features_tasks: list[TaskNames] = [
+    "compute_sbert",
+    "compute_bert_embeddings",
+    "compute_clip_imagexp",
+    "compute_multimodal",
+    "compute_fasttext",
+    "compute_dfm",
+]
+
+prompt_tasks: list[TaskNames] = ["compute_prompt_embedding", "compute_similarity_with_features"]
 
 # Meta categories ?
-#   "feature",
+
 #     "bertopic",
 #     "lexicometrics","projection",
 #     "predict_quickmodel",
-#     "prompt",
+
 #     "prompt_similarity",
 #     "train_quickmodel",

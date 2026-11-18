@@ -58,7 +58,7 @@ def post_embeddings(
         # compute features
 
         orchestrator = get_orchestrator()
-        task = project.features.compute_or_get_task(
+        task_id = project.features.compute(
             df,
             feature.name,
             feature.use_default_name,
@@ -66,8 +66,7 @@ def post_embeddings(
             feature.parameters,
             current_user.username,
         )
-        if task is not None:
-            orchestrator.create_task(task["name"], task["inputs"])
+
         orchestrator.log_action(
             current_user.username, f"COMPUTE FEATURE: {feature.type}", project.name
         )

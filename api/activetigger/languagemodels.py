@@ -10,11 +10,9 @@ from typing import Any, Literal, Tuple, cast
 import pandas as pd
 from fastapi.responses import FileResponse
 from pandas import DataFrame
-from task_manager.celery import celery_app
 from task_manager.tasks.predict_bert_task import (
     PredictBertTask,
     PredictBertTaskInputs,
-    predict_bert,
 )
 from task_manager.tasks.train_bert_task import TrainBertTask, TrainBertTaskInputs, train_bert
 from task_manager.tasks.train_image_task import TrainImageTaskInputs
@@ -32,7 +30,6 @@ from activetigger.datamodels import (
     ModelScoresModel,
     StaticFileModel,
     TaskComputing,
-    TaskToBeRun,
     TextDatasetModel,
 )
 from activetigger.db.languagemodels import ModelsService
@@ -40,7 +37,7 @@ from activetigger.db.manager import DatabaseManager
 from activetigger.errors import AlreadyExistsError, NotFoundError
 from activetigger.functions import get_model_metrics
 from activetigger.monitoring import Monitoring
-from activetigger.tasks.task_manager_client import get_celery_task_progress
+from activetigger.task_registry import TaskRegistry
 
 
 class LanguageModels:
@@ -50,7 +47,7 @@ class LanguageModels:
 
     project_slug: str
     path: Path
-    computing: list
+    task_registry: TaskRegistry
     language_models_service: ModelsService
     db_manager: DatabaseManager
     base_models: list[dict[str, Any]]
@@ -61,14 +58,14 @@ class LanguageModels:
         self,
         project_slug: str,
         path: Path,
-        computing: list,
+        task_registry: TaskRegistry,
         db_manager: DatabaseManager,
         list_models: str | None = None,
     ) -> None:
         self.params_default = LMParametersModel()
         self.project_slug = project_slug
         self.monitoring = Monitoring(db_manager, project_slug)
-        self.computing = computing
+        self.task_registry = task_registry
         self.language_models_service = db_manager.language_models_service
         self.path: Path = Path(path).joinpath("bert")
         self.cache_predictions = {}
@@ -146,15 +143,15 @@ class LanguageModels:
         """
 
         r = {
-            e.user: LMComputingOutModel(
-                name=e.model_name,
-                status=e.status,
-                progress=get_celery_task_progress(e.unique_id),
-                loss=self.get_loss(e.model_name),
-                epochs=e.params["epochs"] if e.params else None,
+            ct.user: LMComputingOutModel(
+                name=ct.inputs.model_name,
+                status=ct.inputs.status,
+                progress=self.task_registry.task_progress(ct.id),
+                loss=self.get_loss(ct.inputs.model_name),
+                epochs=ct.inputs.params["epochs"] if ct.inputs.params else None,
             )
-            for e in self.computing
-            if e.kind in ["bert", "train_bert", "predict_bert"]
+            for ct in self.task_registry.project_computing_tasks(self.project_slug).values()
+            if ct.kind in ["bert", "train_bert", "predict_bert"]
         }
         return r
 
@@ -199,12 +196,6 @@ class LanguageModels:
         if errors:
             raise Exception(f"Problem to delete model files : {'; '.join(errors)}")
 
-    def current_user_processes(self, user: str) -> list[LMComputing]:
-        """
-        Get the user current processes
-        """
-        return [e for e in self.computing if e.user == user]
-
     def estimate_memory_use(self, model: str, kind: str = "train") -> int:
         """
         Estimate the GPU memory in Gb needed to train a model
@@ -241,7 +232,7 @@ class LanguageModels:
         class_balance: bool = False,
         class_min_freq: int = 1,
         exclude_labels: list[str] | None = None,
-    ) -> TaskToBeRun:
+    ) -> str:
         """
         Manage the training of a model from the API
         """
@@ -305,7 +296,7 @@ class LanguageModels:
         # queue celery task
 
         del df
-        return {"name": TrainBertTask.name, "inputs": trainBertInputs}
+        return self.task_registry.start_task(TrainBertTask.name, trainBertInputs)
 
     def clean_files_valid(self, model_name: str, dataset: str):
         """
@@ -319,7 +310,7 @@ class LanguageModels:
         if (self.path.joinpath(model_name).joinpath(f"metrics_{dataset}.json")).exists():
             os.remove(self.path.joinpath(model_name).joinpath(f"metrics_{dataset}.json"))
 
-    def get_predicting_task(
+    def start_predicting_task(
         self,
         project_slug: str,
         name: str,
@@ -336,7 +327,7 @@ class LanguageModels:
         path_train: Path | None = None,
         path_valid: Path | None = None,
         path_test: Path | None = None,
-    ) -> TaskToBeRun:
+    ) -> str:
         """
         Start predicting process
         """
@@ -380,7 +371,7 @@ class LanguageModels:
         )
 
         del df
-        return {"name": PredictBertTask.name, "inputs": inputs}
+        return self.task_registry.start_task(PredictBertTask.name, inputs)
 
     def rename(self, former_name: str, new_name: str) -> None:
         """

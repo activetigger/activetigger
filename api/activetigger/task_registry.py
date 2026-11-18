@@ -1,0 +1,426 @@
+import threading
+import time
+from collections import defaultdict
+from typing import Iterator, cast
+
+from celery import uuid
+from celery.contrib.abortable import AbortableAsyncResult, AbortableTask
+from celery.result import AsyncResult
+from task_manager.active_tigger_task import ActiveTiggerTask, QueueName
+from task_manager.celery import celery_app
+from task_manager.stop_signal import stop_requested
+from task_manager.task_input import TaskInputs
+from task_manager.task_names import TaskNames
+
+from activetigger.datamodels import (
+    EventsModel,
+    OrchestratorTasks,
+    TaskComputing,
+    TaskEndedEvent,
+    TaskEndedReason,
+    TaskEndObserver,
+    TaskProgressState,
+)
+from activetigger.monitoring import Monitoring
+from activetigger.tasks.task_manager_client import celery_task_state, celery_tasks_in_flight
+
+
+class TaskRegistry:
+    """
+    Single owner of the in-memory picture of tasks dispatched to workers.
+
+    Protects the state by construction:
+    - the underlying dicts are name-mangled private;
+    - every accessor returns a snapshot (list copy), never the live dict;
+    - all mutation goes through explicit methods, serialized by a lock
+      (callbacks run in the FastAPI threadpool, the update loop in a thread).
+
+    This class must stay a LEAF module: imports only datamodels / task_manager,
+    never orchestrator / project / features / prompts.
+    """
+
+    def __init__(self, monitoring: Monitoring) -> None:
+        self._lock = threading.RLock()
+        self._computing_tasks = OrchestratorTasks(
+            projects_tasks={}, orchestrator_tasks=defaultdict(dict)
+        )
+        self.monitoring = monitoring
+
+        # orchestrator callbacks
+        self._observers: list[TaskEndObserver] = []
+
+        # sync celery utils
+        # reconciliation with the workers: a task whose callback never arrives
+        # (worker container restarted, redis flushed, callback abandoned) is
+        # dropped after staying finished or unaccounted for longer than the grace
+        self._reconcile_interval = 60
+        self._reconcile_grace = 120
+        # celery stores SUCCESS before the worker posts the callback (retried for
+        # minutes if the API is slow): a finished task must not be dropped before
+        # the whole delivery envelope has passed
+        self._reconcile_grace_success = 900
+        self._last_reconcile = 0.0
+        self._task_lost_since: dict[str, float] = {}
+        # task ids whose callback is being executed by the API right now
+        self._callbacks_in_progress: set[str] = set()
+
+    # ---------- public API ------------
+
+    def start_task(
+        self, task_name: TaskNames, inputs: TaskInputs, queue: QueueName | None = None
+    ) -> str:
+        """
+        Send a task to the workers. With a process, register it in computing first:
+        a task that fails or finishes at once calls back before the dispatcher returns.
+        """
+        if task_name not in celery_app.tasks:
+            raise Exception(
+                f"task {task_name} not registered in celery app. Possible tasks are {celery_app.tasks.keys()}"
+            )
+        # create TaskComputing from tasks input
+        task_class = cast(ActiveTiggerTask, celery_app.tasks[task_name])
+
+        task_id = uuid()
+        computing_task = TaskComputing(
+            id=task_id,
+            kind=task_name,
+            user=inputs.user,
+            project_slug=inputs.project_slug,
+            inputs=inputs,
+        )
+        with self._lock:
+            # or in project_slug none case in case orchestrator_tasks_names is out of sync + typings
+            if task_class.scope == "orchestrator" or inputs.project_slug is None:
+                self._computing_tasks.orchestrator_tasks[task_id] = computing_task
+            else:
+                self._computing_tasks.projects_tasks[inputs.project_slug][task_id] = computing_task
+
+        # registered before the send: a fast task calls back at once
+        self.monitoring.register_process(
+            process_name=task_id, kind=task_name, parameters={}, user_name=inputs.user
+        )
+
+        # queue overrides the task default (e.g. GPU for a wtpsplit preparation)
+        options = {"queue": queue} if queue else {}
+        try:
+            task_class.s(inputs=inputs.model_dump(mode="json")).apply_async(
+                task_id=task_id, **options
+            )
+        except Exception:
+            self.on_task_end(computing_task.id, computing_task.project_slug, "error")
+            raise
+        return task_id
+
+    def stop_task(self, computing_task: TaskComputing):
+        try:
+            task_class = cast(ActiveTiggerTask, celery_app.tasks[computing_task.kind])
+            if isinstance(task_class, AbortableTask):
+                task = AbortableAsyncResult(computing_task.id, app=celery_app)
+                print(f"Aborting {computing_task.id} {type(task).__name__}")
+                # abort() is a fallback flag; revoke drops a task still in the queue
+                task.abort()
+                celery_app.control.revoke(computing_task.id)
+            else:
+                print(f"Revoke task {computing_task.id}")
+                celery_app.control.revoke(computing_task.id, terminate=True, signal="SIGKILL")
+        finally:
+            # we don't wait for task failure callback as it can never arrive in case of revoke or hard kill
+            self.on_task_end(computing_task.id, computing_task.project_slug, "stopped")
+
+    # Stop one task by its id + project if appropriate
+    def stop_task_by_id_and_project(
+        self, task_id: str, project_slug: str | None = None, username: str = "system"
+    ):
+        computing_task = self.get_computing_task(task_id, project_slug)
+
+        if computing_task is None:
+            # we don't raise here as it looks like the job has already been done
+            print(f"Could not find task {task_id} scope {project_slug} in Orchestrator")
+        else:
+            self.stop_task(computing_task)
+
+    def stop_user_tasks(
+        self,
+        username: str,
+        only_project_slug: str | None = None,
+        only_task_names: list[TaskNames] | None = None,
+    ) -> None:
+        """
+        Stop all tasks created by a user with two options to restrict to project and/or kind
+        """
+
+        def should_stop_computing_task(ct: TaskComputing):
+            return (
+                ct.user == username
+                and (only_project_slug is None or ct.project_slug == only_project_slug)
+                and (only_task_names is None or ct.kind in only_task_names)
+            )
+
+        with self._lock:
+            # find matching computing_tasks
+            computing_tasks_to_stop: list[TaskComputing] = []
+            # orchestrator scope
+            for ct in self._computing_tasks.orchestrator_tasks.values():
+                if should_stop_computing_task(ct):
+                    computing_tasks_to_stop.append(ct)
+
+            # project scope
+            all_project_computing_tasks = (
+                # only the one for the project in params
+                (ct for ct in self._computing_tasks.projects_tasks[only_project_slug].values())
+                if only_project_slug
+                else (
+                    # add all computing_task from all projects
+                    ct
+                    for cts in self._computing_tasks.projects_tasks.values()
+                    for ct in cts.values()
+                )
+            )
+            for ct in all_project_computing_tasks:
+                if should_stop_computing_task(ct):
+                    computing_tasks_to_stop.append(ct)
+
+        for ct in computing_tasks_to_stop:
+            self.stop_task(ct)
+
+    def stop_project_tasks(self, project_slug: str, username: str = "system") -> None:
+        """
+        Stop every task of a project (deleted, cleaned or reset)
+        """
+        # copy: stop_process removes entries from the list
+        for computing_task in self.project_computing_tasks(project_slug).values():
+            self.stop_task(computing_task)
+
+    def stop_all_tasks(self):
+        """
+        Stop every task
+        """
+        for ct in self.all_computing_tasks():
+            self.stop_task(ct)
+
+    # get computing_task object from its id and scope
+    def get_computing_task(self, task_id: str, project_slug: str | None):
+        computing_task: TaskComputing | None = None
+        with self._lock:
+            # project scope
+            if project_slug:
+                if project_slug not in self._computing_tasks:
+                    raise Exception(f"Project {project_slug} not registered in orchestrator")
+                if task_id not in self._computing_tasks.projects_tasks[project_slug]:
+                    print(
+                        f"on_task_end called on an untracked task {task_id} in project {project_slug} scope"
+                    )
+                else:
+                    computing_task = self._computing_tasks.projects_tasks[project_slug][task_id]
+            # orchestrator scope
+            if project_slug is None and task_id not in self._computing_tasks.orchestrator_tasks:
+                print(f"on_task_end called on an untracked task {task_id} in orchestrator scope")
+            else:
+                computing_task = self._computing_tasks.orchestrator_tasks[task_id]
+        return computing_task
+
+    def projects_with_running_tasks(self) -> set[str]:
+        with self._lock:
+            return set(
+                project_slug
+                for (
+                    project_slug,
+                    computing_tasks_by_id,
+                ) in self._computing_tasks.projects_tasks.items()
+                if len(computing_tasks_by_id) > 0
+            )
+
+    def project_creation_ongoing_computing_tasks(
+        self,
+    ) -> set[str]:
+        with self._lock:
+            return set(
+                (
+                    ct.project_slug
+                    for ct in self._computing_tasks.orchestrator_tasks.values()
+                    if ct.kind == "create_project" and ct.project_slug
+                )
+            )
+
+    def project_duplication_ongoing_computing_tasks(
+        self,
+    ) -> set[str]:
+        with self._lock:
+            return set(
+                (
+                    ct.project_slug
+                    for ct in self._computing_tasks.orchestrator_tasks.values()
+                    if ct.kind == "duplicate_project" and ct.project_slug
+                )
+            )
+
+    def all_computing_tasks(self) -> Iterator[TaskComputing]:
+        """Snapshot iterator over every task (both scopes)."""
+        with self._lock:
+            all_cts = [
+                ct
+                for by_id in self._computing_tasks.projects_tasks.values()
+                for ct in by_id.values()
+            ] + list(self._computing_tasks.orchestrator_tasks.values())
+        return iter(all_cts)
+
+    def project_computing_tasks(
+        self, project_slug: str, user: str | None = None, kinds: list[TaskNames] | None = None
+    ) -> dict[str, TaskComputing]:
+        with self._lock:
+            if project_slug in self._computing_tasks.projects_tasks:
+                return {
+                    id: ct
+                    for (id, ct) in self._computing_tasks.projects_tasks[project_slug].items()
+                    if (not user or ct.user == user) and (not kinds or ct.kind in kinds)
+                }
+            else:
+                return {}
+
+    def projects_computing_tasks(self) -> dict[str, dict[str, TaskComputing]]:
+        with self._lock:
+            return {slug: dict(cts) for slug, cts in self._computing_tasks.projects_tasks.items()}
+
+    def task_progress(self, task_id: str) -> TaskProgressState | None:
+        r = AsyncResult(task_id, app=celery_app)
+        if r.state == "PROGRESS":
+            return r.info
+        return None
+
+    def on_task_end(
+        self,
+        task_id: str,
+        project_slug: str | None,
+        reason: TaskEndedReason,
+        events: EventsModel | None = None,
+        error_message: str | None = None,
+    ) -> None:
+        """
+        When task ends, this method must be called to delete the task representation from the orchestrator memory
+        """
+        with self._lock:
+            computing_task = self._pop_computing_task(task_id, project_slug)
+        if computing_task is None:
+            return
+        self.monitoring.close_process(task_id, events)
+        self._clean_temp_files(computing_task)
+        self._emit_task_end(
+            TaskEndedEvent(
+                computing_task=computing_task,
+                reason=reason,
+                events=events,
+                error_message=error_message,
+            )
+        )
+
+    # ---------------- internals ----------------
+
+    def _pop_computing_task(self, task_id: str, project_slug: str | None) -> TaskComputing | None:
+        """Caller must hold the lock (or accept the small race and tolerate
+        a None return). Idempotent: a stop and a late callback can race."""
+        if project_slug:
+            return self._computing_tasks.projects_tasks.get(project_slug, {}).pop(task_id, None)
+        return self._computing_tasks.orchestrator_tasks.pop(task_id, None)
+
+    def _clean_temp_files(self, computing_task: TaskComputing):
+        task_class = cast(ActiveTiggerTask, celery_app.tasks[computing_task.kind])
+        # clean temp files
+        if task_class.clean_temp_files:
+            task_class.clean_temp_files(computing_task)
+
+    # ---------------- subscription API ----------------
+
+    def subscribe_task_end(self, observer: TaskEndObserver) -> None:
+        """Register a hook fired after any task leaves the registry.
+
+        Called with the registry lock NOT held, after state has been
+        updated. Observers may call registry methods freely.
+        """
+        self._observers.append(observer)
+
+    def _emit_task_end(self, event: TaskEndedEvent) -> None:
+        """Fire observers, isolated from each other."""
+        for observer in list(self._observers):
+            try:
+                observer(event)
+            except Exception as e:
+                print(f"TaskRegistry task-end observer failed: {e}")
+
+    # ---------------- sync with celery ----------------
+
+    def maybe_reconcile(self) -> None:
+        if time.time() - self._last_reconcile < self._reconcile_interval:
+            return
+        self._last_reconcile = time.time()
+        self._reconcile_tasks()
+
+    def mark_callback_started(self, task_id: str):
+        with self._lock:
+            self._callbacks_in_progress.add(task_id)
+
+    def mark_callback_finished(self, task_id: str):
+        with self._lock:
+            self._callbacks_in_progress.remove(task_id)
+
+    def in_callback(self, task_id: str):
+        with self._lock:
+            return task_id in self._callbacks_in_progress
+
+    def mark_task_lost(self, task_id: str):
+        with self._lock:
+            return self._task_lost_since.setdefault(task_id, time.time())
+
+    def mark_task_found(self, task_id: str):
+        with self._lock:
+            return self._task_lost_since.pop(task_id, None)
+
+    def _reconcile_tasks(self) -> None:
+        """
+        Compare the processes in memory with the celery side. An entry whose
+        task is finished (SUCCESS/FAILURE/REVOKED, so its callback was lost) or
+        neither queued nor held by a worker for more than the grace period is
+        dropped and reported as an error (silently if it was stopped).
+        """
+        if celery_app.conf.task_always_eager:
+            return
+        in_flight = celery_tasks_in_flight()
+        now = time.time()
+        with self._lock:
+            tracked: dict[str, tuple[str | None, TaskNames]] = {}  # task_id -> (project_slug, kind)
+            for slug, computing_tasks_by_id in self._computing_tasks.projects_tasks.items():
+                for ct in computing_tasks_by_id.values():
+                    tracked[ct.id] = (slug, ct.kind)
+            for ct in self._computing_tasks.orchestrator_tasks.values():
+                tracked[ct.id] = (ct.project_slug, ct.kind)
+
+        for task_id, (slug, kind) in tracked.items():
+            # its result is being stored by a callback: not lost
+            if self.in_callback(task_id):
+                self.mark_task_found(task_id)
+                continue
+            state = celery_task_state(task_id)
+            finished = state in ("SUCCESS", "FAILURE", "REVOKED")
+            missing = in_flight is not None and task_id not in in_flight
+            if not finished and not missing:
+                self.mark_task_found(task_id)
+                continue
+
+            since = self.mark_task_lost(task_id)
+            grace = self._reconcile_grace_success if state == "SUCCESS" else self._reconcile_grace
+            if now - since < grace:
+                continue
+
+            self.mark_task_found(task_id)
+            reason = f"celery state {state}" + (", not held by any worker" if missing else "")
+            print(f"Dropping lost task {task_id} ({kind}, {slug}): {reason}")
+            self.on_task_end(
+                task_id,
+                slug,
+                "lost",
+                error_message=f"Task {ct.kind} {ct.id} lost: no result received",
+            )
+
+        # forget ids no longer tracked
+        with self._lock:
+            for task_id in [t for t in self._task_lost_since if t not in tracked]:
+                del self._task_lost_since[task_id]

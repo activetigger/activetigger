@@ -5,7 +5,7 @@ import pandas as pd
 from pandas import DataFrame
 
 from activetigger.config import config
-from activetigger.datamodels import (  # ignore[import]
+from activetigger.datamodels import (
     ExportGenerationsParams,
     GenerationAvailableModel,
     GenerationComputing,
@@ -20,7 +20,7 @@ from activetigger.datamodels import (  # ignore[import]
 from activetigger.db.generations import GenerationsService
 from activetigger.db.manager import DatabaseManager
 from activetigger.functions import remove_punctuation, replace_accented_chars
-from activetigger.tasks.task_manager_client import get_celery_task_progress
+from activetigger.task_registry import TaskRegistry
 
 # Maps the `type` key used in generative.yaml to the internal `api` identifier
 # used by the generation clients.
@@ -39,7 +39,8 @@ class Generations:
     Class to manage generation data
     """
 
-    computing: list
+    project_slug: str
+    task_registry: TaskRegistry
     generations_service: GenerationsService
 
     @staticmethod
@@ -75,9 +76,12 @@ class Generations:
             GenerationModelApi(name="HuggingFace", models=[]),
         ]
 
-    def __init__(self, db_manager: DatabaseManager, computing: list[GenerationComputing]) -> None:
+    def __init__(
+        self, project_slug: str, db_manager: DatabaseManager, task_registry: TaskRegistry
+    ) -> None:
+        self.project_slug = project_slug
         self.generations_service = db_manager.generations_service
-        self.computing = computing
+        self.task_registry = task_registry
 
     def add(
         self,
@@ -128,11 +132,12 @@ class Generations:
         """
         return {
             e.user: GenerationComputingOut(
-                model_id=e.model_id,
-                progress=get_celery_task_progress(e.unique_id),
+                model_id=e.inputs.model_id,
+                progress=self.task_registry.task_progress(e.id),
             )
-            for e in self.computing
-            if e.kind == "generation"
+            for e in self.task_registry.project_computing_tasks(
+                self.project_slug, kinds=["generation"]
+            ).values()
         }
 
     def prompt_exists(self, project_slug: str, name: str) -> bool:

@@ -6,7 +6,7 @@ from typing import Any
 
 from task_manager.utils import TaskFailureReportForCallback
 
-from activetigger.datamodels import EventsModel, ProcessComputing, TaskComputing
+from activetigger.datamodels import EventsModel, TaskComputing, TaskEndedReason
 from activetigger.orchestrator import get_orchestrator
 from activetigger.project import Project
 from activetigger.tasks.task_manager_client import was_stopped
@@ -38,31 +38,34 @@ class TaskCallback(ABC):
         print(f"Completion of {cls.task_name} task {task_id} in orchestrator {task_result}")
         orchestrator = get_orchestrator()
         # the reconciliation must not take a task for lost while its result is stored
-        orchestrator.callbacks_in_progress.add(task_id)
+        orchestrator.task_registry.mark_callback_started(task_id)
         try:
             project_slug = cls.get_project_slug(task_result)
             project_manager = cls.get_project_manager(project_slug)
-            # copy: clean_process mutates the list
+            reason: TaskEndedReason = "finished"
+            error_message: str | None = None
             # always drop the entry, a raising hook must not leave a stale process
             try:
-                computing_task = orchestrator.get_computing_task(task_id, project_slug)
+                computing_task = orchestrator.task_registry.get_computing_task(
+                    task_id, project_slug
+                )
                 cls.on_complete_task_specific(task_id, task_result, project_manager, computing_task)
                 events = (
                     EventsModel(events=task_result["events"]) if "events" in task_result else None
                 )
 
             except Exception as ex:
+                reason = "error"
                 # surface the error to the user instead of a 500 the worker would retry
-                print(f"Error in {computing_task.kind} callback {task_id}: {ex}")
-                project_manager.errors.add(f"Error in {computing_task.kind} : {ex}")
-                # a creation is only cleaned by the orchestrator loop on "error"
-                # TODO: we can remoe that probably
-                if project_slug in get_orchestrator().project_creation_ongoing_computing_tasks():
-                    project_manager.status = "error"
+                error_message = f"Error in {computing_task.kind} callback {task_id}: {ex}"
+                print(error_message)
+
             finally:
-                orchestrator.on_task_end(task_id, project_slug, events)
+                orchestrator.task_registry.on_task_end(
+                    task_id, project_slug, reason, events, error_message=error_message
+                )
         finally:
-            orchestrator.callbacks_in_progress.discard(task_id)
+            orchestrator.task_registry.mark_callback_finished(task_id)
 
     @classmethod
     @abstractmethod
@@ -80,21 +83,18 @@ class TaskCallback(ABC):
     def on_failure(cls, task_id: str, task_report: TaskFailureReportForCallback):
         print(f"Error on {cls.task_name} task {task_id} in orchestrator {task_report}")
         orchestrator = get_orchestrator()
-        orchestrator.callbacks_in_progress.add(task_id)
+        orchestrator.task_registry.mark_callback_started(task_id)
         # cast first args as Task Input type
         task_input = task_report.task_args[0]
         project_slug = task_input["project_slug"]
         try:
             project_manager = cls.get_project_manager(project_slug)
             specific_message = cls.on_failure_task_specific(task_id, task_report, project_manager)
-            # a stopped task is not an error (same as the in-process "cancelled" state)
-            if "Process interrupted by user" in task_report.exception or was_stopped(task_id):
-                # except for a creation: the loop only cleans a creating project on "error"
-                # TODO: we probably can remove that
-                if project_slug in get_orchestrator().project_creation_ongoing_computing_tasks():
-                    project_manager.errors.add("Project creation stopped by user")
-                    project_manager.status = "error"
-                return
+
+            # TODO: we have two different place where we trigger error message for task here and in orchestrator._on_task_ended
+            # TODO: a stopped task is not an error (same as the in-process "cancelled" state)
+            # if "Process interrupted by user" in task_report.exception or was_stopped(task_id):
+
             project_manager.status = "error"
             if specific_message:
                 project_manager.errors.add(specific_message)
@@ -141,8 +141,8 @@ class TaskCallback(ABC):
                     f"Error for process {cls.task_name} : {task_report.exception}"
                 )
         finally:
-            orchestrator.callbacks_in_progress.discard(task_id)
-            orchestrator.on_task_end(task_id, project_slug)
+            orchestrator.task_registry.mark_callback_finished(task_id)
+            orchestrator.task_registry.on_task_end(task_id, project_slug, reason="error")
 
     @classmethod
     @abstractmethod

@@ -20,7 +20,6 @@ import activetigger.functions as functions
 from activetigger.config import config
 from activetigger.datamodels import (
     ImageModelsProjectStateModel,
-    LMComputing,
     LMComputingOutModel,
     LMParametersModel,
     LMStatusModel,
@@ -28,16 +27,13 @@ from activetigger.datamodels import (
     ModelScoresModel,
     StaticFileModel,
     TaskComputing,
-    TaskToBeRun,
 )
 from activetigger.db.languagemodels import ModelsService
 from activetigger.db.manager import DatabaseManager
 from activetigger.errors import AlreadyExistsError, NotFoundError
 from activetigger.functions import get_model_metrics
 from activetigger.monitoring import Monitoring
-from activetigger.tasks.task_manager_client import (
-    get_celery_task_progress,
-)
+from activetigger.task_registry import TaskRegistry
 
 
 class ImageModels:
@@ -53,7 +49,7 @@ class ImageModels:
 
     project_slug: str
     path: Path
-    computing: list
+    task_registry: TaskRegistry
     models_service: ModelsService
     db_manager: DatabaseManager
     base_models: list[dict[str, Any]]
@@ -64,7 +60,7 @@ class ImageModels:
         self,
         project_slug: str,
         path: Path,
-        computing: list,
+        task_registry: TaskRegistry,
         db_manager: DatabaseManager,
         list_models: str | None = None,
     ) -> None:
@@ -81,7 +77,7 @@ class ImageModels:
         )
         self.project_slug = project_slug
         self.monitoring = Monitoring(db_manager, project_slug)
-        self.computing = computing
+        self.task_registry = task_registry
         self.models_service = db_manager.language_models_service
         self.path: Path = Path(path).joinpath("image").absolute()
         self.cache_predictions = {}
@@ -140,22 +136,16 @@ class ImageModels:
         """
         return {
             e.user: LMComputingOutModel(
-                name=e.model_name,
-                status=e.status,
-                progress=get_celery_task_progress(e.unique_id),
-                loss=self.get_loss(e.model_name),
-                epochs=e.params["epochs"] if e.params else None,
+                name=e.inputs.model_name,
+                status=e.inputs.status,
+                progress=self.task_registry.task_progress(e.id),
+                loss=self.get_loss(e.inputs.model_name),
+                epochs=e.inputs.params["epochs"] if e.inputs.params else None,
             )
-            for e in self.computing
-            if e.kind in ["image", "train_image", "predict_image"]
+            for e in self.task_registry.project_computing_tasks(
+                self.project_slug, kinds=["train_image", "predict_image"]
+            ).values()
         }
-
-    def current_user_processes(self, user: str) -> list[LMComputing]:
-        return [
-            e
-            for e in self.computing
-            if e.user == user and e.kind in ["image", "train_image", "predict_image"]
-        ]
 
     def estimate_memory_use(self, model: str, kind: str = "train", batchsize: int = 16) -> int:
         """
@@ -170,7 +160,7 @@ class ImageModels:
             return 4
         return 0
 
-    def get_training_task(
+    def start_training_task(
         self,
         name: str,
         project: str,
@@ -190,7 +180,7 @@ class ImageModels:
         class_min_freq: int = 1,
         exclude_labels: list[str] | None = None,
         fp16: bool = True,
-    ) -> TaskToBeRun:
+    ) -> str:
         """
         create a training task
         """
@@ -246,9 +236,9 @@ class ImageModels:
         )
         del df
 
-        return {"name": TrainImageTask.name, "inputs": inputs}
+        return self.task_registry.start_task(TrainImageTask.name, inputs)
 
-    def get_predicting_task(
+    def start_predicting_task(
         self,
         project_slug: str,
         name: str,
@@ -264,7 +254,7 @@ class ImageModels:
         path_train: Path | None = None,
         path_valid: Path | None = None,
         path_test: Path | None = None,
-    ) -> TaskToBeRun:
+    ) -> str:
         """
         create a prediction task with a model
         """
@@ -308,7 +298,7 @@ class ImageModels:
         )
 
         del df
-        return {"name": PredictImageTask.name, "inputs": inputs}
+        return self.task_registry.start_task(PredictImageTask.name, inputs)
 
     def delete(self, name: str) -> None:
         """
@@ -366,7 +356,7 @@ class ImageModels:
             user=task_computing.user,
             project=self.project_slug,
             scheme=task_computing.inputs.scheme or "default",
-            params=task_computing.inputs.params,
+            params=task_computing.inputs.params.model_dump(),
             path=str(self.path.joinpath(task_computing.inputs.model_name)),
             status="trained",
         )

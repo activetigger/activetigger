@@ -114,7 +114,7 @@ def compute_projection(
         raise HTTPException(status_code=400, detail="No features available")
     try:
         features = project.features.get(projection.features, dataset=["train"])
-        task = project.projections.get_compute_task(
+        task_id = project.projections.get_compute_task(
             project_slug=project.name,
             username=current_user.username,
             projection=projection,
@@ -122,7 +122,6 @@ def compute_projection(
             normalize_features=projection.normalize_features,
         )
         orchestrator = get_orchestrator()
-        orchestrator.create_task(task["name"], task["inputs"])
         orchestrator.log_action(
             current_user.username,
             f"COMPUTE PROJECTION: {projection.name} ({projection.method})",

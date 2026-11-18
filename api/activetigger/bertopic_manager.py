@@ -19,7 +19,6 @@ from activetigger.datamodels import (
     BertopicProjectionNode,
     BertopicProjectStateModel,
     TaskComputing,
-    TaskToBeRun,
     TopicsOutModel,
     TrainingState,
 )
@@ -28,7 +27,7 @@ from activetigger.db.manager import DatabaseManager
 from activetigger.errors import NotFoundError
 from activetigger.features import Features
 from activetigger.monitoring import Monitoring
-from activetigger.tasks.task_manager_client import get_celery_task_progress
+from activetigger.task_registry import TaskRegistry
 
 
 class Bertopic:
@@ -47,13 +46,13 @@ class Bertopic:
         self,
         project_slug: str,
         path: Path,
-        computing: list,
+        task_registry: TaskRegistry,
         features: Features,
         db_manager: DatabaseManager,
     ) -> None:
         self.project_slug = project_slug
         self.monitoring = Monitoring(db_manager, project_slug)
-        self.computing = computing
+        self.task_registry = task_registry
         self.path: Path = path.joinpath("bertopic")
         self.path.mkdir(parents=True, exist_ok=True)
         if not self.path.joinpath("runs").exists():
@@ -66,7 +65,7 @@ class Bertopic:
         with open(folder_path / "params.json", "r") as file:
             return json.load(file)
 
-    def get_compute_task(
+    def start_compute_task(
         self,
         path_data: Path,
         col_id: str | None,
@@ -74,7 +73,7 @@ class Bertopic:
         parameters: BertopicParamsModel,
         name: str,
         user: str,
-    ) -> TaskToBeRun:
+    ) -> str:
         """
         Compute BERTopic model.
 
@@ -109,7 +108,7 @@ class Bertopic:
             random_seed=config.random_seed,
         )
 
-        return {"name": ComputeBertopicTask.name, "inputs": inputs}
+        return self.task_registry.start_task(ComputeBertopicTask.name, inputs)
 
     def add(self, computing_task: TaskComputing[ComputeBertopicTaskInput]) -> None:
         """
@@ -141,13 +140,14 @@ class Bertopic:
         return {
             e.user: TrainingState(
                 {
-                    "name": e.name,
+                    "name": e.inputs.name,
                     "status": "training",
-                    "progress": get_celery_task_progress(e.unique_id),
+                    "progress": self.task_registry.task_progress(e.id),
                 }
             )
-            for e in self.computing
-            if e.kind == "bertopic"
+            for e in self.task_registry.project_computing_tasks(
+                self.project_slug, kinds=["compute_bertopic"]
+            ).values()
         }
 
     def available(self) -> dict[str, BERTopicDescriptionModel]:
@@ -165,7 +165,12 @@ class Bertopic:
         (neither registered in the database nor currently computing).
         """
         slug = slugify(name)
-        computing_names = [e.name for e in self.computing if e.kind == "bertopic"]
+        computing_names = [
+            e.inputs.name
+            for e in self.task_registry.project_computing_tasks(
+                self.project_slug, kinds=["compute_bertopic"]
+            ).values()
+        ]
         return slug not in computing_names and not self.models_service.model_exists(
             self.project_slug, slug
         )
@@ -247,11 +252,16 @@ class Bertopic:
         # Always overwrite to avoid stale data if the feature was recomputed.
         df.to_parquet(target)
 
-    def current_user_processes(self, user: str) -> list:
+    def current_user_processes(self, user: str) -> list[TaskComputing]:
         """
         Get current user processes
         """
-        return [e for e in self.computing if e.user == user]
+        return [
+            e
+            for e in self.task_registry.project_computing_tasks(
+                self.project_slug, user=user
+            ).values()
+        ]
 
     def delete(self, name: str) -> None:
         """

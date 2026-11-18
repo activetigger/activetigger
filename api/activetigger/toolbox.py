@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse
 from task_manager.active_tigger_task import QueueName
 from task_manager.celery import celery_app
 from task_manager.stop_signal import stop_requested
-from task_manager.tasks.prepare_dataset_task import PrepareDatasetTaskInput, prepare_dataset_task
+from task_manager.tasks.prepare_dataset_task import PrepareDatasetTask, PrepareDatasetTaskInputs
 
 from activetigger.config import config
 from activetigger.datamodels import (
@@ -25,11 +25,9 @@ from activetigger.datamodels import (
     PrepareTaskModel,
 )
 from activetigger.functions import safe_upload_path, slugify
+from activetigger.task_registry import TaskRegistry
 from activetigger.tasks.task_manager_client import (
     celery_tasks_in_flight,
-    enqueue_celery_task,
-    get_celery_task_progress,
-    stop_celery_task,
 )
 
 
@@ -50,6 +48,11 @@ class Toolbox:
     # a task still PENDING with no progress after this delay was lost (redis
     # flushed, state expired, worker killed before it started)
     LOST_TASK_GRACE_SECONDS = 300
+
+    task_registry: TaskRegistry
+
+    def __init__(self, task_registry: TaskRegistry):
+        self.task_registry = task_registry
 
     def _user_dir(self, username: str) -> Path:
         return Path(config.data_path).joinpath("prepare", slugify(username))
@@ -227,22 +230,23 @@ class Toolbox:
         # a previous split of this session must not write its result under the new one
         previous = self._session_task_id(session_dir)
         if previous:
-            stop_celery_task(previous, abortable=True)
+            self.task_registry.stop_task_by_id_and_project(previous)
+
         # remove results of a previous run
         session_dir.joinpath("result.parquet").unlink(missing_ok=True)
 
         try:
-            # TODO: add an abstraction over create_task to allow task outside project boundaries
-            (task_id, _) = enqueue_celery_task(
-                prepare_dataset_task,
-                PrepareDatasetTaskInput(
-                    username=username,
+            task_id = self.task_registry.start_task(
+                PrepareDatasetTask.name,
+                PrepareDatasetTaskInputs(
+                    user=username,
                     session_id=params.session_id,
                     path_session=session_dir,
                     params=params,
                 ),
                 queue=QueueName.GPU if params.method == "wtpsplit" else None,
             )
+
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
         # remember the task so status/stop can check it belongs to this session
@@ -260,7 +264,7 @@ class Toolbox:
         )
         if not owned:
             raise HTTPException(status_code=404, detail="Task not found")
-        stop_celery_task(task_id, abortable=True)
+        self.task_registry.stop_task_by_id_and_project(task_id, None, username)
 
     def status(self, username: str, session_id: str, task_id: str) -> PrepareStatusModel:
         """
@@ -288,7 +292,7 @@ class Toolbox:
             return PrepareStatusModel(status="failed", error=error)
 
         # queued or running: the worker reports progress once it starts
-        progress_report = get_celery_task_progress(task_id)
+        progress_report = self.task_registry.task_progress(task_id)
         if progress_report is None and state == PENDING:
             # celery forgets tasks (result_expires, redis restart). After the grace
             # period, ask the broker and the workers: a task still queued behind a

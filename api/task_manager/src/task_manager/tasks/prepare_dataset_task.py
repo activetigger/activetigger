@@ -11,8 +11,9 @@ from task_manager.task_names import TaskNames
 from task_manager.tasks.prepare_dataset import prepare_dataset
 
 
-class PrepareDatasetTaskInput(TaskInputs[None]):
+class PrepareDatasetTaskInputs(TaskInputs[None]):
     # toolbox tasks belong to a user session, not to a project
+    project_slug: None = None
     session_id: str
     path_session: Path
     params: PrepareSplitModel
@@ -40,7 +41,7 @@ class PrepareDatasetTask(AbortableActiveTiggerTask):
     pydantic=True,
 )
 def prepare_dataset_task(
-    self: PrepareDatasetTask, inputs: PrepareDatasetTaskInput
+    self: PrepareDatasetTask, inputs: PrepareDatasetTaskInputs
 ) -> PrepareDatasetTaskResult:
     # progress lives at <session>/progress, read by Toolbox.status
     result_path = prepare_dataset(

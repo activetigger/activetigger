@@ -16,7 +16,6 @@ from task_manager.tasks.train_ner_task import TrainNerTask, TrainNerTaskInputs
 import activetigger.functions as functions
 from activetigger.config import config
 from activetigger.datamodels import (
-    LMComputing,
     LMComputingOutModel,
     LMParametersDbModel,
     LMParametersModel,
@@ -26,7 +25,6 @@ from activetigger.datamodels import (
     NerModelsProjectStateModel,
     StaticFileModel,
     TaskComputing,
-    TaskToBeRun,
     TextDatasetModel,
 )
 from activetigger.db.languagemodels import ModelsService
@@ -34,9 +32,7 @@ from activetigger.db.manager import DatabaseManager
 from activetigger.errors import AlreadyExistsError, NotFoundError
 from activetigger.functions import get_model_metrics
 from activetigger.monitoring import Monitoring
-from activetigger.tasks.task_manager_client import (
-    get_celery_task_progress,
-)
+from activetigger.task_registry import TaskRegistry
 
 
 class NerModels:
@@ -52,7 +48,7 @@ class NerModels:
 
     project_slug: str
     path: Path
-    computing: list
+    task_registry: TaskRegistry
     models_service: ModelsService
     db_manager: DatabaseManager
     base_models: list[dict[str, Any]]
@@ -63,14 +59,14 @@ class NerModels:
         self,
         project_slug: str,
         path: Path,
-        computing: list,
+        task_registry: TaskRegistry,
         db_manager: DatabaseManager,
         list_models: str | None = None,
     ) -> None:
         self.params_default = LMParametersModel()
         self.project_slug = project_slug
         self.monitoring = Monitoring(db_manager, project_slug)
-        self.computing = computing
+        self.task_registry = task_registry
         self.models_service = db_manager.language_models_service
         self.path = Path(path).joinpath("ner")
         self.cache_predictions = {}
@@ -124,22 +120,16 @@ class NerModels:
     def training(self) -> dict[str, LMComputingOutModel]:
         return {
             e.user: LMComputingOutModel(
-                name=e.model_name,
-                status=e.status,
-                progress=get_celery_task_progress(e.unique_id),
-                loss=self.get_loss(e.model_name),
-                epochs=e.params["epochs"] if e.params else None,
+                name=e.inputs.model_name,
+                status=e.inputs.status,
+                progress=self.task_registry.task_progress(e.id),
+                loss=self.get_loss(e.inputs.model_name),
+                epochs=e.inputs.params["epochs"] if e.inputs.params else None,
             )
-            for e in self.computing
-            if e.kind in ["ner", "train_ner", "predict_ner"]
+            for e in self.task_registry.project_computing_tasks(
+                self.project_slug, kinds=["train_ner", "predict_ner"]
+            ).values()
         }
-
-    def current_user_processes(self, user: str) -> list[LMComputing]:
-        return [
-            e
-            for e in self.computing
-            if e.user == user and e.kind in ["ner", "train_ner", "predict_ner"]
-        ]
 
     def estimate_memory_use(self, model: str, kind: str = "train") -> int:
         if kind == "train":
@@ -148,7 +138,7 @@ class NerModels:
             return 3
         return 0
 
-    def get_training_task(
+    def start_training_task(
         self,
         name: str,
         project: str,
@@ -163,7 +153,7 @@ class NerModels:
         test_size: float = 0.2,
         num_min_annotations: int = 10,
         max_length: int = 512,
-    ) -> TaskToBeRun:
+    ) -> str:
         if len(df.dropna()) < num_min_annotations:
             raise Exception(f"Less than {num_min_annotations} elements annotated")
         if self.models_service.model_exists(project, name):
@@ -197,7 +187,7 @@ class NerModels:
         )
 
         del df
-        return {"name": TrainNerTask.name, "inputs": inputs}
+        return self.task_registry.start_task(TrainNerTask.name, inputs)
 
     def start_predicting_process(
         self,
@@ -216,7 +206,7 @@ class NerModels:
         path_train: Path | None = None,
         path_valid: Path | None = None,
         path_test: Path | None = None,
-    ) -> TaskToBeRun:
+    ) -> str:
         if not (self.path.joinpath(name)).exists():
             raise NotFoundError("The model does not exist")
 
@@ -257,7 +247,7 @@ class NerModels:
         # status=status,
         # training_kind="ner",
         del df
-        return {"name": PredictNerTask.name, "inputs": inputs}
+        return self.task_registry.start_task(PredictNerTask.name, inputs)
 
     def delete(self, name: str) -> None:
         if not name:
@@ -310,9 +300,7 @@ class NerModels:
         print("NER prediction finished")
 
     def add_train(self, computing_task: TaskComputing[TrainNerTaskInputs]) -> None:
-        params_db = LMParametersDbModel(
-            **computing_task.inputs.params.model_dump(), exclude_labels=[]
-        )
+        params_db = {**computing_task.inputs.params.model_dump(), "exclude_labels": []}
         self.models_service.add_model(
             kind="ner",
             name=computing_task.inputs.model_name,

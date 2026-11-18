@@ -3,7 +3,6 @@ import os
 import pickle
 import threading
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -11,8 +10,9 @@ import pandas as pd
 import pyarrow.parquet as pq
 import regex
 from pandas import DataFrame, Series
-from task_manager.active_tigger_task import ActiveTiggerTask, QueueName
+from task_manager.active_tigger_task import ActiveTiggerTask
 from task_manager.task_input import TaskInputs
+from task_manager.task_names import features_tasks
 from task_manager.tasks.compute_bert_embeddings_task import (
     ComputeBertEmbeddingsTask,
     ComputeBertEmbeddingsTaskInputs,
@@ -42,11 +42,10 @@ from activetigger.data import Data
 from activetigger.datamodels import (
     FeatureDescriptionModelOut,
     FeaturesProjectStateModel,
-    TaskToBeRun,
 )
 from activetigger.db.projects import ProjectsService
 from activetigger.errors import AlreadyExistsError, InvalidInputError, NotFoundError
-from activetigger.tasks.task_manager_client import get_celery_task_progress
+from activetigger.task_registry import TaskRegistry
 
 # Experimental image projects: list of selectable image embedding models.
 # Each entry maps a UI label to (open_clip model name, pretrained tag).
@@ -106,7 +105,7 @@ class Features:
     project_slug: str
     data: Data
     path_model: Path
-    computing: list
+    task_registry: TaskRegistry
     informations: dict
     content: DataFrame
     map: dict
@@ -120,7 +119,7 @@ class Features:
         project_slug: str,
         data: Data,
         models_path: Path,
-        computing: list,
+        task_registry: TaskRegistry,
         db_manager,
         lang: str,
         kind: str = "text",
@@ -141,7 +140,7 @@ class Features:
         self._lock = threading.RLock()
 
         self.lang = lang
-        self.computing = computing
+        self.task_registry = task_registry
         self.kind = kind
         # Reference to the project's LanguageModels manager.
         self.languagemodels = languagemodels
@@ -279,15 +278,19 @@ class Features:
         """
         return name in self.map
 
-    def extension_running(self) -> bool:
+    def _raise_if_extending(self) -> None:
         """
-        True while an ExtendFeatures task (triggered by an eval set
+        raise if an ExtendFeatures task (triggered by an eval set
         import) is rewriting the features file.
         """
-        return any(getattr(c, "kind", None) == "extend_features" for c in self.computing)
-
-    def _raise_if_extending(self) -> None:
-        if self.extension_running():
+        if (
+            len(
+                self.task_registry.project_computing_tasks(
+                    self.project_slug, kinds=["extend_features"]
+                )
+            )
+            > 0
+        ):
             raise ValueError(
                 "Features are being recomputed for a newly imported eval set; "
                 "retry when this process is finished"
@@ -595,30 +598,21 @@ class Features:
         else:
             raise InvalidInputError("Index not recognized")
 
-    def current_user_processes(self, user: str):
-        return [e for e in self.computing if getattr(e, "user", None) == user]
-
-    @staticmethod
-    def _progress(task_id: str) -> str | None:
-        progress = get_celery_task_progress(task_id)
-        return str(progress["progress"]) if progress else None
-
     def current_computing(self) -> dict[str, dict[str, str | None]]:
-        computing = {
-            e.name: {"progress": self._progress(e.unique_id), "name": e.name}
-            for e in self.computing
-            if e.kind == "feature"
+        computing: dict[str, dict] = {
+            e.kind: {"progress": self.task_registry.task_progress(e.id), "name": e.kind}
+            for e in self.task_registry.project_computing_tasks(
+                self.project_slug, kinds=features_tasks + ["extend_features"]
+            ).values()
         }
         # eval set import/drop in progress: existing features are being
         # recomputed/rewritten for the new dataset shape. The `kind` key
         # lets the frontend render this entry differently.
-        for e in self.computing:
-            if e.kind == "extend_features":
-                computing["extending features"] = {
-                    "progress": self._progress(e.unique_id),
-                    "name": "extending features",
-                    "kind": "extend_features",
-                }
+        if "extend_features" in computing:
+            computing["extending features"] = computing["extend_features"]
+            computing["extending features"]["name"] = "extending features"
+            computing["extending features"]["kind"] = "extend features"
+
         return computing
 
     def __sbert_choose_model(self, parameters: dict):
@@ -687,7 +681,7 @@ class Features:
             pass
         return pretty_name
 
-    def compute_or_get_task(
+    def compute(
         self,
         df: pd.Series,
         name: str,
@@ -695,14 +689,15 @@ class Features:
         kind: str,
         parameters: dict,
         username: str,
-    ) -> TaskToBeRun | None:
+    ) -> str | None:
         """
         Compute new feature
         TODO : the parameters management is really bad
         """
-        if len(self.current_user_processes(username)) > 0:
+        if len(self.task_registry.project_computing_tasks(self.project_slug, user=username)) > 0:
             raise ValueError("A process is already running")
 
+        # TODO: why are those not TaskNames ?
         if kind not in {
             "sentence-embeddings",
             "bert-embeddings",
@@ -996,7 +991,7 @@ class Features:
             )
 
         if task is not None and task_inputs is not None:
-            return {"name": task.name, "inputs": task_inputs}
+            return self.task_registry.start_task(task.name, task_inputs)
         raise ValueError("Error in the process")
 
     def pickle_for_task(self, obj: Any) -> Path:
