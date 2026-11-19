@@ -25,9 +25,11 @@ class PredictImageCallback(TaskCallback):
         cls,
         task_id: str,
         task_result: PredictImageTaskResult,
-        project_manager: Project,
+        project_manager: Project | None,
         computing_task: TaskComputing[PredictImageTaskInputs],
     ):
+        # project scope task always receive a populated project_manager
+        project_manager = cast(Project, project_manager)
         if project_manager.imagemodels is None:
             raise Exception("Image models are not available for this project")
 

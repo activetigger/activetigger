@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import cast
 
 from fastapi.encoders import jsonable_encoder
 
@@ -28,9 +29,11 @@ class UpdateDatasetsCallback(TaskCallback):
         cls,
         task_id: str,
         task_result: UpdateDatasetsTaskResult,
-        project_manager: Project,
+        project_manager: Project | None,
         computing_task: TaskComputing[UpdateDatasetsTaskInputs],
     ):
+        # project scope task always receive a populated project_manager
+        project_manager = cast(Project, project_manager)
         params = project_manager.params
         changed = task_result["train_path"] is not None
         if changed:

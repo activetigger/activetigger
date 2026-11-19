@@ -47,9 +47,12 @@ class ActiveTiggerTask(Task, Generic[TInputs]):
 
     # Callback to orchestrator on task success
     def on_success(self, retval, task_id, args, kwargs):
+
         results = TaskResultForCallback(
             results=retval,
             task_name=self.name,
+            task_args=args,
+            task_kwargs=kwargs,
         )
         task_success_callback(task_id, results)
         return super().on_success(retval, task_id, args, kwargs)

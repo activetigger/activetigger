@@ -25,9 +25,11 @@ class TrainImageCallback(TaskCallback):
         cls,
         task_id: str,
         task_result: TrainImageTaskResult,
-        project_manager: Project,
+        project_manager: Project | None,
         computing_task: TaskComputing[TrainImageTaskInputs],
     ):
+        # project scope task always receive a populated project_manager
+        project_manager = cast(Project, project_manager)
         if project_manager.imagemodels is None:
             raise Exception("Image models are not available for this project")
 
@@ -37,6 +39,8 @@ class TrainImageCallback(TaskCallback):
     @classmethod
     def on_failure_task_specific(cls, task_id, task_report, project_manager):
         model_name = task_report.task_args[0]["model_name"]
+        # project scope task always receive a populated project_manager
+        project_manager = cast(Project, project_manager)
         project_manager.db_manager.language_models_service.delete_model(
             project_manager.name, model_name
         )

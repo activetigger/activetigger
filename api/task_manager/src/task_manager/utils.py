@@ -6,12 +6,15 @@ from celery.utils.log import get_task_logger
 from pydantic import BaseModel
 
 from task_manager import config
+from task_manager.task_input import TaskInputs
 from task_manager.task_names import TaskNames
 
 
 class TaskResultForCallback[R](BaseModel):
     results: R
     task_name: TaskNames
+    task_args: Any
+    task_kwargs: Any
 
 
 class TaskFailureReportForCallback(BaseModel):
@@ -24,12 +27,14 @@ class TaskFailureReportForCallback(BaseModel):
 class SuccessCallbackPayload(BaseModel):
     task_id: str
     task_name: TaskNames
+    project_slug: str | None
     results: Any
 
 
 class FailureCallbackPayload(BaseModel):
     task_id: str
     task_name: TaskNames
+    project_slug: str | None
     report: TaskFailureReportForCallback
 
 
@@ -76,8 +81,12 @@ def task_success_callback(task_id: str, results: TaskResultForCallback[Any]):
     """
     Send to the FastAPI route the result of the task
     """
+    project_slug = results.task_kwargs["inputs"]["project_slug"]
     payload = SuccessCallbackPayload(
-        task_id=task_id, task_name=results.task_name, results=results.results
+        task_id=task_id,
+        task_name=results.task_name,
+        results=results.results,
+        project_slug=project_slug,
     )
     _post_callback(config.api_task_success_route, payload)
 
@@ -86,5 +95,11 @@ def task_failure_callback(task_id: str, report: TaskFailureReportForCallback):
     """
     Send to the FastAPI route the failure report of the task
     """
-    payload = FailureCallbackPayload(task_id=task_id, task_name=report.task_name, report=report)
+    project_slug = report.task_kwargs["inputs"]["project_slug"]
+    payload = FailureCallbackPayload(
+        task_id=task_id,
+        task_name=report.task_name,
+        project_slug=project_slug,
+        report=report,
+    )
     _post_callback(config.api_task_failure_route, payload)

@@ -26,12 +26,14 @@ class ComputeBertEmbeddingsCallback(TaskCallback):
         cls,
         task_id: str,
         task_result: ComputeBertEmbeddingsTaskResult,
-        project_manager: Project,
+        project_manager: Project | None,
         computing_task,
     ):
         embeddings_path = Path(task_result["embeddings_path"])
         try:
             results = pd.read_parquet(embeddings_path)
+            # project scope task always receive a populated project_manager
+            project_manager = cast(Project, project_manager)
             project_manager.features.add(
                 name=task_result["parameters"]["name"],
                 kind="bert-embeddings",

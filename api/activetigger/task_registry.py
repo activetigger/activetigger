@@ -6,9 +6,8 @@ from typing import Iterator, cast
 from celery import uuid
 from celery.contrib.abortable import AbortableAsyncResult, AbortableTask
 from celery.result import AsyncResult
-from task_manager.active_tigger_task import ActiveTiggerTask, QueueName
+from task_manager.active_tigger_task import ActiveTiggerTask, QueueName, TaskScope
 from task_manager.celery import celery_app
-from task_manager.stop_signal import stop_requested
 from task_manager.task_input import TaskInputs
 from task_manager.task_names import TaskNames
 
@@ -95,14 +94,20 @@ class TaskRegistry:
             else:
                 self._computing_tasks.projects_tasks[inputs.project_slug][task_id] = computing_task
 
-        # registered before the send: a fast task calls back at once
-        self.monitoring.register_process(
-            process_name=task_id, kind=task_name, parameters={}, user_name=inputs.user
+        # TODO: monitoring does not support orchestrator scope tasks
+        print(
+            f"create task {computing_task.kind} {computing_task.project_slug} {computing_task.id}"
         )
+        if task_class.scope == "project":
+            # registered before the send: a fast task calls back at once
+            self.monitoring.register_process(
+                process_name=task_id, kind=task_name, parameters={}, user_name=inputs.user
+            )
 
         # queue overrides the task default (e.g. GPU for a wtpsplit preparation)
         options = {"queue": queue} if queue else {}
         try:
+            # TODO: should we create a chord/chain to encapsulate success callback into task lifetime
             task_class.s(inputs=inputs.model_dump(mode="json")).apply_async(
                 task_id=task_id, **options
             )
@@ -111,10 +116,48 @@ class TaskRegistry:
             raise
         return task_id
 
+    def on_task_end(
+        self,
+        task_id: str,
+        project_slug: str | None,
+        reason: TaskEndedReason,
+        events: EventsModel | None = None,
+        error_message: str | None = None,
+    ) -> None:
+        """
+        When task ends, this method must be called to delete the task representation from the orchestrator memory
+        """
+        with self._lock:
+            computing_task = self._pop_computing_task(task_id, project_slug)
+        if computing_task is None:
+            return
+        # TODO: monitoring does not support orchestrator scope tasks
+
+        if TaskRegistry.task_scope(computing_task.kind):
+            self.monitoring.close_process(task_id, events)
+        self._clean_temp_files(computing_task)
+        self._emit_task_end(
+            TaskEndedEvent(
+                computing_task=computing_task,
+                reason=reason,
+                events=events,
+                error_message=error_message,
+            )
+        )
+
+    @staticmethod
+    def task_scope(task_name: TaskNames) -> TaskScope:
+        task_class = cast(ActiveTiggerTask, celery_app.tasks[task_name])
+        return task_class.scope
+
+    @staticmethod
+    def is_task_abortable(task_name: TaskNames) -> bool:
+        task_class = cast(ActiveTiggerTask, celery_app.tasks[task_name])
+        return isinstance(task_class, AbortableTask)
+
     def stop_task(self, computing_task: TaskComputing):
         try:
-            task_class = cast(ActiveTiggerTask, celery_app.tasks[computing_task.kind])
-            if isinstance(task_class, AbortableTask):
+            if TaskRegistry.is_task_abortable(computing_task.kind):
                 task = AbortableAsyncResult(computing_task.id, app=celery_app)
                 print(f"Aborting {computing_task.id} {type(task).__name__}")
                 # abort() is a fallback flag; revoke drops a task still in the queue
@@ -200,24 +243,26 @@ class TaskRegistry:
 
     # get computing_task object from its id and scope
     def get_computing_task(self, task_id: str, project_slug: str | None):
-        computing_task: TaskComputing | None = None
+
         with self._lock:
-            # project scope
-            if project_slug:
-                if project_slug not in self._computing_tasks:
-                    raise Exception(f"Project {project_slug} not registered in orchestrator")
-                if task_id not in self._computing_tasks.projects_tasks[project_slug]:
-                    print(
-                        f"on_task_end called on an untracked task {task_id} in project {project_slug} scope"
-                    )
-                else:
-                    computing_task = self._computing_tasks.projects_tasks[project_slug][task_id]
             # orchestrator scope
-            if project_slug is None and task_id not in self._computing_tasks.orchestrator_tasks:
-                print(f"on_task_end called on an untracked task {task_id} in orchestrator scope")
+            if task_id in self._computing_tasks.orchestrator_tasks:
+                return self._computing_tasks.orchestrator_tasks[task_id]
             else:
-                computing_task = self._computing_tasks.orchestrator_tasks[task_id]
-        return computing_task
+                # project scope
+                if project_slug:
+                    if project_slug not in self._computing_tasks:
+                        raise Exception(f"Project {project_slug} not registered in orchestrator")
+                    if task_id in self._computing_tasks.projects_tasks[project_slug]:
+                        return self._computing_tasks.projects_tasks[project_slug][task_id]
+                    else:
+                        raise Exception(
+                            f"on_task_end called on an untracked task {task_id} in project {project_slug} scope"
+                        )
+                else:
+                    raise Exception(
+                        f"on_task_end called on an untracked task {task_id} in orchestrator scope"
+                    )
 
     def projects_with_running_tasks(self) -> set[str]:
         with self._lock:
@@ -286,32 +331,6 @@ class TaskRegistry:
         if r.state == "PROGRESS":
             return r.info
         return None
-
-    def on_task_end(
-        self,
-        task_id: str,
-        project_slug: str | None,
-        reason: TaskEndedReason,
-        events: EventsModel | None = None,
-        error_message: str | None = None,
-    ) -> None:
-        """
-        When task ends, this method must be called to delete the task representation from the orchestrator memory
-        """
-        with self._lock:
-            computing_task = self._pop_computing_task(task_id, project_slug)
-        if computing_task is None:
-            return
-        self.monitoring.close_process(task_id, events)
-        self._clean_temp_files(computing_task)
-        self._emit_task_end(
-            TaskEndedEvent(
-                computing_task=computing_task,
-                reason=reason,
-                events=events,
-                error_message=error_message,
-            )
-        )
 
     # ---------------- internals ----------------
 

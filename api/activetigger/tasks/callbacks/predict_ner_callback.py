@@ -25,9 +25,11 @@ class PredictNerCallback(TaskCallback):
         cls,
         task_id: str,
         task_result: PredictNerTaskResult,
-        project_manager: Project,
+        project_manager: Project | None,
         computing_task: TaskComputing[PredictNerTaskInputs],
     ):
+        # project scope task always receive a populated project_manager
+        project_manager = cast(Project, project_manager)
         if project_manager.nermodels is None:
             raise Exception("NER models are not available for this project")
 
@@ -39,6 +41,3 @@ class PredictNerCallback(TaskCallback):
             for err in errors:
                 project_manager.errors.add(err)
         project_manager.nermodels.add_prediction(computing_task)
-        project_manager.monitoring.close_process(
-            computing_task.id, EventsModel(events=task_result["events"])
-        )

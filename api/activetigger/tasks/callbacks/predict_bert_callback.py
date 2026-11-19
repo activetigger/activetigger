@@ -25,9 +25,11 @@ class PredictBertCallback(TaskCallback):
         cls,
         task_id: str,
         task_result: PredictBertTaskResult,
-        project_manager: Project,
+        project_manager: Project | None,
         computing_task: TaskComputing[PredictBertTaskInputs],
     ):
+        # project scope task always receive a populated project_manager
+        project_manager = cast(Project, project_manager)
         # predictions on the annotable dataset become features
         if "predict_annotable.parquet" in task_result["path"]:
             errors = project_manager.features.add_predictions(
@@ -36,6 +38,3 @@ class PredictBertCallback(TaskCallback):
             for err in errors:
                 project_manager.errors.add(err)
         project_manager.languagemodels.add_predicting_result(computing_task)
-        project_manager.monitoring.close_process(
-            computing_task.id, EventsModel(events=task_result["events"])
-        )

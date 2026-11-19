@@ -61,7 +61,7 @@ class CreateProjectTask(ActiveTiggerTask):
     queue = QueueName.CPU
     scope: TaskScope = "orchestrator"
 
-    def create_project(self: Task, props: CreateProjectTaskInputs) -> CreateProjectTaskResult:
+    def create_project(self, props: CreateProjectTaskInputs) -> CreateProjectTaskResult:
         """
         Create the project with the given name and file
         Define an internal and external index
@@ -360,9 +360,7 @@ class CreateProjectTask(ActiveTiggerTask):
         return result
 
     # TODO: refacto those two sibblings method by factoring code between image/normal project
-    def create_image_project(
-        self: Task, props: CreateProjectTaskInputs, update_progress: UpdateProgressMethod
-    ) -> CreateProjectTaskResult:
+    def create_image_project(self, props: CreateProjectTaskInputs) -> CreateProjectTaskResult:
         """
         Experimental task for creating an "image" project.
         Accepts a .zip upload containing png/jpg files and an optional metadata
@@ -433,7 +431,7 @@ class CreateProjectTask(ActiveTiggerTask):
 
                 # Write progress
                 progress_pct = round((idx / total_images) * 100, 1)
-                update_progress(progress_pct)
+                self.update_progress(progress_pct)
 
             metadata_df = None
             if metadata_infos:
@@ -592,10 +590,8 @@ class CreateProjectTask(ActiveTiggerTask):
     base=CreateProjectTask,
     pydantic=True,
 )
-def create_project_task(self, props: CreateProjectTaskInputs):
-    if props.image_project:
-        return CreateProjectTask.create_image_project(
-            self=self, props=props, update_progress=self.update_progress
-        )
+def create_project_task(self, inputs: CreateProjectTaskInputs):
+    if inputs.image_project:
+        return CreateProjectTask.create_image_project(self=self, props=inputs)
     else:
-        return CreateProjectTask.create_project(self=self, props=props)
+        return CreateProjectTask.create_project(self=self, props=inputs)

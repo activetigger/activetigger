@@ -18,8 +18,9 @@ class TrainMLCallback(TaskCallback):
         cls,
         task_id: str,
         task_result: TrainMLTaskResult,
-        project_manager: Project,
+        project_manager: Project | None,
         computing_task: TaskComputing[TrainMLMultiClassInputs],
     ):
-
+        # project scope task always receive a populated project_manager
+        project_manager = cast(Project, project_manager)
         project_manager.quickmodels.add(computing_task)

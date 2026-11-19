@@ -21,9 +21,11 @@ class TrainNerCallback(TaskCallback):
         cls,
         task_id: str,
         task_result: TrainNerTaskResult,
-        project_manager: Project,
+        project_manager: Project | None,
         computing_task: TaskComputing[TrainNerTaskInputs],
     ):
+        # project scope task always receive a populated project_manager
+        project_manager = cast(Project, project_manager)
         if project_manager.nermodels is None:
             raise Exception("NER models are not available for this project")
 
@@ -33,6 +35,8 @@ class TrainNerCallback(TaskCallback):
     @classmethod
     def on_failure_task_specific(cls, task_id, task_report, project_manager):
         model_name = task_report.task_args[0]["model_name"]
+        # project scope task always receive a populated project_manager
+        project_manager = cast(Project, project_manager)
         project_manager.db_manager.language_models_service.delete_model(
             project_manager.name, model_name
         )

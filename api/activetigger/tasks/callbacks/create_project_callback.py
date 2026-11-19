@@ -10,6 +10,7 @@ from task_manager.tasks.create_project_task import (
 from typing_extensions import override
 
 from activetigger.datamodels import ProjectModel
+from activetigger.orchestrator import get_orchestrator
 from activetigger.project import Project
 
 # ensure the callback definition is what we expect by using the TaskCallback abstraction
@@ -20,12 +21,6 @@ class CreateProjectCallback(TaskCallback):
     # task_name is used to identify which callback to execute
     task_name = CreateProjectTask.name
 
-    # the slug is nested in the dumped project model
-    @classmethod
-    @override
-    def get_project_slug(cls, task_result):
-        return task_result["project"]["project_slug"]
-
     # the on_complete method will be executed when a task succeeds
     # it will be executed from the orchestrator allowing using its dependencies (db and all)
     @classmethod
@@ -34,7 +29,7 @@ class CreateProjectCallback(TaskCallback):
         cls,
         task_id: str,
         task_result: CreateProjectTaskResult,
-        project_manager: Project,
+        project_manager: Project | None,
         computing_task,
     ):
         # create project model from the dump version
@@ -55,8 +50,8 @@ class CreateProjectCallback(TaskCallback):
             if task_result["import_validset_path"]
             else None
         )
-
-        project_manager.finish_project_creation(
+        orchestrator = get_orchestrator()
+        orchestrator.finish_project_creation(
             task_result["username"], project, trainset_import, validset_import, testset_import
         )
         # clean filesystem

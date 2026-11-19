@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from typing import cast
 
 from fastapi.encoders import jsonable_encoder
 
@@ -29,13 +30,18 @@ class AddEvalsetCallback(TaskCallback):
         cls,
         task_id: str,
         task_result: AddEvalsetTaskResult,
-        project_manager: Project,
+        project_manager: Project | None,
         computing_task: TaskComputing[AddEvalsetTaskInputs],
     ):
         eval_dataset = task_result["dataset"]
         user_name = task_result["username"]
         annotations_path = Path(task_result["annotations_path"])
         evalset_path = Path(task_result["evalset_path"])
+
+        # TODO: find a better architecture to avoid this typing issue
+        # project scope task always receive a populated project_manager
+        project_manager = cast(Project, project_manager)
+
         try:
             with open(annotations_path) as f:
                 schemes_elements = json.load(f)

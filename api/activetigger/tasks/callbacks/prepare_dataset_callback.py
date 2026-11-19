@@ -16,18 +16,11 @@ class PrepareDatasetCallback(TaskCallback):
 
     # toolbox tasks have no project: the result is on disk and Toolbox.status
     # reads the celery state, so both hooks only log
-    @classmethod
-    def on_complete(cls, task_id, task_result):
-        logger.info(f"prepare dataset {task_id} done: {task_result}")
-
-    @classmethod
-    def on_failure(cls, task_id, task_report: TaskFailureReportForCallback):
-        logger.info(f"prepare dataset {task_id} failed: {task_report.exception}")
 
     @classmethod
     def on_complete_task_specific(cls, task_id, task_result, project_manager, computing_task):
-        pass
+        logger.info(f"prepare dataset {task_id} done: {task_result}")
 
     @classmethod
     def on_failure_task_specific(cls, task_id, task_report, project_manager):
-        return None
+        logger.info(f"prepare dataset {task_id} failed: {task_report.exception}")

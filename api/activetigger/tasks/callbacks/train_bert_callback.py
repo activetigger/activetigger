@@ -25,9 +25,9 @@ class TrainBertCallback(TaskCallback):
         cls,
         task_id: str,
         task_result: TrainBertTaskResult,
-        project_manager: Project,
+        project_manager: Project | None,
         computing_task: TaskComputing[TrainBertTaskInputs],
     ):
+        # project scope task always receive a populated project_manager
+        project_manager = cast(Project, project_manager)
         project_manager.languagemodels.add_training_result(computing_task)
-    
-       
