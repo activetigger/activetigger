@@ -8,10 +8,10 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from activetigger.functions import get_device, release_device_memory
+from activetigger.tasks.utils import load_tokenizer
 from pandas import DataFrame, Series
 from transformers import (
     AutoModel,  # ty: ignore[possibly-missing-import]
-    AutoTokenizer,  # ty: ignore[possibly-missing-import]
 )
 
 from task_manager.auto_callback_task import UpdateProgressMethod
@@ -61,11 +61,9 @@ def encode_bert_embeddings(
 
     # prefer the tokenizer saved with the fine-tuned checkpoint
     if model_path.joinpath("tokenizer_config.json").exists():
-        tokenizer = AutoTokenizer.from_pretrained(str(model_path), trust_remote_code=True)
+        tokenizer = load_tokenizer(str(model_path), trust_remote_code=True)
     else:
-        tokenizer = AutoTokenizer.from_pretrained(
-            _load_base_model_name(model_path), trust_remote_code=True
-        )
+        tokenizer = load_tokenizer(_load_base_model_name(model_path), trust_remote_code=True)
     model = AutoModel.from_pretrained(str(model_path), trust_remote_code=True)
     model.to(device)
     model.eval()

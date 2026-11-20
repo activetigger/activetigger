@@ -3,6 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from activetigger.tasks.utils import load_tokenizer
 from pandas import Series
 from sklearn.feature_extraction.text import CountVectorizer
 from spacy.lang.de import German
@@ -10,7 +11,6 @@ from spacy.lang.en import English
 from spacy.lang.es import Spanish
 from spacy.lang.fr import French
 from spacy.lang.nb import Norwegian
-from transformers import AutoTokenizer  # ty: ignore[possibly-missing-import]
 
 from task_manager.tasks.compute_dfm import compute_dfm
 
@@ -121,9 +121,9 @@ def count_tokens(
     try:
         try:
             # prefer the local cache to avoid any network dependency
-            tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, local_files_only=True)
+            tokenizer = load_tokenizer(tokenizer_name, local_files_only=True)
         except Exception:
-            tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+            tokenizer = load_tokenizer(tokenizer_name)
     except Exception as e:
         print(f"Could not load tokenizer {tokenizer_name}, skipping token counts: {e}")
         return None

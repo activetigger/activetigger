@@ -25,13 +25,13 @@ from activetigger.functions import (
     release_device_memory,
 )
 from activetigger.monitoring import TaskTimer
+from activetigger.tasks.utils import load_tokenizer
 from pandas import DataFrame
 from pydantic import BaseModel
 from scipy.stats import entropy
 from tqdm import tqdm
 from transformers import (
     AutoModelForSequenceClassification,
-    AutoTokenizer,  # ty: ignore[possibly-missing-import]
 )
 
 from task_manager.auto_callback_task import UpdateProgressMethod
@@ -210,9 +210,9 @@ class PredictBertMultiClass:
         # models trained before the tokenizer was saved alongside the weights
         # only have the base model name, so fall back to the hub for those
         if (self.path / "tokenizer_config.json").exists():
-            tokenizer = AutoTokenizer.from_pretrained(str(self.path), trust_remote_code=True)
+            tokenizer = load_tokenizer(str(self.path), trust_remote_code=True)
         else:
-            tokenizer = AutoTokenizer.from_pretrained(self.modeltype, trust_remote_code=True)
+            tokenizer = load_tokenizer(self.modeltype, trust_remote_code=True)
         # fp32 upcast: models fine-tuned from fp16 checkpoints (e.g. deberta-v3)
         # are saved in fp16, and fp16 inference on CPU is extremely slow.
         model = AutoModelForSequenceClassification.from_pretrained(

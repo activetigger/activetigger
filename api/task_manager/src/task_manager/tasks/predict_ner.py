@@ -20,12 +20,12 @@ from activetigger.functions import (
 )
 from activetigger.monitoring import TaskTimer
 from activetigger.ner_metrics import compute_ner_metrics
+from activetigger.tasks.utils import load_tokenizer
 from pandas import DataFrame
 from pydantic import BaseModel
 from tqdm import tqdm
 from transformers import (
     AutoModelForTokenClassification,
-    AutoTokenizer,  # ty: ignore[possibly-missing-import]
 )
 
 from task_manager.auto_callback_task import UpdateProgressMethod
@@ -228,7 +228,7 @@ class PredictNer:
         # instead of pulling from the upstream base model. This guarantees
         # we use the exact same vocab / special tokens / offset behavior
         # that produced the model's predictions during training.
-        tokenizer = AutoTokenizer.from_pretrained(self.path, trust_remote_code=True, use_fast=True)
+        tokenizer = load_tokenizer(self.path, trust_remote_code=True, use_fast=True)
         if not tokenizer or not tokenizer.is_fast:
             raise Exception(
                 "NER prediction requires a fast tokenizer for offset_mapping "

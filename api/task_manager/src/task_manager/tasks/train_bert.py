@@ -27,13 +27,16 @@ from activetigger.functions import (
     split_annotation,
 )
 from activetigger.monitoring import TaskTimer
-from activetigger.tasks.utils import length_after_tokenizing, retrieve_model_max_length
+from activetigger.tasks.utils import (
+    length_after_tokenizing,
+    load_tokenizer,
+    retrieve_model_max_length,
+)
 from pydantic import BaseModel
 from torch import nn
 from torch.utils.data import Dataset as TorchDataset
 from transformers import (
     AutoModelForSequenceClassification,
-    AutoTokenizer,  # ty: ignore[possibly-missing-import]
     Trainer,
     TrainerCallback,
     TrainerControl,
@@ -359,7 +362,7 @@ class TrainBert:
 
     def __load_tokenizer(self, base_model: str):
         """Load the tokenize"""
-        return AutoTokenizer.from_pretrained(base_model, trust_remote_code=True)
+        return load_tokenizer(base_model, trust_remote_code=True)
 
     def __cap_tokenizer_max_length(
         self,

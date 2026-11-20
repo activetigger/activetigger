@@ -32,11 +32,10 @@ from activetigger.datamodels import EventsDict, LMParametersModel
 from activetigger.functions import get_device, release_device_memory
 from activetigger.monitoring import TaskTimer
 from activetigger.ner_metrics import compute_ner_metrics
-from activetigger.tasks.utils import retrieve_model_max_length
+from activetigger.tasks.utils import load_tokenizer, retrieve_model_max_length
 from pydantic import BaseModel
 from transformers import (
     AutoModelForTokenClassification,
-    AutoTokenizer,  # ty: ignore[possibly-missing-import]
     DataCollatorForTokenClassification,
     Trainer,
     TrainingArguments,
@@ -647,9 +646,7 @@ class TrainNer:
 
         labels, label2id, id2label = build_bio_labels(self.scheme_labels)
         # Fast tokenizer is required
-        tokenizer = AutoTokenizer.from_pretrained(
-            self.base_model, trust_remote_code=True, use_fast=True
-        )
+        tokenizer = load_tokenizer(self.base_model, trust_remote_code=True, use_fast=True)
         if not tokenizer or not tokenizer.is_fast:
             raise Exception(
                 f"{self.base_model} does not provide a fast tokenizer; "
