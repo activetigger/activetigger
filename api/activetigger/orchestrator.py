@@ -417,13 +417,13 @@ class Orchestrator:
         """
         Check project status
         """
-        if not self.exists(project_slug):
-            return "not existing"
-        if project_slug in self.task_registry.project_duplication_ongoing_computing_tasks():
-            return "duplicating"
 
         if project_slug in self.task_registry.project_creation_ongoing_computing_tasks():
             return "creating"
+        if project_slug in self.task_registry.project_duplication_ongoing_computing_tasks():
+            return "duplicating"
+        if not self.exists(project_slug):
+            return "not existing"
 
         # down
         if project_slug not in self.projects:
