@@ -6,7 +6,6 @@ from celery.utils.log import get_task_logger
 from pydantic import BaseModel
 
 from task_manager import config
-from task_manager.task_input import TaskInputs
 from task_manager.task_names import TaskNames
 
 

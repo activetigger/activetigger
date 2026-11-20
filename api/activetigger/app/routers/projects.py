@@ -112,7 +112,7 @@ def compute_lexicometrics(
     """
     test_rights(ProjectAction.ADD, current_user.username, project.project_slug)
     try:
-        task_id = project.lexicometrics.get_compute_task(
+        project.lexicometrics.get_compute_task(
             project_slug=project.name,
             username=current_user.username,
             language=project.params.language,
@@ -232,7 +232,7 @@ def update_project(
     test_rights(ProjectAction.UPDATE, current_user.username, project.project_slug)
     try:
         orchestrator = get_orchestrator()
-        task_id = project.start_update_project_task(update, current_user.username)
+        project.start_update_project_task(update, current_user.username)
 
         orchestrator.log_action(
             current_user.username,
@@ -339,7 +339,7 @@ def delete_evalset(
     """
     test_rights(ProjectAction.UPDATE, current_user.username, project.project_slug)
     try:
-        task_id = project.drop_evalset(dataset=dataset)
+        project.drop_evalset(dataset=dataset)
         orchestrator = get_orchestrator()
         orchestrator.log_action(
             current_user.username, f"DELETE EVALSET {dataset}", project.project_slug

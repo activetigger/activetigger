@@ -17,7 +17,6 @@ import activetigger.functions as functions
 from activetigger.config import config
 from activetigger.datamodels import (
     LMComputingOutModel,
-    LMParametersDbModel,
     LMParametersModel,
     LMStatusModel,
     ModelInformationsModel,

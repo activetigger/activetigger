@@ -7,7 +7,7 @@ from collections import Counter
 from collections.abc import Callable
 from logging import Logger
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import datasets
 import numpy as np
@@ -28,7 +28,6 @@ from activetigger.functions import (
 )
 from activetigger.monitoring import TaskTimer
 from activetigger.tasks.utils import length_after_tokenizing, retrieve_model_max_length
-from pydantic import BaseModel
 from torch import nn
 from torch.utils.data import Dataset as TorchDataset
 from transformers import (
@@ -214,7 +213,7 @@ class TrainBert:
                 f"TrainBERT only works for multiclass and "
                 f"multilabel but you set training_kind = {inputs.training_kind}"
             )
-        self.training_kind = inputs.training_kind
+        self.training_kind: Literal["multiclass", "multilabel"] = inputs.training_kind
         if len(inputs.scheme_labels) != len(set(inputs.scheme_labels)):
             raise ValueError(
                 f"Labels in your scheme are not unique.\nLabels provided : {inputs.scheme_labels}"
@@ -709,8 +708,7 @@ class TrainBert:
 
             df_train_results["predicted_label-matrix"] = y_prob_pred.tolist()
             df_train_results["predicted_label"] = [
-                "|".join(matrix_to_label(row, id2label))
-                for row in labels_predicted  # ty: ignore[possibly-unresolved-reference]
+                "|".join(matrix_to_label(row, id2label)) for row in labels_predicted
             ]
 
             if self.training_kind == "multiclass":
@@ -723,7 +721,7 @@ class TrainBert:
             elif self.training_kind == "multilabel":
                 metrics_train = get_metrics_multilabel(
                     Y_true=train_label_ids,
-                    Y_pred=labels_predicted,  # ty: ignore[possibly-unresolved-reference]
+                    Y_pred=labels_predicted,
                     texts=df_train_results["text"],
                     id2label=id2label,
                 )
@@ -803,8 +801,8 @@ class TrainBert:
                 bert_model=bert_model,
                 tokenizer=tokenizer,
                 params_to_save=params_to_save,
-                metrics_train=metrics_train,  # ty: ignore[possibly-unresolved-reference]
-                metrics_test=metrics_test,  # ty: ignore[possibly-unresolved-reference]
+                metrics_train=metrics_train,
+                metrics_test=metrics_test,
             )
             task_timer.stop("save_files")
 

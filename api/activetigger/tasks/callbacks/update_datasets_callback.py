@@ -36,7 +36,7 @@ class UpdateDatasetsCallback(TaskCallback):
         project_manager = cast(Project, project_manager)
         params = project_manager.params
         changed = task_result["train_path"] is not None
-        if changed:
+        if changed and params.dir:
             Path(task_result["train_path"]).replace(params.dir.joinpath(config.train_file))
             params.cols_context = task_result["cols_context"]
             params.cols_text = task_result["cols_text"]

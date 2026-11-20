@@ -2,7 +2,6 @@ from pathlib import Path
 from typing import TypedDict
 
 from activetigger.datamodels import ProjectUpdateModel, TaskComputing
-from pydantic import BaseModel
 
 from task_manager.active_tigger_task import AbortableActiveTiggerTask, QueueName
 from task_manager.celery import celery_app

@@ -1,13 +1,11 @@
 import logging
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict
 from task_manager.celery import celery_app
 from task_manager.utils import (
     FailureCallbackPayload,
     SuccessCallbackPayload,
-    TaskFailureReportForCallback,
 )
 
 from activetigger.app.dependencies import (

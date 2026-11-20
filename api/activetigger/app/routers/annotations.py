@@ -114,7 +114,7 @@ def compute_projection(
         raise HTTPException(status_code=400, detail="No features available")
     try:
         features = project.features.get(projection.features, dataset=["train"])
-        task_id = project.projections.get_compute_task(
+        project.projections.get_compute_task(
             project_slug=project.name,
             username=current_user.username,
             projection=projection,

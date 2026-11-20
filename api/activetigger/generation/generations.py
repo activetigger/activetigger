@@ -8,7 +8,6 @@ from activetigger.config import config
 from activetigger.datamodels import (
     ExportGenerationsParams,
     GenerationAvailableModel,
-    GenerationComputing,
     GenerationComputingOut,
     GenerationCreationModel,
     GenerationModel,

@@ -3,7 +3,6 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 from activetigger.datamodels import LexicometricsParametersModel
-from pydantic import BaseModel
 
 from task_manager.active_tigger_task import AbortableActiveTiggerTask, QueueName
 from task_manager.celery import celery_app

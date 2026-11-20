@@ -7,7 +7,7 @@ from task_manager.tasks.predict_bert_task import (
     PredictBertTaskResult,
 )
 
-from activetigger.datamodels import EventsModel, LMComputing, TaskComputing
+from activetigger.datamodels import TaskComputing
 from activetigger.project import Project
 
 # ensure the callback definition is what we expect by using the TaskCallback abstraction

@@ -2,7 +2,6 @@ import logging
 
 # use task specification to ensure name and return are in sync with task_manager
 from task_manager.tasks.prepare_dataset_task import PrepareDatasetTask
-from task_manager.utils import TaskFailureReportForCallback
 
 # ensure the callback definition is what we expect by using the TaskCallback abstraction
 from activetigger.tasks.task_callback import TaskCallback

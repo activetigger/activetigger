@@ -436,7 +436,7 @@ class TaskRegistry:
                 task_id,
                 slug,
                 "lost",
-                error_message=f"Task {ct.kind} {ct.id} lost: no result received",
+                error_message=f"Task {kind} {task_id} lost: no result received",
             )
 
         # forget ids no longer tracked

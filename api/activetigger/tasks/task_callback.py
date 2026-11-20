@@ -15,7 +15,6 @@ from activetigger.datamodels import EventsModel, TaskComputing, TaskEndedReason
 from activetigger.orchestrator import get_orchestrator
 from activetigger.project import Project
 from activetigger.task_registry import TaskRegistry
-from activetigger.tasks.task_manager_client import was_stopped
 
 
 class ProjectNotTrackedError(Exception):

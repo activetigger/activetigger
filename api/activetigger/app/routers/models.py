@@ -50,7 +50,7 @@ def train_quickmodel(
     test_rights(ProjectAction.ADD, current_user.username, project.name)
     try:
         orchestrator = get_orchestrator()
-        task = project.start_train_quickmodel_task(quickmodel, current_user.username)
+        project.start_train_quickmodel_task(quickmodel, current_user.username)
 
         orchestrator.log_action(
             current_user.username, f"TRAIN SIMPLE MODEL {quickmodel.name}", project.name
@@ -74,7 +74,7 @@ def retrain_quickmodel(
     test_rights(ProjectAction.GET, current_user.username, project.name)
     try:
         orchestrator = get_orchestrator()
-        task_id = project.get_retrain_quickmodel_task(name, scheme, current_user.username)
+        project.get_retrain_quickmodel_task(name, scheme, current_user.username)
 
         orchestrator.log_action(current_user.username, f"RETRAIN SIMPLE MODEL {name}", project.name)
     except (HTTPException, APIError, OverflowError):
@@ -254,7 +254,7 @@ def predict(
         if kind == "bert":
             if dataset_type == "external" and external_dataset is None:
                 raise Exception("External dataset must be provided for external prediction")
-            task_id = project.start_language_model_prediction_task(
+            project.start_language_model_prediction_task(
                 username=current_user.username,
                 dataset_type=dataset_type,
                 datasets=datasets,
@@ -269,7 +269,7 @@ def predict(
                 # Predict on the whole source dataset (path_data_all) — the
                 # PredictWithFeatures task (re)computes the features the
                 # model was trained on and applies the model in one go.
-                task_id = project.quickmodels.get_predict_on_dataset_task(
+                project.quickmodels.get_predict_on_dataset_task(
                     name=model_name,
                     username=current_user.username,
                     dataset="all",
@@ -277,7 +277,7 @@ def predict(
             elif dataset_type == "external":
                 if external_dataset is None:
                     raise Exception("External dataset must be provided for external prediction")
-                task_id = project.quickmodels.get_predict_on_external_dataset_task(
+                project.quickmodels.get_predict_on_external_dataset_task(
                     name=model_name,
                     username=current_user.username,
                     external_dataset=external_dataset,
@@ -287,7 +287,7 @@ def predict(
                     raise Exception(
                         "Dataset parameter must be specified for quick model prediction"
                     )
-                task_id = project.start_quick_model_prediction_task(
+                project.start_quick_model_prediction_task(
                     username=current_user.username,
                     dataset_type=dataset_type,
                     datasets=datasets,
@@ -296,7 +296,7 @@ def predict(
                 )
 
         if kind == "image":
-            task_id = project.start_image_model_prediction(
+            project.start_image_model_prediction(
                 username=current_user.username,
                 dataset_type=dataset_type,
                 datasets=datasets,
@@ -306,7 +306,7 @@ def predict(
             )
 
         if kind == "ner":
-            task_id = project.start_ner_prediction_task(
+            project.start_ner_prediction_task(
                 username=current_user.username,
                 dataset_type=dataset_type,
                 datasets=datasets,
@@ -499,7 +499,7 @@ def post_ner(
                 status_code=403,
                 detail="Storage limit exceeded. Please delete models or contact the administrator.",
             )
-        task_id = project.start_ner_training_task(ner=ner, username=current_user.username)
+        project.start_ner_training_task(ner=ner, username=current_user.username)
 
         orchestrator.log_action(current_user.username, f"TRAIN NER MODEL: {ner.name}", project.name)
         return None

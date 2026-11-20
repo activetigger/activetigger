@@ -23,7 +23,6 @@ from activetigger.functions import (
 )
 from pandas import DataFrame
 from PIL import Image, ImageOps, UnidentifiedImageError
-from pydantic import BaseModel
 from scipy.stats import entropy
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm

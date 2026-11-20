@@ -4,7 +4,7 @@ import shutil
 import uuid
 from io import BytesIO
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
@@ -25,7 +25,6 @@ from activetigger.data import Data
 from activetigger.datamodels import (
     KnnParams,
     LMComputingOutModel,
-    LMParametersModel,
     LogisticL1Params,
     LogisticL2Params,
     ModelDescriptionModel,

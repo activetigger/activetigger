@@ -187,7 +187,7 @@ class ImageModels:
         if len(df.dropna()) < num_min_annotations:
             raise Exception(f"Less than {num_min_annotations} elements annotated")
 
-        current_date = datetime.now(timezone.utc)
+        datetime.now(timezone.utc)
         model_name = name
 
         if self.models_service.model_exists(project, model_name):

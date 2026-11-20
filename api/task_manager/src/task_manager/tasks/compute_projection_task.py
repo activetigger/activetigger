@@ -1,9 +1,8 @@
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import TypedDict
 
 import pandas as pd
 from activetigger.datamodels import ProjectionParametersModel, TaskComputing
-from pydantic import BaseModel
 
 from task_manager.active_tigger_task import AbortableActiveTiggerTask, QueueName
 from task_manager.celery import celery_app

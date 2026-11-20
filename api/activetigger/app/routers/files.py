@@ -73,20 +73,16 @@ def copy_existing_data(
         # create a folder for the project to be created
         project_slug = orchestrator.check_project_name(project_name)
         project_path = Path(f"{orchestrator.path}/{project_slug}")
-        os.makedirs(project_path)
-
-        # copy the full dataset
-        shutil.copyfile(
-            source_path,
-            project_path.joinpath(config.data_all),
-        )
-
-    except HTTPException:
-        if project_path.exists():  # ty: ignore[possibly-unresolved-reference]
-            shutil.rmtree(project_path)  # ty: ignore[possibly-unresolved-reference]
-        raise
+        try:
+            os.makedirs(project_path)
+            # copy the full dataset
+            shutil.copyfile(
+                source_path,
+                project_path.joinpath(config.data_all),
+            )
+        except:
+            if project_path.exists():
+                shutil.rmtree(project_path)
+            raise
     except Exception as e:
-        # if failed, remove the project folder
-        if project_path.exists():  # ty: ignore[possibly-unresolved-reference]
-            shutil.rmtree(project_path)  # ty: ignore[possibly-unresolved-reference]
         raise HTTPException(status_code=500, detail=str(e))

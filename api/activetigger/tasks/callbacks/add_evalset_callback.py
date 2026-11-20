@@ -70,7 +70,7 @@ class AddEvalsetCallback(TaskCallback):
         # load the new eval set before refreshing features so the
         # features file covers the full train+valid+test index
         project_manager.data.load_dataset(eval_dataset)
-        subtask_id = project_manager._refresh_features_after_evalset(eval_dataset, user_name)
+        project_manager._refresh_features_after_evalset(eval_dataset, user_name)
 
     # the frontend matches the error on "add_evalset_<dataset>" (old in-process message)
     @classmethod

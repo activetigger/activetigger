@@ -606,7 +606,7 @@ class BertopicParamsModel(BaseModel):
     embedding_model: str | None = "all-MiniLM-L6-v2"
     embedding_batch_size: int = 32
     filter_text_length: int = 2
-    input_datasets: str = "train"
+    input_datasets: Literal["train", "all_sets", "complete"] = "train"
     existing_feature: str | None = None
 
 

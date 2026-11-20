@@ -657,7 +657,7 @@ class Orchestrator:
         has_static = Path(source_static).exists()
 
         try:
-            task_id = self.task_registry.start_task(
+            self.task_registry.start_task(
                 DuplicateProjectTask.name,
                 DuplicateProjectTaskInputs(
                     user=username,

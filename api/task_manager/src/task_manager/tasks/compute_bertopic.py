@@ -20,7 +20,6 @@ from bertopic import BERTopic
 from great_tables import GT, loc, style
 from jinja2 import Template
 from nltk.corpus import stopwords as nltk_stopwords
-from pydantic import BaseModel
 from simplemma import lemmatize
 from sklearn.feature_extraction.text import CountVectorizer
 from slugify import slugify
@@ -308,7 +307,7 @@ class ComputeBertopic:
                 )
             case "complete":
                 df = pd.read_parquet(self.path_data.joinpath(config.data_all))
-        return df  # ty: ignore[possibly-unresolved-reference]
+        return df
 
     def __check_text_data(self, df) -> pd.DataFrame:
         """Check the validity of the dataframe (contains necessary data, index,

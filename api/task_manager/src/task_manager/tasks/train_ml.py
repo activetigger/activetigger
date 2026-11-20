@@ -14,8 +14,6 @@ from activetigger.config import config
 from activetigger.datamodels import (
     EventsDict,
     KnnParams,
-    LMParametersDbModel,
-    LMParametersModel,
     LogisticL1Params,
     LogisticL2Params,
     MLStatisticsModel,
@@ -25,7 +23,6 @@ from activetigger.datamodels import (
 )
 from activetigger.functions import get_metrics_multiclass
 from activetigger.monitoring import TaskTimer
-from pydantic import BaseModel
 from scipy.stats import entropy
 from sklearn.base import BaseEstimator
 from sklearn.ensemble import RandomForestClassifier

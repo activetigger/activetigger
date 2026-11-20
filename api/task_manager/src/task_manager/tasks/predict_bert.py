@@ -26,7 +26,6 @@ from activetigger.functions import (
 )
 from activetigger.monitoring import TaskTimer
 from pandas import DataFrame
-from pydantic import BaseModel
 from scipy.stats import entropy
 from tqdm import tqdm
 from transformers import (

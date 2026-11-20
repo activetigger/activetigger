@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 import pandas as pd
-from activetigger.datamodels import ProjectBaseModel, ProjectModel, TaskComputing
+from activetigger.datamodels import ProjectBaseModel, ProjectModel
 from activetigger.functions import concat_text_columns, slugify
 from activetigger.functions_image import (
     ALLOWED_EXT as IMAGE_ALLOWED_EXT,
@@ -18,13 +18,11 @@ from activetigger.functions_image import (
     filter_readable_images,
     generate_thumbnail,
 )
-from celery import Task
 
 from task_manager.active_tigger_task import (
     ActiveTiggerTask,
     QueueName,
     TaskScope,
-    UpdateProgressMethod,
 )
 from task_manager.celery import celery_app
 from task_manager.task_input import TaskInputs

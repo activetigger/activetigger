@@ -7,7 +7,7 @@ from task_manager.tasks.train_image_task import (
     TrainImageTaskResult,
 )
 
-from activetigger.datamodels import EventsModel, LMComputing, TaskComputing
+from activetigger.datamodels import TaskComputing
 from activetigger.project import Project
 
 # ensure the callback definition is what we expect by using the TaskCallback abstraction

@@ -1,5 +1,5 @@
 from enum import StrEnum
-from typing import Generic, Literal, Protocol, TypedDict, TypeVar
+from typing import Generic, Literal, Protocol, TypeVar
 
 from activetigger.datamodels import TaskComputing
 from celery import Task

@@ -2,7 +2,6 @@ from pathlib import Path
 from typing import TypedDict
 
 from activetigger.datamodels import PrepareSplitModel
-from pydantic import BaseModel
 
 from task_manager.active_tigger_task import AbortableActiveTiggerTask, QueueName, TaskScope
 from task_manager.celery import celery_app
@@ -51,7 +50,7 @@ def prepare_dataset_task(
         update_progress=self.update_progress,
     )
     return {
-        "username": inputs.username,
+        "username": inputs.user,
         "session_id": inputs.session_id,
         "result_path": str(result_path),
     }

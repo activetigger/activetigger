@@ -14,7 +14,7 @@ from task_manager.tasks.predict_bert_task import (
     PredictBertTask,
     PredictBertTaskInputs,
 )
-from task_manager.tasks.train_bert_task import TrainBertTask, TrainBertTaskInputs, train_bert
+from task_manager.tasks.train_bert_task import TrainBertTask, TrainBertTaskInputs
 from task_manager.tasks.train_image_task import TrainImageTaskInputs
 
 import activetigger.functions as functions
@@ -242,7 +242,6 @@ class LanguageModels:
             raise Exception(f"Less than {num_min_annotations} elements annotated")
 
         # name integrating the scheme & user + date
-        current_date = datetime.now(timezone.utc)
         model_name = name
 
         # check if a project not already exist

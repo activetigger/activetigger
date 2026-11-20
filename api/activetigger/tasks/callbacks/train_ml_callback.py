@@ -3,7 +3,7 @@ from typing import cast
 # use task specification to ensure name and return are in sync with task_manager
 from task_manager.tasks.train_ml_task import TrainMLMultiClassInputs, TrainMLTask, TrainMLTaskResult
 
-from activetigger.datamodels import EventsModel, QuickModelComputing, TaskComputing
+from activetigger.datamodels import TaskComputing
 from activetigger.project import Project
 
 # ensure the callback definition is what we expect by using the TaskCallback abstraction

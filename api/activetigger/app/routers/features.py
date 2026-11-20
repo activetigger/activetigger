@@ -58,7 +58,7 @@ def post_embeddings(
         # compute features
 
         orchestrator = get_orchestrator()
-        task_id = project.features.compute(
+        project.features.compute(
             df,
             feature.name,
             feature.use_default_name,

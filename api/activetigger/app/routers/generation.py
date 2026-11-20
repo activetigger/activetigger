@@ -162,7 +162,7 @@ def postgenerate(
 
     try:
         project.generations.check_prompts(request.prompt, project.params.cols_context)
-        task_id = project.start_generation_task(request, current_user.username)
+        project.start_generation_task(request, current_user.username)
         orchestrator = get_orchestrator()
         orchestrator.log_action(
             current_user.username,

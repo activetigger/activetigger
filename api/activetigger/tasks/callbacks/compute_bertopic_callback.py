@@ -1,5 +1,4 @@
 import shutil
-from typing import cast
 
 # use task specification to ensure name and return are in sync with task_manager
 from task_manager.tasks.compute_bertopic import RUN_OWNER_FILE
@@ -7,8 +6,6 @@ from task_manager.tasks.compute_bertopic_task import (
     ComputeBertopicTask,
     ComputeBertopicTaskResult,
 )
-
-from activetigger.datamodels import BertopicComputing, EventsModel
 
 # ensure the callback definition is what we expect by using the TaskCallback abstraction
 from activetigger.tasks.task_callback import TaskCallback

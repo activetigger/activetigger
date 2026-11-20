@@ -1,13 +1,14 @@
-import json
 import os
 import traceback
 from collections.abc import Generator
-from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 from task_manager.celery import celery_app
-from task_manager.utils import TaskFailureReportForCallback
+from task_manager.utils import (
+    FailureCallbackPayload,
+    SuccessCallbackPayload,
+)
 
 from task_manager import utils as task_utils
 
@@ -27,18 +28,17 @@ from activetigger.tasks import all_callbacks  # noqa: E402
 from activetigger.tasks.task_callback import ProjectNotTrackedError  # noqa: E402
 
 
-def _deliver_callback(url: str, payload: Any) -> bool:
+def _deliver_callback(url: str, payload: SuccessCallbackPayload | FailureCallbackPayload) -> bool:
     """
     Replace the HTTP callback of the workers: the TestClient app listens on no
     port, so the result goes straight to the callback class (same JSON round trip)
     """
-    body = json.loads(payload.model_dump_json())
-    callback = all_callbacks.task_callbacks[body["task_name"]]
+    callback = all_callbacks.task_callbacks[payload.task_name]
     try:
-        if url.endswith("/done"):
-            callback.on_complete(body["task_id"], body["results"])
-        else:
-            callback.on_failure(body["task_id"], TaskFailureReportForCallback(**body["report"]))
+        if url.endswith("/done") and isinstance(payload, SuccessCallbackPayload):
+            callback.on_complete(payload)
+        elif isinstance(payload, FailureCallbackPayload):
+            callback.on_failure(payload)
     except ProjectNotTrackedError as e:
         print(f"callback dropped: {e}")
         return False

@@ -1,8 +1,6 @@
 from pathlib import Path
 from typing import Any, TypedDict
 
-from pydantic import BaseModel
-
 from task_manager.active_tigger_task import AbortableActiveTiggerTask, QueueName, TaskScope
 from task_manager.celery import celery_app
 from task_manager.task_input import TaskInputs

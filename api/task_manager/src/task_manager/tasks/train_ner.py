@@ -33,7 +33,6 @@ from activetigger.functions import get_device, release_device_memory
 from activetigger.monitoring import TaskTimer
 from activetigger.ner_metrics import compute_ner_metrics
 from activetigger.tasks.utils import retrieve_model_max_length
-from pydantic import BaseModel
 from transformers import (
     AutoModelForTokenClassification,
     AutoTokenizer,  # ty: ignore[possibly-missing-import]

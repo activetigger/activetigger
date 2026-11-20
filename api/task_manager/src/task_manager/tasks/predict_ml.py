@@ -10,7 +10,6 @@ import pandas as pd
 from activetigger.datamodels import MLStatisticsModel, QuickModelComputed
 from activetigger.functions import get_metrics_multiclass
 from activetigger.monitoring import TaskTimer
-from pydantic import BaseModel
 
 from task_manager.task_input import TaskInputs
 

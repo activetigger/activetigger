@@ -28,7 +28,6 @@ from activetigger.functions import (
 from activetigger.functions_image import filter_readable_images
 from activetigger.monitoring import TaskTimer
 from PIL import Image, ImageOps
-from pydantic import BaseModel
 from torch.utils.data import Dataset as TorchDataset
 from transformers import (
     AutoImageProcessor,

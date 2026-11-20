@@ -7,7 +7,7 @@ from task_manager.tasks.predict_ner_task import (
     PredictNerTaskResult,
 )
 
-from activetigger.datamodels import EventsModel, TaskComputing
+from activetigger.datamodels import TaskComputing
 from activetigger.project import Project
 
 # ensure the callback definition is what we expect by using the TaskCallback abstraction

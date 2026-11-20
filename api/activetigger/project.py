@@ -27,7 +27,6 @@ from activetigger.config import config
 from activetigger.data import Data
 from activetigger.datamodels import (
     ActiveModel,
-    AuthUserModel,
     BertModelModel,
     ElementInModel,
     ElementOutModel,

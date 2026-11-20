@@ -3,7 +3,6 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 import pandas as pd
-from pydantic import BaseModel
 
 from task_manager.active_tigger_task import AbortableActiveTiggerTask, QueueName
 from task_manager.celery import celery_app

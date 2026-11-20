@@ -21,7 +21,6 @@ from activetigger.functions import (
 from activetigger.monitoring import TaskTimer
 from activetigger.ner_metrics import compute_ner_metrics
 from pandas import DataFrame
-from pydantic import BaseModel
 from tqdm import tqdm
 from transformers import (
     AutoModelForTokenClassification,
