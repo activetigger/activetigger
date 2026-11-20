@@ -60,7 +60,7 @@ export const ImageClassificationPanelImagexp: FC<ImageClassificationPanelImagexp
   }, []);
 
   return (
-    <div>
+    <div style={{ justifySelf: 'stretch', minWidth: 0 }}>
       {element?.selection === 'prompt' && element.similarity != null && (
         <small
           className="text-muted d-block mb-1"
@@ -75,6 +75,7 @@ export const ImageClassificationPanelImagexp: FC<ImageClassificationPanelImagexp
         style={
           {
             '--height': `${displayConfig.textFrameHeight}vh`,
+            marginInline: 'auto',
           } as CSSProperties
         }
         ref={frameRef as unknown as LegacyRef<HTMLDivElement>}
