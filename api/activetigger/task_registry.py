@@ -337,9 +337,11 @@ class TaskRegistry:
     def _pop_computing_task(self, task_id: str, project_slug: str | None) -> TaskComputing | None:
         """Caller must hold the lock (or accept the small race and tolerate
         a None return). Idempotent: a stop and a late callback can race."""
-        if project_slug:
+        if task_id in self._computing_tasks.orchestrator_tasks:
+            return self._computing_tasks.orchestrator_tasks.pop(task_id, None)
+        elif project_slug in self._computing_tasks.projects_tasks:
             return self._computing_tasks.projects_tasks.get(project_slug, {}).pop(task_id, None)
-        return self._computing_tasks.orchestrator_tasks.pop(task_id, None)
+        return None
 
     def _clean_temp_files(self, computing_task: TaskComputing):
         task_class = cast(ActiveTiggerTask, celery_app.tasks[computing_task.kind])
