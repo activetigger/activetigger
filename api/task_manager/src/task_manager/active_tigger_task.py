@@ -70,7 +70,10 @@ class ActiveTiggerTask(Task, Generic[TInputs]):
 
     # Progress state is used to monitor state in orchestrator
     def update_progress(self, progress: float, label: str | None = None):
-        self.update_state(state="PROGRESS", meta={"progress": progress, "progress_label": label})
+        if not isinstance(self, AbortableActiveTiggerTask) or self.is_aborted() is False:
+            self.update_state(
+                state="PROGRESS", meta={"progress": progress, "progress_label": label}
+            )
 
     # Clean temp files is used to remove temp files used to exchange data with orchestrator
     @classmethod
