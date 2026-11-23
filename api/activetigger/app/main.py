@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
-from task_manager.task_names import TaskNames
+from task_manager.task_names import TaskNames, features_tasks
 
 from activetigger import __version__
 from activetigger.app.dependencies import (
@@ -290,8 +290,10 @@ def stop_process(
     current_user: Annotated[UserInDBModel, Depends(verified_user)],
     unique_id: str | None = None,
     project_slug: str | None = None,
-    kind: Literal["all", "bert", "ner", "quick", "quickmodel"]
-    | None = None,  # TODO type with TaskNames + category?
+    # TODO type with TaskNames + category?
+    kind: Literal["all", "bert", "ner", "quick", "quickmodel", "image", "feature"]
+    | TaskNames
+    | None = None,
 ) -> None:
     """
     Stop processes either by unique_id or by kind for a user
@@ -310,16 +312,21 @@ def stop_process(
             # define the processes to kill
             task_names: list[TaskNames] | None = None
 
-            if kind == "all":
-                task_names = None
-            if kind == "bert":
-                task_names = ["train_bert", "predict_bert"]
-            if kind == "ner":
-                task_names = ["train_ner", "predict_ner"]
-            if kind == "image":
-                task_names = ["train_image", "predict_image"]
-            if kind in ("quick", "quickmodel"):
-                task_names = ["predict_with_features", "train_ml", "predict_ml"]
+            match kind:
+                case "all" | None:
+                    task_names = None
+                case "feature":
+                    task_names = features_tasks
+                case "bert":
+                    task_names = ["train_bert", "predict_bert"]
+                case "ner":
+                    task_names = ["train_ner", "predict_ner"]
+                case "image":
+                    task_names = ["train_image", "predict_image"]
+                case "quick" | "quickmodel":
+                    task_names = ["predict_with_features", "train_ml", "predict_ml"]
+                case _:
+                    task_names = [kind]
 
             orchestrator.task_registry.stop_user_tasks(
                 current_user.username, project_slug, task_names
