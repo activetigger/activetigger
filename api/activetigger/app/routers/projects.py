@@ -112,7 +112,7 @@ def compute_lexicometrics(
     """
     test_rights(ProjectAction.ADD, current_user.username, project.project_slug)
     try:
-        project.lexicometrics.get_compute_task(
+        project.lexicometrics.start_compute_task(
             project_slug=project.name,
             username=current_user.username,
             language=project.params.language,

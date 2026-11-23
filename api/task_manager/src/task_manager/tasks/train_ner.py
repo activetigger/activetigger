@@ -21,7 +21,7 @@ import shutil
 from collections.abc import Callable
 from logging import Logger
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import datasets
 import numpy as np
@@ -319,6 +319,7 @@ class TrainNerTaskInputs(TaskInputs[str]):
     test_size: float
     max_length: int = 512
     scheme: str
+    status: Literal["training"] = "training"
 
 
 class TrainNer:

@@ -1,6 +1,7 @@
 import json
 import shutil
 from pathlib import Path
+from typing import cast
 
 import pandas as pd
 from fastapi.responses import FileResponse
@@ -26,7 +27,6 @@ from activetigger.db.languagemodels import ModelsService
 from activetigger.db.manager import DatabaseManager
 from activetigger.errors import NotFoundError
 from activetigger.features import Features
-from activetigger.monitoring import Monitoring
 from activetigger.task_registry import TaskRegistry
 
 
@@ -51,7 +51,7 @@ class Bertopic:
         db_manager: DatabaseManager,
     ) -> None:
         self.project_slug = project_slug
-        self.monitoring = Monitoring(db_manager, project_slug)
+
         self.task_registry = task_registry
         self.path: Path = path.joinpath("bertopic")
         self.path.mkdir(parents=True, exist_ok=True)
@@ -145,9 +145,12 @@ class Bertopic:
                     "progress": self.task_registry.task_progress(e.id),
                 }
             )
-            for e in self.task_registry.project_computing_tasks(
-                self.project_slug, kinds=["compute_bertopic"]
-            ).values()
+            for e in cast(
+                list[TaskComputing[ComputeBertopicTaskInput]],
+                self.task_registry.project_computing_tasks(
+                    self.project_slug, kinds=["compute_bertopic"]
+                ).values(),
+            )
         }
 
     def available(self) -> dict[str, BERTopicDescriptionModel]:
@@ -167,9 +170,12 @@ class Bertopic:
         slug = slugify(name)
         computing_names = [
             e.inputs.name
-            for e in self.task_registry.project_computing_tasks(
-                self.project_slug, kinds=["compute_bertopic"]
-            ).values()
+            for e in cast(
+                list[TaskComputing[ComputeBertopicTaskInput]],
+                self.task_registry.project_computing_tasks(
+                    self.project_slug, kinds=["compute_bertopic"]
+                ).values(),
+            )
         ]
         return slug not in computing_names and not self.models_service.model_exists(
             self.project_slug, slug

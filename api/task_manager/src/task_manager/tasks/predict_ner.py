@@ -3,7 +3,7 @@ import json
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, Literal, TypedDict
 
 import numpy as np
 import pandas as pd
@@ -51,6 +51,7 @@ class PredictNerTaskInputs(TaskInputs[str]):
     path_train: Path | None = None
     path_valid: Path | None = None
     path_test: Path | None = None
+    status: Literal["predicting"] = "predicting"
 
 
 # Return type must be a dict, a BaseModel would not be serialized by Celery

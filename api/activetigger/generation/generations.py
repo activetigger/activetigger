@@ -3,6 +3,7 @@ from typing import cast
 
 import pandas as pd
 from pandas import DataFrame
+from task_manager.tasks.generate_call_task import GenerateCallTaskInputs
 
 from activetigger.config import config
 from activetigger.datamodels import (
@@ -15,6 +16,7 @@ from activetigger.datamodels import (
     GenerationsProjectStateModel,
     PromptInputModel,
     PromptModel,
+    TaskComputing,
 )
 from activetigger.db.generations import GenerationsService
 from activetigger.db.manager import DatabaseManager
@@ -134,9 +136,12 @@ class Generations:
                 model_id=e.inputs.model_id,
                 progress=self.task_registry.task_progress(e.id),
             )
-            for e in self.task_registry.project_computing_tasks(
-                self.project_slug, kinds=["generation"]
-            ).values()
+            for e in cast(
+                list[TaskComputing[GenerateCallTaskInputs]],
+                self.task_registry.project_computing_tasks(
+                    self.project_slug, kinds=["generation"]
+                ).values(),
+            )
         }
 
     def prompt_exists(self, project_slug: str, name: str) -> bool:

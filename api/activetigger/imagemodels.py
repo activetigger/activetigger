@@ -32,7 +32,6 @@ from activetigger.db.languagemodels import ModelsService
 from activetigger.db.manager import DatabaseManager
 from activetigger.errors import AlreadyExistsError, NotFoundError
 from activetigger.functions import get_model_metrics
-from activetigger.monitoring import Monitoring
 from activetigger.task_registry import TaskRegistry
 
 
@@ -76,7 +75,6 @@ class ImageModels:
             adapt=False,
         )
         self.project_slug = project_slug
-        self.monitoring = Monitoring(db_manager, project_slug)
         self.task_registry = task_registry
         self.models_service = db_manager.language_models_service
         self.path: Path = Path(path).joinpath("image").absolute()

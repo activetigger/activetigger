@@ -4,7 +4,7 @@ import shutil
 import uuid
 from io import BytesIO
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import pandas as pd
@@ -47,7 +47,6 @@ from activetigger.functions import (
     get_model_metrics,
     serve_temp_export,
 )
-from activetigger.monitoring import Monitoring
 from activetigger.task_registry import TaskRegistry
 
 if TYPE_CHECKING:
@@ -89,7 +88,7 @@ class QuickModels:
         if not self.path.exists():
             os.mkdir(self.path)
         self.project_slug = project_slug
-        self.monitoring = Monitoring(db_manager, project_slug)
+
         self.language_models_service = db_manager.language_models_service
         self.task_registry = task_registry
         self.features = features
@@ -268,9 +267,14 @@ class QuickModels:
         """
         kinds: list[TaskNames] = ["train_ml", "predict_with_features", "predict_ml"]
         r: dict[str, LMComputingOutModel] = {}
-        for e in self.task_registry.project_computing_tasks(
-            self.project_slug, kinds=kinds
-        ).values():
+        for e in cast(
+            list[
+                TaskComputing[
+                    TrainMLMultiClassInputs | PredictWithFeaturesTaskInputs | PredictMLTaskInputs
+                ]
+            ],
+            self.task_registry.project_computing_tasks(self.project_slug, kinds=kinds).values(),
+        ):
             r[e.user] = LMComputingOutModel(
                 name=getattr(e, "name", ""),
                 status="training" if e.kind == "train_ml" else "predicting",

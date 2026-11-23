@@ -533,42 +533,46 @@ class Orchestrator:
         ct = event.computing_task
         username = ct.user  # or track the stopping user separately
 
-        # something went wrong, let's clean
-        if event.reason in ("stopped", "lost", "error"):
-            self.log_action(
-                username, f"TASK {event.reason.upper()}: {ct.id}", ct.project_slug or "all"
-            )
+        try:
+            # something went wrong, let's clean
+            if event.reason in ("stopped", "lost", "error"):
+                self.log_action(
+                    username, f"TASK {event.reason.upper()}: {ct.id}", ct.project_slug or "all"
+                )
 
-            #  creation / duplication lifecycle
-            if ct.kind == "create_project" and ct.project_slug:
-                if event.reason in ("stopped", "lost", "error"):
-                    self.creation_errors[ct.project_slug] = (
-                        "Project creation stopped by user"
-                        if event.stopped_by_user
-                        else f"Creation lost ({event.error_message})"
-                    )
-                    project = self.projects.get(ct.project_slug)
-                    if project is not None:
-                        project.status = "error"
-                        project.errors.add(self.creation_errors[ct.project_slug])
-                self.clean_unfinished_project(project_slug=ct.project_slug)
-
-            #  training lifecycle: killed/lost training leaves a phantom row
-            elif ct.kind in ("train_bert", "train_image", "train_ner") and ct.project_slug:
-                if event.reason in ("stopped", "lost"):
-                    try:
-                        self.db_manager.language_models_service.delete_model(
-                            ct.project_slug, ct.inputs.model_name
+                #  creation / duplication lifecycle
+                if ct.kind == "create_project" and ct.project_slug:
+                    if event.reason in ("stopped", "lost", "error"):
+                        self.creation_errors[ct.project_slug] = (
+                            "Project creation stopped by user"
+                            if event.stopped_by_user
+                            else f"Creation lost ({event.error_message})"
                         )
-                    except Exception as e:
-                        print(f"Could not delete model after {event.reason} {ct.kind}: {e}")
-            # Surface the error
+                        project = self.projects.get(ct.project_slug)
+                        if project is not None:
+                            project.status = "error"
+                            project.errors.add(self.creation_errors[ct.project_slug])
+                    self.clean_unfinished_project(project_slug=ct.project_slug)
 
-        #  generic surfacing for lost tasks
-        if event.error_message:
-            project = self.projects.get(ct.project_slug, None)
-            if project is not None:
-                project.errors.add(f"Task {ct.kind} {event.reason}: {event.error_message}")
+                #  training lifecycle: killed/lost training leaves a phantom row
+                elif ct.kind in ("train_bert", "train_image", "train_ner") and ct.project_slug:
+                    if event.reason in ("stopped", "lost"):
+                        try:
+                            self.db_manager.language_models_service.delete_model(
+                                ct.project_slug, ct.inputs.model_name
+                            )
+                        except Exception as e:
+                            print(f"Could not delete model after {event.reason} {ct.kind}: {e}")
+                # Surface the error
+
+            #  generic surfacing for lost tasks
+            if event.error_message:
+                project = self.projects.get(ct.project_slug, None)
+                if project is not None:
+                    project.errors.add(f"Task {ct.kind} {event.reason}: {event.error_message}")
+        except Exception as e:
+            print(f"Exception in orchestrator._on_task_ended {e}")
+            raise
 
         # TODO: here would be a goof place to generate a success message
 

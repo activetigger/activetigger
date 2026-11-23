@@ -770,7 +770,7 @@ class LMComputing(ProcessComputing):
 
 class LMComputingOutModel(BaseModel):
     name: str
-    status: str
+    status: Literal["training", "predicting"]
     progress: TaskProgressState | None = None
     loss: dict[str, dict] | None = None
     epochs: float | None = None

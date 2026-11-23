@@ -1,6 +1,5 @@
 import threading
 import time
-from collections import defaultdict
 from typing import Iterator, cast
 
 from celery import uuid
@@ -40,9 +39,7 @@ class TaskRegistry:
 
     def __init__(self, monitoring: Monitoring) -> None:
         self._lock = threading.RLock()
-        self._computing_tasks = OrchestratorTasks(
-            projects_tasks={}, orchestrator_tasks=defaultdict(dict)
-        )
+        self._computing_tasks = OrchestratorTasks(projects_tasks={}, orchestrator_tasks={})
         self.monitoring = monitoring
 
         # orchestrator callbacks
@@ -87,21 +84,28 @@ class TaskRegistry:
             project_slug=inputs.project_slug,
             inputs=inputs,
         )
+        print(f"add new task in registry {computing_task}")
         with self._lock:
             # or in project_slug none case in case orchestrator_tasks_names is out of sync + typings
             if task_class.scope == "orchestrator" or inputs.project_slug is None:
                 self._computing_tasks.orchestrator_tasks[task_id] = computing_task
-            else:
+            elif computing_task.project_slug is not None:
+                if computing_task.project_slug not in self._computing_tasks.projects_tasks:
+                    self._computing_tasks.projects_tasks[computing_task.project_slug] = {}
                 self._computing_tasks.projects_tasks[inputs.project_slug][task_id] = computing_task
 
         # TODO: monitoring does not support orchestrator scope tasks
         print(
             f"create task {computing_task.kind} {computing_task.project_slug} {computing_task.id}"
         )
-        if task_class.scope == "project":
+        if task_class.scope == "project" and computing_task.project_slug:
             # registered before the send: a fast task calls back at once
             self.monitoring.register_process(
-                process_name=task_id, kind=task_name, parameters={}, user_name=inputs.user
+                process_name=task_id,
+                project_slug=computing_task.project_slug,
+                kind=task_name,
+                parameters={},
+                user_name=inputs.user,
             )
 
         # queue overrides the task default (e.g. GPU for a wtpsplit preparation)
@@ -111,7 +115,8 @@ class TaskRegistry:
             task_class.s(inputs=inputs.model_dump(mode="json")).apply_async(
                 task_id=task_id, **options
             )
-        except Exception:
+        except Exception as e:
+            print(e)
             self.on_task_end(computing_task.id, computing_task.project_slug, "error")
             raise
         return task_id
@@ -131,11 +136,13 @@ class TaskRegistry:
             computing_task = self._pop_computing_task(task_id, project_slug)
         if computing_task is None:
             return
+        print(f"terminating {computing_task}")
         # TODO: monitoring does not support orchestrator scope tasks
-
-        if TaskRegistry.task_scope(computing_task.kind):
+        if TaskRegistry.task_scope(computing_task.kind) == "project":
             self.monitoring.close_process(task_id, events)
+        print(f"clean files {computing_task}")
         self._clean_temp_files(computing_task)
+        print(f"emit task _end {computing_task}")
         self._emit_task_end(
             TaskEndedEvent(
                 computing_task=computing_task,
@@ -231,7 +238,7 @@ class TaskRegistry:
         Stop every task of a project (deleted, cleaned or reset)
         """
         # copy: stop_process removes entries from the list
-        for computing_task in self.project_computing_tasks(project_slug).values():
+        for computing_task in list(self.project_computing_tasks(project_slug).values()):
             self.stop_task(computing_task)
 
     def stop_all_tasks(self):
@@ -242,7 +249,7 @@ class TaskRegistry:
             self.stop_task(ct)
 
     # get computing_task object from its id and scope
-    def get_computing_task(self, task_id: str, project_slug: str | None):
+    def get_computing_task(self, task_id: str, project_slug: str | None) -> TaskComputing:
 
         with self._lock:
             # orchestrator scope
@@ -251,8 +258,8 @@ class TaskRegistry:
             else:
                 # project scope
                 if project_slug:
-                    if project_slug not in self._computing_tasks:
-                        raise Exception(f"Project {project_slug} not registered in orchestrator")
+                    if project_slug not in self._computing_tasks.projects_tasks:
+                        print(f"Project {project_slug} not registered in orchestrator")
                     if task_id in self._computing_tasks.projects_tasks[project_slug]:
                         return self._computing_tasks.projects_tasks[project_slug][task_id]
                     else:
@@ -381,7 +388,7 @@ class TaskRegistry:
 
     def mark_callback_finished(self, task_id: str):
         with self._lock:
-            self._callbacks_in_progress.remove(task_id)
+            self._callbacks_in_progress.discard(task_id)
 
     def in_callback(self, task_id: str):
         with self._lock:

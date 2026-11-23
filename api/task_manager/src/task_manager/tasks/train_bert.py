@@ -172,6 +172,7 @@ class TrainBertTaskInputs(TaskInputs[str]):
     class_balance: bool = False
     class_min_freq: int = 1
     exclude_labels: list[str]
+    status: Literal["training"] = "training"
 
 
 class TrainBert:

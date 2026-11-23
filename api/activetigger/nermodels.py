@@ -30,7 +30,6 @@ from activetigger.db.languagemodels import ModelsService
 from activetigger.db.manager import DatabaseManager
 from activetigger.errors import AlreadyExistsError, NotFoundError
 from activetigger.functions import get_model_metrics
-from activetigger.monitoring import Monitoring
 from activetigger.task_registry import TaskRegistry
 
 
@@ -64,7 +63,7 @@ class NerModels:
     ) -> None:
         self.params_default = LMParametersModel()
         self.project_slug = project_slug
-        self.monitoring = Monitoring(db_manager, project_slug)
+
         self.task_registry = task_registry
         self.models_service = db_manager.language_models_service
         self.path = Path(path).joinpath("ner")
@@ -123,11 +122,14 @@ class NerModels:
                 status=e.inputs.status,
                 progress=self.task_registry.task_progress(e.id),
                 loss=self.get_loss(e.inputs.model_name),
-                epochs=e.inputs.params["epochs"] if e.inputs.params else None,
+                epochs=e.inputs.params.epochs if isinstance(e.inputs, TrainNerTaskInputs) else None,
             )
-            for e in self.task_registry.project_computing_tasks(
-                self.project_slug, kinds=["train_ner", "predict_ner"]
-            ).values()
+            for e in cast(
+                list[TaskComputing[TrainNerTaskInputs | PredictNerTaskInputs]],
+                self.task_registry.project_computing_tasks(
+                    self.project_slug, kinds=["train_ner", "predict_ner"]
+                ).values(),
+            )
         }
 
     def estimate_memory_use(self, model: str, kind: str = "train") -> int:

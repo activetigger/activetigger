@@ -48,6 +48,7 @@ from activetigger.datamodels import (
     ProjectUpdateModel,
     QuickModelInModel,
     StaticFileModel,
+    TaskComputing,
     TextDatasetModel,
 )
 from activetigger.db.manager import DatabaseManager
@@ -348,7 +349,7 @@ class Project:
         if self.params.dir is not None:
             running = self.task_registry.project_computing_tasks(self.project_slug)
             for jsonl_path in self.params.dir.glob("gen_*.jsonl"):
-                if jsonl_path.stem.removeprefix("gen_") not in running:
+                if jsonl_path.stem.removeprefix("gen_") not in running.keys():
                     self._recover_generations_from_jsonl(jsonl_path)
 
     def delete(self) -> None:
@@ -463,9 +464,12 @@ class Project:
         # only one add_evalset task per dataset at a time
         if any(
             c.inputs.dataset == dataset
-            for c in self.task_registry.project_computing_tasks(
-                self.project_slug, kinds=["add_evalset"]
-            ).values()
+            for c in cast(
+                list[TaskComputing[AddEvalsetTaskInputs]],
+                self.task_registry.project_computing_tasks(
+                    self.project_slug, kinds=["add_evalset"]
+                ).values(),
+            )
         ):
             raise Exception("this set is already being added")
 
@@ -1830,6 +1834,7 @@ class Project:
             min_freq = df["labels"].value_counts().sort_values().min()
             df = df.groupby("labels").sample(n=min_freq)
 
+        print(f"start trainign process {bert.name}")
         # launch training process
         self.languagemodels.start_training_process(
             name=bert.name,
@@ -2221,6 +2226,7 @@ class Project:
                 project_slug=self.name,
                 user=username,
                 dataset=request.dataset,
+                model_id=request.model_id,
                 prompt_name=prompt_name,
                 prompt=request.prompt,
                 cols_context=self.params.cols_context,

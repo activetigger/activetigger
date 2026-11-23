@@ -80,7 +80,7 @@ class Lexicometrics:
             ).values()
         }
 
-    def get_compute_task(self, project_slug: str, username: str, language: str) -> str:
+    def start_compute_task(self, project_slug: str, username: str, language: str) -> str:
         """
         Launch the lexicometrics computation as a celery task.
 

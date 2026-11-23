@@ -293,17 +293,19 @@ class Monitoring:
     """
 
     db_manager: DatabaseManager
-    project_slug: str | None
     ACTIVITY_CACHE_TTL_SECONDS: int = 300
 
-    def __init__(self, db_manager: DatabaseManager, project_slug: str | None = None) -> None:
+    def __init__(
+        self,
+        db_manager: DatabaseManager,
+    ) -> None:
         self.db_manager = db_manager
-        self.project_slug = project_slug
         self._activity_cache: dict[int, tuple[datetime, "MonitoringActivityModel"]] = {}
         self._activity_lock = threading.Lock()
 
+    # TODO: refacto using computing_task as props ?
     def register_process(
-        self, process_name: str, kind: str, parameters: dict, user_name: str
+        self, process_name: str, project_slug: str, kind: str, parameters: dict, user_name: str
     ) -> None:
         """
         Start a new monitored process
@@ -314,7 +316,7 @@ class Monitoring:
             kind=kind,
             parameters=parameters,
             events=events,
-            project_slug=self.project_slug,
+            project_slug=project_slug,
             user_name=user_name,
         )
 

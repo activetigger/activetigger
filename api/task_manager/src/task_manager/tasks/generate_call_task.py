@@ -17,6 +17,7 @@ class GenerateCallTaskInputs(TaskInputs[str]):
     prompt: str
     cols_context: list[str]
     n_workers: int = 1
+    model_id: int
     # pickled {"data": DataFrame, "model": GenerationModel dump}; the model
     # carries decrypted credentials, so it never goes through the broker
     data_path: Path

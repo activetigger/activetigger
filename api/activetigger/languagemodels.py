@@ -36,7 +36,6 @@ from activetigger.db.languagemodels import ModelsService
 from activetigger.db.manager import DatabaseManager
 from activetigger.errors import AlreadyExistsError, NotFoundError
 from activetigger.functions import get_model_metrics
-from activetigger.monitoring import Monitoring
 from activetigger.task_registry import TaskRegistry
 
 
@@ -64,7 +63,6 @@ class LanguageModels:
     ) -> None:
         self.params_default = LMParametersModel()
         self.project_slug = project_slug
-        self.monitoring = Monitoring(db_manager, project_slug)
         self.task_registry = task_registry
         self.language_models_service = db_manager.language_models_service
         self.path: Path = Path(path).joinpath("bert")
@@ -148,10 +146,16 @@ class LanguageModels:
                 status=ct.inputs.status,
                 progress=self.task_registry.task_progress(ct.id),
                 loss=self.get_loss(ct.inputs.model_name),
-                epochs=ct.inputs.params["epochs"] if ct.inputs.params else None,
+                epochs=ct.inputs.params.epochs
+                if isinstance(ct.inputs, TrainBertTaskInputs)
+                else None,
             )
-            for ct in self.task_registry.project_computing_tasks(self.project_slug).values()
-            if ct.kind in ["bert", "train_bert", "predict_bert"]
+            for ct in cast(
+                list[TaskComputing[TrainBertTaskInputs | PredictBertTaskInputs]],
+                self.task_registry.project_computing_tasks(
+                    self.project_slug, kinds=["train_bert", "predict_bert"]
+                ).values(),
+            )
         }
         return r
 

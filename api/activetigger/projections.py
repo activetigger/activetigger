@@ -1,7 +1,7 @@
 import pickle
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pandas as pd
 from fastapi.responses import FileResponse
@@ -78,9 +78,12 @@ class Projections:
         """
         return {
             e.inputs.name: e.inputs.projection.method
-            for e in self.task_registry.project_computing_tasks(
-                self.project_slug, kinds=["compute_projection"]
-            ).values()
+            for e in cast(
+                list[TaskComputing[ComputeProjectionTaskInputs]],
+                self.task_registry.project_computing_tasks(
+                    self.project_slug, kinds=["compute_projection"]
+                ).values(),
+            )
         }
 
     def exists(self, name: str) -> bool:
@@ -149,9 +152,12 @@ class Projections:
             raise Exception(f"A model named '{projection.name}' already exists")
         if projection.name in [
             e.inputs.name
-            for e in self.task_registry.project_computing_tasks(
-                self.project_slug, kinds=["compute_projection"]
-            ).values()
+            for e in cast(
+                list[TaskComputing[ComputeProjectionTaskInputs]],
+                self.task_registry.project_computing_tasks(
+                    self.project_slug, kinds=["compute_projection"]
+                ).values(),
+            )
         ]:
             raise AlreadyExistsError(
                 f"A projection named '{projection.name}' is already being computed"
