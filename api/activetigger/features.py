@@ -599,12 +599,16 @@ class Features:
             raise InvalidInputError("Index not recognized")
 
     def current_computing(self) -> dict[str, dict[str, str | None]]:
-        computing: dict[str, dict] = {
-            e.kind: {"progress": self.task_registry.task_progress(e.id), "name": e.kind}
-            for e in self.task_registry.project_computing_tasks(
-                self.project_slug, kinds=features_tasks + ["extend_features"]
-            ).values()
-        }
+
+        computing: dict[str, dict[str, str | None]] = {}
+        for e in self.task_registry.project_computing_tasks(
+            self.project_slug, kinds=features_tasks + ["extend_features"]
+        ).values():
+            progress = self.task_registry.task_progress(e.id)
+            computing[e.kind] = {
+                "progress": str(progress["progress"]) if progress else None,
+                "name": e.kind,
+            }
         # eval set import/drop in progress: existing features are being
         # recomputed/rewritten for the new dataset shape. The `kind` key
         # lets the frontend render this entry differently.
