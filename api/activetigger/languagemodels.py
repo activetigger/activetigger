@@ -154,7 +154,7 @@ class LanguageModels:
                 list[TaskComputing[TrainBertTaskInputs | PredictBertTaskInputs]],
                 self.task_registry.project_computing_tasks(
                     self.project_slug, kinds=["train_bert", "predict_bert"]
-                ).values(),
+                ),
             )
         }
         return r

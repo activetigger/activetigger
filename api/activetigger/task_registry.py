@@ -12,7 +12,6 @@ from task_manager.task_names import TaskNames
 
 from activetigger.datamodels import (
     EventsModel,
-    OrchestratorTasks,
     TaskComputing,
     TaskEndedEvent,
     TaskEndedReason,
@@ -39,7 +38,7 @@ class TaskRegistry:
 
     def __init__(self, monitoring: Monitoring) -> None:
         self._lock = threading.RLock()
-        self._computing_tasks = OrchestratorTasks(projects_tasks={}, orchestrator_tasks={})
+        self._computing_tasks: dict[str, TaskComputing] = {}
         self.monitoring = monitoring
 
         # orchestrator callbacks
@@ -86,13 +85,7 @@ class TaskRegistry:
         )
         print(f"add new task in registry {computing_task}")
         with self._lock:
-            # or in project_slug none case in case orchestrator_tasks_names is out of sync + typings
-            if task_class.scope == "orchestrator" or inputs.project_slug is None:
-                self._computing_tasks.orchestrator_tasks[task_id] = computing_task
-            elif computing_task.project_slug is not None:
-                if computing_task.project_slug not in self._computing_tasks.projects_tasks:
-                    self._computing_tasks.projects_tasks[computing_task.project_slug] = {}
-                self._computing_tasks.projects_tasks[inputs.project_slug][task_id] = computing_task
+            self._computing_tasks[task_id] = computing_task
 
         # TODO: monitoring does not support orchestrator scope tasks
         print(
@@ -181,7 +174,7 @@ class TaskRegistry:
     def stop_task_by_id_and_project(
         self, task_id: str, project_slug: str | None = None, username: str = "system"
     ):
-        computing_task = self.get_computing_task(task_id, project_slug)
+        computing_task = self.get_computing_task(task_id)
 
         if computing_task is None:
             # we don't raise here as it looks like the job has already been done
@@ -209,24 +202,7 @@ class TaskRegistry:
         with self._lock:
             # find matching computing_tasks
             computing_tasks_to_stop: list[TaskComputing] = []
-            # orchestrator scope
-            for ct in self._computing_tasks.orchestrator_tasks.values():
-                if should_stop_computing_task(ct):
-                    computing_tasks_to_stop.append(ct)
-
-            # project scope
-            all_project_computing_tasks = (
-                # only the one for the project in params
-                (ct for ct in self._computing_tasks.projects_tasks[only_project_slug].values())
-                if only_project_slug
-                else (
-                    # add all computing_task from all projects
-                    ct
-                    for cts in self._computing_tasks.projects_tasks.values()
-                    for ct in cts.values()
-                )
-            )
-            for ct in all_project_computing_tasks:
+            for ct in self._computing_tasks.values():
                 if should_stop_computing_task(ct):
                     computing_tasks_to_stop.append(ct)
 
@@ -238,7 +214,7 @@ class TaskRegistry:
         Stop every task of a project (deleted, cleaned or reset)
         """
         # copy: stop_process removes entries from the list
-        for computing_task in list(self.project_computing_tasks(project_slug).values()):
+        for computing_task in self.project_computing_tasks(project_slug):
             self.stop_task(computing_task)
 
     def stop_all_tasks(self):
@@ -249,37 +225,21 @@ class TaskRegistry:
             self.stop_task(ct)
 
     # get computing_task object from its id and scope
-    def get_computing_task(self, task_id: str, project_slug: str | None) -> TaskComputing:
+    def get_computing_task(self, task_id: str) -> TaskComputing:
 
         with self._lock:
             # orchestrator scope
-            if task_id in self._computing_tasks.orchestrator_tasks:
-                return self._computing_tasks.orchestrator_tasks[task_id]
+            if task_id in self._computing_tasks:
+                return self._computing_tasks[task_id]
             else:
-                # project scope
-                if project_slug:
-                    if project_slug not in self._computing_tasks.projects_tasks:
-                        print(f"Project {project_slug} not registered in orchestrator")
-                    if task_id in self._computing_tasks.projects_tasks[project_slug]:
-                        return self._computing_tasks.projects_tasks[project_slug][task_id]
-                    else:
-                        raise Exception(
-                            f"on_task_end called on an untracked task {task_id} in project {project_slug} scope"
-                        )
-                else:
-                    raise Exception(
-                        f"on_task_end called on an untracked task {task_id} in orchestrator scope"
-                    )
+                raise Exception(f"on_task_end called on an untracked task {task_id}")
 
     def projects_with_running_tasks(self) -> set[str]:
         with self._lock:
             return set(
-                project_slug
-                for (
-                    project_slug,
-                    computing_tasks_by_id,
-                ) in self._computing_tasks.projects_tasks.items()
-                if len(computing_tasks_by_id) > 0
+                computing_task.project_slug
+                for computing_task in self._computing_tasks.values()
+                if computing_task.project_slug is not None
             )
 
     def project_creation_ongoing_computing_tasks(
@@ -289,7 +249,7 @@ class TaskRegistry:
             return set(
                 (
                     ct.project_slug
-                    for ct in self._computing_tasks.orchestrator_tasks.values()
+                    for ct in self._computing_tasks.values()
                     if ct.kind == "create_project" and ct.project_slug
                 )
             )
@@ -301,7 +261,7 @@ class TaskRegistry:
             return set(
                 (
                     ct.project_slug
-                    for ct in self._computing_tasks.orchestrator_tasks.values()
+                    for ct in self._computing_tasks.values()
                     if ct.kind == "duplicate_project" and ct.project_slug
                 )
             )
@@ -309,29 +269,20 @@ class TaskRegistry:
     def all_computing_tasks(self) -> Iterator[TaskComputing]:
         """Snapshot iterator over every task (both scopes)."""
         with self._lock:
-            all_cts = [
-                ct
-                for by_id in self._computing_tasks.projects_tasks.values()
-                for ct in by_id.values()
-            ] + list(self._computing_tasks.orchestrator_tasks.values())
+            all_cts = list(self._computing_tasks.values())
         return iter(all_cts)
 
     def project_computing_tasks(
         self, project_slug: str, user: str | None = None, kinds: list[TaskNames] | None = None
-    ) -> dict[str, TaskComputing]:
+    ) -> list[TaskComputing]:
         with self._lock:
-            if project_slug in self._computing_tasks.projects_tasks:
-                return {
-                    id: ct
-                    for (id, ct) in self._computing_tasks.projects_tasks[project_slug].items()
-                    if (not user or ct.user == user) and (not kinds or ct.kind in kinds)
-                }
-            else:
-                return {}
-
-    def projects_computing_tasks(self) -> dict[str, dict[str, TaskComputing]]:
-        with self._lock:
-            return {slug: dict(cts) for slug, cts in self._computing_tasks.projects_tasks.items()}
+            return [
+                ct
+                for ct in self._computing_tasks.values()
+                if (not user or ct.user == user)
+                and (not kinds or ct.kind in kinds)
+                and ct.project_slug == project_slug
+            ]
 
     def task_progress(self, task_id: str) -> TaskProgressState | None:
         r = AsyncResult(task_id, app=celery_app)
@@ -344,10 +295,8 @@ class TaskRegistry:
     def _pop_computing_task(self, task_id: str, project_slug: str | None) -> TaskComputing | None:
         """Caller must hold the lock (or accept the small race and tolerate
         a None return). Idempotent: a stop and a late callback can race."""
-        if task_id in self._computing_tasks.orchestrator_tasks:
-            return self._computing_tasks.orchestrator_tasks.pop(task_id, None)
-        elif project_slug in self._computing_tasks.projects_tasks:
-            return self._computing_tasks.projects_tasks.get(project_slug, {}).pop(task_id, None)
+        if task_id in self._computing_tasks:
+            return self._computing_tasks.pop(task_id, None)
         return None
 
     def _clean_temp_files(self, computing_task: TaskComputing):
@@ -415,10 +364,7 @@ class TaskRegistry:
         now = time.time()
         with self._lock:
             tracked: dict[str, tuple[str | None, TaskNames]] = {}  # task_id -> (project_slug, kind)
-            for slug, computing_tasks_by_id in self._computing_tasks.projects_tasks.items():
-                for ct in computing_tasks_by_id.values():
-                    tracked[ct.id] = (slug, ct.kind)
-            for ct in self._computing_tasks.orchestrator_tasks.values():
+            for ct in self._computing_tasks.values():
                 tracked[ct.id] = (ct.project_slug, ct.kind)
 
         for task_id, (slug, kind) in tracked.items():

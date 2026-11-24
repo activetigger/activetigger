@@ -142,7 +142,7 @@ class ImageModels:
             )
             for e in self.task_registry.project_computing_tasks(
                 self.project_slug, kinds=["train_image", "predict_image"]
-            ).values()
+            )
         }
 
     def estimate_memory_use(self, model: str, kind: str = "train", batchsize: int = 16) -> int:

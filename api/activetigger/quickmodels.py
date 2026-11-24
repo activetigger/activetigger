@@ -273,7 +273,7 @@ class QuickModels:
                     TrainMLMultiClassInputs | PredictWithFeaturesTaskInputs | PredictMLTaskInputs
                 ]
             ],
-            self.task_registry.project_computing_tasks(self.project_slug, kinds=kinds).values(),
+            self.task_registry.project_computing_tasks(self.project_slug, kinds=kinds),
         ):
             r[e.user] = LMComputingOutModel(
                 name=getattr(e, "name", ""),

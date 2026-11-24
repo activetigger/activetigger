@@ -149,7 +149,7 @@ class Bertopic:
                 list[TaskComputing[ComputeBertopicTaskInput]],
                 self.task_registry.project_computing_tasks(
                     self.project_slug, kinds=["compute_bertopic"]
-                ).values(),
+                ),
             )
         }
 
@@ -174,7 +174,7 @@ class Bertopic:
                 list[TaskComputing[ComputeBertopicTaskInput]],
                 self.task_registry.project_computing_tasks(
                     self.project_slug, kinds=["compute_bertopic"]
-                ).values(),
+                ),
             )
         ]
         return slug not in computing_names and not self.models_service.model_exists(
@@ -262,12 +262,7 @@ class Bertopic:
         """
         Get current user processes
         """
-        return [
-            e
-            for e in self.task_registry.project_computing_tasks(
-                self.project_slug, user=user
-            ).values()
-        ]
+        return [e for e in self.task_registry.project_computing_tasks(self.project_slug, user=user)]
 
     def delete(self, name: str) -> None:
         """

@@ -82,7 +82,7 @@ class Projections:
                 list[TaskComputing[ComputeProjectionTaskInputs]],
                 self.task_registry.project_computing_tasks(
                     self.project_slug, kinds=["compute_projection"]
-                ).values(),
+                ),
             )
         }
 
@@ -156,7 +156,7 @@ class Projections:
                 list[TaskComputing[ComputeProjectionTaskInputs]],
                 self.task_registry.project_computing_tasks(
                     self.project_slug, kinds=["compute_projection"]
-                ).values(),
+                ),
             )
         ]:
             raise AlreadyExistsError(

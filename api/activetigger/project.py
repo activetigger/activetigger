@@ -347,9 +347,11 @@ class Project:
         # Persist any generation checkpoints left behind by a crashed worker or
         # a previous server restart; a gen_<task_id>.jsonl still in flight is kept.
         if self.params.dir is not None:
-            running = self.task_registry.project_computing_tasks(self.project_slug)
+            running_tasks_ids = set(
+                t.id for t in self.task_registry.project_computing_tasks(self.project_slug)
+            )
             for jsonl_path in self.params.dir.glob("gen_*.jsonl"):
-                if jsonl_path.stem.removeprefix("gen_") not in running.keys():
+                if jsonl_path.stem.removeprefix("gen_") not in running_tasks_ids:
                     self._recover_generations_from_jsonl(jsonl_path)
 
     def delete(self) -> None:
@@ -468,7 +470,7 @@ class Project:
                 list[TaskComputing[AddEvalsetTaskInputs]],
                 self.task_registry.project_computing_tasks(
                     self.project_slug, kinds=["add_evalset"]
-                ).values(),
+                ),
             )
         ):
             raise Exception("this set is already being added")
@@ -551,7 +553,7 @@ class Project:
             c
             for c in self.task_registry.project_computing_tasks(
                 self.project_slug, kinds=["extend_features"]
-            ).values()
+            )
         ]
         for c in running:
             self.task_registry.stop_task(c)
@@ -1978,7 +1980,7 @@ class Project:
         # existing BERT process (and vice versa) for the same user.
         already = self.task_registry.project_computing_tasks(
             self.project_slug, user=username, kinds=["train_bert", "train_image"]
-        ).values()
+        )
         if len(already) > 0:
             raise Exception(
                 "User already has a process launched, please wait before launching another one"

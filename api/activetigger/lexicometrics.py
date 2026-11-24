@@ -77,7 +77,7 @@ class Lexicometrics:
             e.user: "computing"
             for e in self.task_registry.project_computing_tasks(
                 self.project_slug, kinds=["compute_lexicometrics"]
-            ).values()
+            )
         }
 
     def start_compute_task(self, project_slug: str, username: str, language: str) -> str:

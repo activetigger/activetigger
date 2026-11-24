@@ -12,8 +12,9 @@ import shutil
 import time
 import traceback
 from datetime import datetime, timedelta, timezone
+from itertools import groupby
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pandas as pd
 import psutil
@@ -35,6 +36,7 @@ from activetigger.datamodels import (
     ProjectModel,
     ProjectStatus,
     ServerStateModel,
+    TaskComputing,
     TaskEndedEvent,
 )
 from activetigger.db import DBException
@@ -363,20 +365,26 @@ class Orchestrator:
         Heavy system stats (CPU, memory, disk, GPU) come from the
         periodically refreshed cache (_heavy_stats_cache).
         """
+        # every tasks
+        tasks = list(self.task_registry.all_computing_tasks())
+
+        def key_project(t: TaskComputing) -> str:
+            return cast(str, t.project_slug)
+
+        tasks_sorted = [t for t in tasks if t.project_slug is not None]
+        tasks_sorted.sort(key=key_project)
+        tasks_by_projects = groupby(tasks_sorted, key=key_project)
+
         # active projects in the orchestrator
         active_projects = {
             p: [
                 {"unique_id": c.id, "user": c.user, "kind": c.kind, "time": c.inputs.time}
-                for c in computing_tasks_by_id.values()
+                for c in project_tasks
             ]
-            for p, computing_tasks_by_id in self.task_registry.projects_computing_tasks().items()
-            if computing_tasks_by_id
+            for p, project_tasks in tasks_by_projects
         }
         # every process in flight on the celery workers
-        queue = {
-            c.id: {"unique_id": c.id, "kind": c.kind, "state": "running"}
-            for c in self.task_registry.all_computing_tasks()
-        }
+        queue = {c.id: {"unique_id": c.id, "kind": c.kind, "state": "running"} for c in tasks}
 
         # use cached heavy stats
         stats = self._heavy_stats_cache

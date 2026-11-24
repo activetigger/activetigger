@@ -603,7 +603,7 @@ class Features:
         computing: dict[str, dict[str, str | None]] = {}
         for e in self.task_registry.project_computing_tasks(
             self.project_slug, kinds=features_tasks + ["extend_features"]
-        ).values():
+        ):
             progress = self.task_registry.task_progress(e.id)
             computing[e.kind] = {
                 "progress": str(progress["progress"]) if progress else None,

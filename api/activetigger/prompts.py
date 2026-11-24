@@ -365,7 +365,7 @@ class Prompts:
         similarity_computing: list[TaskComputing[ComputeSimilarityWithFeaturesTaskInputs]] = list(
             self.task_registry.project_computing_tasks(
                 self.project_slug, kinds=["compute_similarity_with_features"]
-            ).values()
+            )
         )
         if any(sc.inputs.prompt_id == prompt_id for sc in similarity_computing):
             raise ValueError("A similarity computation is already running for this prompt")
@@ -452,7 +452,7 @@ class Prompts:
         out: dict[str, dict[str, str | None]] = {}
         for e in self.task_registry.project_computing_tasks(
             self.project_slug, kinds=["compute_similarity_with_features"]
-        ).values():
+        ):
             e = cast(TaskComputing[ComputeSimilarityWithFeaturesTaskInputs], e)
             progress = self.task_registry.task_progress(e.id)
             out[e.inputs.prompt_id] = {
@@ -468,7 +468,7 @@ class Prompts:
         out: dict[str, dict[str, str | None]] = {}
         for e in self.task_registry.project_computing_tasks(
             self.project_slug, kinds=["compute_prompt_embedding"]
-        ).values():
+        ):
             e = cast(TaskComputing[ComputePromptEmbeddingTaskInputs], e)
             progress = self.task_registry.task_progress(e.id)
             out[e.inputs.prompt_id] = {

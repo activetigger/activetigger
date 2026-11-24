@@ -60,9 +60,7 @@ class TaskCallback(ABC):
             events: EventsModel | None = None
             # always drop the entry, a raising hook must not leave a stale process
             try:
-                computing_task = orchestrator.task_registry.get_computing_task(
-                    task_id, project_slug
-                )
+                computing_task = orchestrator.task_registry.get_computing_task(task_id)
                 cls.on_complete_task_specific(
                     task_id, task_results, project_manager, computing_task
                 )

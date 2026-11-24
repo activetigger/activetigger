@@ -128,7 +128,7 @@ class NerModels:
                 list[TaskComputing[TrainNerTaskInputs | PredictNerTaskInputs]],
                 self.task_registry.project_computing_tasks(
                     self.project_slug, kinds=["train_ner", "predict_ner"]
-                ).values(),
+                ),
             )
         }
 

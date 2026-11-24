@@ -138,9 +138,7 @@ class Generations:
             )
             for e in cast(
                 list[TaskComputing[GenerateCallTaskInputs]],
-                self.task_registry.project_computing_tasks(
-                    self.project_slug, kinds=["generation"]
-                ).values(),
+                self.task_registry.project_computing_tasks(self.project_slug, kinds=["generation"]),
             )
         }
 
