@@ -5,6 +5,7 @@ import numpy as np
 import torch
 from activetigger.config import config
 from activetigger.functions import get_device, release_device_memory
+from celery.exceptions import TaskRevokedError
 
 from task_manager.active_tigger_task import UpdateProgressMethod
 
@@ -46,7 +47,7 @@ def encode_prompt(
             model = SentenceTransformer(model_name, device=device, trust_remote_code=True)
 
         if is_aborted is not None and is_aborted():
-            raise Exception("Process interrupted by user")
+            raise TaskRevokedError()
 
         if kind == "sentence-embeddings":
             model_args = config.models_embeddings.get(model_name, {}) or {}

@@ -20,7 +20,7 @@ from task_manager.celery import celery_app
 
 @pytest.fixture(scope="module")
 def valid_names() -> frozenset[str]:
-    return frozenset(get_args(TaskNames))
+    return frozenset(list(get_args(TaskNames)) + ["success_callback", "failure_callback"])
 
 
 def test_auto_callback_task_names_valid(valid_names: frozenset[str]) -> None:
@@ -65,4 +65,4 @@ def test_celery_registry_matches_task_name(valid_names: frozenset[str]) -> None:
     )
 
     missing = valid_names - registered
-    assert not missing, f"Some TaskNames are note registered tasks: {sorted(missing)}"
+    assert not missing, f"Some TaskNames are not registered tasks: {sorted(missing)}"

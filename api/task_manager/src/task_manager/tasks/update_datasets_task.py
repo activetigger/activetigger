@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import TypedDict
 
 from activetigger.datamodels import ProjectUpdateModel, TaskComputing
+from celery.exceptions import TaskRevokedError
 
 from task_manager.active_tigger_task import AbortableActiveTiggerTask, QueueName
 from task_manager.celery import celery_app
@@ -51,7 +52,7 @@ def update_datasets_task(
 ) -> UpdateDatasetsTaskResult:
     # the parquet rewrite cannot be interrupted midway, only skipped before it starts
     if self.is_aborted():
-        raise Exception("Process interrupted by user")
+        raise TaskRevokedError()
     # provisional file, promoted to train.parquet by the API callback
     output_path = inputs.path_project.joinpath(f"train_{self.request.id}.parquet")
     try:

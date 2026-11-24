@@ -14,6 +14,7 @@ from typing import Any
 
 import numpy as np
 from activetigger.functions import get_device, release_device_memory
+from celery.exceptions import TaskRevokedError
 from pandas import DataFrame, Series
 
 from task_manager.active_tigger_task import UpdateProgressMethod
@@ -65,7 +66,7 @@ def encode_clip(
         with torch.no_grad():
             for i, start in enumerate(range(0, n, batch_size), 1):
                 if is_aborted is not None and is_aborted():
-                    raise Exception("Process interrupted by user")
+                    raise TaskRevokedError()
 
                 batch_ids = ids[start : start + batch_size]
                 batch_paths = files[start : start + batch_size]

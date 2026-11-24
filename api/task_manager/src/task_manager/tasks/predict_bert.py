@@ -25,6 +25,7 @@ from activetigger.functions import (
     release_device_memory,
 )
 from activetigger.monitoring import TaskTimer
+from celery.exceptions import TaskRevokedError
 from pandas import DataFrame
 from scipy.stats import entropy
 from tqdm import tqdm
@@ -226,7 +227,7 @@ class PredictBertMultiClass:
         Raise exception if the user requested cancellation
         """
         if self.is_aborted():
-            raise Exception("Process interrupted by user")
+            raise TaskRevokedError()
 
     def __transform_to_dataframe(
         self, prob_predictions: np.ndarray, id2label: dict[int, str]

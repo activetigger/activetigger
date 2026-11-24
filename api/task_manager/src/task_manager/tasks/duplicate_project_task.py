@@ -1,6 +1,8 @@
 from pathlib import Path
 from typing import Any, TypedDict
 
+from celery.exceptions import TaskRevokedError
+
 from task_manager.active_tigger_task import AbortableActiveTiggerTask, QueueName, TaskScope
 from task_manager.celery import celery_app
 from task_manager.task_input import TaskInputs
@@ -49,7 +51,7 @@ def duplicate_project_task(
 ) -> DuplicateProjectTaskResult:
     # a copy cannot be interrupted midway, only skipped before it starts
     if self.is_aborted():
-        raise Exception("Process interrupted by user")
+        raise TaskRevokedError()
     duplicate_project_files(
         inputs.source_dir,
         inputs.target_dir,

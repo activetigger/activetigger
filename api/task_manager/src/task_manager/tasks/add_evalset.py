@@ -16,6 +16,7 @@ from activetigger.functions_image import (
     filter_readable_images,
     generate_thumbnail,
 )
+from celery.exceptions import TaskRevokedError
 
 from task_manager.active_tigger_task import UpdateProgressMethod
 
@@ -37,7 +38,7 @@ def _stop_opportunity(
         if images_dir is not None and images_dir.exists():
             shutil.rmtree(images_dir, ignore_errors=True)
         output_path.unlink(missing_ok=True)
-        raise Exception("Process interrupted by user")
+        raise TaskRevokedError()
 
 
 def _read_evalset_file(

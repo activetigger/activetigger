@@ -20,6 +20,7 @@ from activetigger.functions import (
 )
 from activetigger.monitoring import TaskTimer
 from activetigger.ner_metrics import compute_ner_metrics
+from celery.exceptions import TaskRevokedError
 from pandas import DataFrame
 from tqdm import tqdm
 from transformers import (
@@ -172,7 +173,7 @@ class PredictNer:
 
     def __check_aborted(self):
         if self.is_aborted():
-            raise Exception("Process interrupted by user")
+            raise TaskRevokedError()
 
     def __compute_statistics(
         self, pred: DataFrame, id2label: dict[int, str]

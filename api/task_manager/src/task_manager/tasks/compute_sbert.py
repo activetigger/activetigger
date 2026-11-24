@@ -6,6 +6,7 @@ import numpy as np
 import torch
 from activetigger.config import config
 from activetigger.functions import get_device, release_device_memory
+from celery.exceptions import TaskRevokedError
 from pandas import DataFrame, Series
 from sentence_transformers import SentenceTransformer
 
@@ -60,7 +61,7 @@ def encode_sbert(
             # check if the user want to stop the process
             if is_aborted is not None and is_aborted():
                 print("Process interrupted by user")
-                raise Exception("Process interrupted by user")
+                raise TaskRevokedError()
             batch_texts = list(texts.iloc[start : start + batch_size])
             embeddings.append(
                 sbert.encode(

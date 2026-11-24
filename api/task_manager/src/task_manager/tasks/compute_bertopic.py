@@ -17,6 +17,7 @@ from activetigger.datamodels import BertopicParamsModel, EventsDict
 from activetigger.functions import release_device_memory
 from activetigger.monitoring import TaskTimer
 from bertopic import BERTopic
+from celery.exceptions import TaskRevokedError
 from great_tables import GT, loc, style
 from jinja2 import Template
 from nltk.corpus import stopwords as nltk_stopwords
@@ -270,7 +271,7 @@ class ComputeBertopic:
     def __stop_process_opportunity(self):
         """stop process by the user"""
         if self.is_aborted():
-            raise Exception("Process interrupted by user")
+            raise TaskRevokedError()
 
     def __init_paths(self) -> tuple[Path, Path]:
         """Creates a folder (projects/{project_slug}/bertopic/runs/{bertopic_run}/)

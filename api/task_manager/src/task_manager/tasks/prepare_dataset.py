@@ -7,6 +7,7 @@ import pandas as pd
 import torch
 from activetigger.datamodels import PrepareSplitModel
 from activetigger.functions import concat_text_columns, get_device
+from celery.exceptions import TaskRevokedError
 from wtpsplit import SaT
 
 from task_manager.active_tigger_task import UpdateProgressMethod
@@ -48,7 +49,7 @@ def split_by_regex(text: str, pattern: str) -> list[str]:
 
 def _check_interrupt(is_aborted: Callable[[], bool] | None) -> None:
     if is_aborted is not None and is_aborted():
-        raise Exception("Process interrupted by user")
+        raise TaskRevokedError()
 
 
 def _empty_device_cache(device: torch.device) -> None:

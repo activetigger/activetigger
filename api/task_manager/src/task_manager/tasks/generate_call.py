@@ -10,6 +10,7 @@ from activetigger.generation.ollama import Ollama
 from activetigger.generation.openai import OpenAI
 from activetigger.generation.openapi import OpenAPI
 from activetigger.generation.openrouter import OpenRouter
+from celery.exceptions import TaskRevokedError
 from pandas import DataFrame, Series
 
 from task_manager.active_tigger_task import UpdateProgressMethod
@@ -119,7 +120,7 @@ def generate_call(
         _flush_to_jsonl(path_jsonl, results[last_flushed:], batch)
 
     if interrupted:
-        raise Exception("Process interrupted by user")
+        raise TaskRevokedError()
 
     # surface failures instead of silently returning a partial/empty batch
     if errors and not results:

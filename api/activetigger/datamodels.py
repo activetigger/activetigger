@@ -704,6 +704,7 @@ TaskInputsGeneric = TypeVar("TaskInputsGeneric", bound=TaskInputs)
 # ongoing Celery Task representation
 class TaskComputing(BaseModel, Generic[TaskInputsGeneric]):
     id: str
+    callback_id: str
     kind: TaskNames  # from task name in celery
     user: str  # duplicated from input
     project_slug: str | None  # duplicated from input

@@ -3,6 +3,7 @@ from typing import TypedDict
 
 import pandas as pd
 from activetigger.datamodels import ProjectionParametersModel, TaskComputing
+from celery.exceptions import TaskRevokedError
 
 from task_manager.active_tigger_task import AbortableActiveTiggerTask, QueueName
 from task_manager.celery import celery_app
@@ -54,7 +55,7 @@ def compute_projection_task(
         features = pd.read_pickle(inputs.features_path)
         # one-shot fit: abort only before starting
         if self.is_aborted():
-            raise Exception("Process interrupted by user")
+            raise TaskRevokedError()
         coordinates = compute_projection(
             features,
             kind=inputs.projection.method,

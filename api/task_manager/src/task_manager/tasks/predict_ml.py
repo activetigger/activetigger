@@ -10,6 +10,7 @@ import pandas as pd
 from activetigger.datamodels import MLStatisticsModel, QuickModelComputed
 from activetigger.functions import get_metrics_multiclass
 from activetigger.monitoring import TaskTimer
+from celery.exceptions import TaskRevokedError
 
 from task_manager.task_input import TaskInputs
 
@@ -143,7 +144,7 @@ class PredictMLMultiClass:
 
             task_timer.start("predict")
             if self.is_aborted():
-                raise Exception("Process interrupted by user")
+                raise TaskRevokedError()
             Y_pred = model.predict(X.drop(columns=["dataset"]))
             Y_proba = model.predict_proba(X.drop(columns=["dataset"]))
             labels_list = [label for label in model.classes_]

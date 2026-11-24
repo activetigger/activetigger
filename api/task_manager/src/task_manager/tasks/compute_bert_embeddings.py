@@ -8,6 +8,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from activetigger.functions import get_device, release_device_memory
+from celery.exceptions import TaskRevokedError
 from pandas import DataFrame, Series
 from transformers import (
     AutoModel,  # ty: ignore[possibly-missing-import]
@@ -85,7 +86,7 @@ def encode_bert_embeddings(
         for i, start in enumerate(range(0, len(texts), batch_size), 1):
             if is_aborted is not None and is_aborted():
                 print("Process interrupted by user")
-                raise Exception("Process interrupted by user")
+                raise TaskRevokedError()
 
             batch_texts = list(texts.iloc[start : start + batch_size])
             encoded = tokenizer(  # ty: ignore[call-non-callable]

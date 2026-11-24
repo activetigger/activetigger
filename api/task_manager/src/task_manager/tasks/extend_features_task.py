@@ -3,6 +3,7 @@ from typing import TypedDict
 
 import pandas as pd
 from activetigger.datamodels import TaskComputing
+from celery.exceptions import TaskRevokedError
 from pandas import DataFrame
 
 from task_manager.active_tigger_task import AbortableActiveTiggerTask, QueueName
@@ -90,7 +91,7 @@ def extend_features(
         merged = (pd.concat([kept, new_rows]) if len(new_rows) else kept).loc[full_index]
 
         if self.is_aborted():
-            raise Exception("Process interrupted by user")
+            raise TaskRevokedError()
         tmp = inputs.path_features.with_suffix(".parquet.tmp")
         merged.to_parquet(tmp, index=True)
         tmp.replace(inputs.path_features)

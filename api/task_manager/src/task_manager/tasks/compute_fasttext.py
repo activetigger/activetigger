@@ -5,6 +5,7 @@ from pathlib import Path
 import fasttext
 import pandas as pd
 from activetigger.functions import tokenize
+from celery.exceptions import TaskRevokedError
 from fasttext.util import download_model
 from pandas import DataFrame, Series
 
@@ -52,7 +53,7 @@ def encode_fasttext(
             progress_percent = len(emb) / len(texts_tk) * 100
             update_progress(progress_percent)
             if is_aborted is not None and is_aborted():
-                raise Exception("Process interrupted by user")
+                raise TaskRevokedError()
 
     df = pd.DataFrame(emb, index=texts.index)
     df.columns = ["ft%03d" % (x + 1) for x in range(len(df.columns))]

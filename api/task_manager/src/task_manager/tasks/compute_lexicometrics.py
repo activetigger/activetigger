@@ -3,6 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from celery.exceptions import TaskRevokedError
 from pandas import Series
 from sklearn.feature_extraction.text import CountVectorizer
 from spacy.lang.de import German
@@ -48,7 +49,7 @@ def distribution_statistics(values: Series, bins: int = 30) -> dict:
 
 def _check_aborted(is_aborted: Callable[[], bool] | None) -> None:
     if is_aborted is not None and is_aborted():
-        raise Exception("Process interrupted by user")
+        raise TaskRevokedError()
 
 
 def compute_lexicometrics(

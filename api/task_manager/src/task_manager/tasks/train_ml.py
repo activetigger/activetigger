@@ -23,6 +23,7 @@ from activetigger.datamodels import (
 )
 from activetigger.functions import get_metrics_multiclass
 from activetigger.monitoring import TaskTimer
+from celery.exceptions import TaskRevokedError
 from scipy.stats import entropy
 from sklearn.base import BaseEstimator
 from sklearn.ensemble import RandomForestClassifier
@@ -312,7 +313,7 @@ class TrainMLMultiClass:
     def _check_cancelled(self) -> None:
         """Raise if the user requested cancellation."""
         if self.is_aborted():
-            raise Exception("Process interrupted by user")
+            raise TaskRevokedError()
 
     def run(self) -> EventsDict:
         """

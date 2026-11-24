@@ -578,6 +578,20 @@ class Orchestrator:
                 project = self.projects.get(ct.project_slug, None)
                 if project is not None:
                     project.errors.add(f"Task {ct.kind} {event.reason}: {event.error_message}")
+                else:
+                    self.messages.add_message(
+                        username,
+                        "system",
+                        f"{ct.kind} task failed with error {event.error_message}",
+                    )
+
+            # TODO: replace messages by real notification system when succcess
+
+            if event.reason == "stopped":
+                self.messages.add_message(
+                    username, "system", f"{ct.kind} task successfully stopped"
+                )
+
         except Exception as e:
             print(f"Exception in orchestrator._on_task_ended {e}")
             raise

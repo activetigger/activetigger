@@ -2,13 +2,18 @@ import threading
 import time
 from typing import Iterator, cast
 
-from celery import uuid
+from celery import chord, uuid
 from celery.contrib.abortable import AbortableAsyncResult, AbortableTask
 from celery.result import AsyncResult
-from task_manager.active_tigger_task import ActiveTiggerTask, QueueName, TaskScope
+from task_manager.active_tigger_task import (
+    ActiveTiggerTask,
+    QueueName,
+    TaskScope,
+)
 from task_manager.celery import celery_app
 from task_manager.task_input import TaskInputs
 from task_manager.task_names import TaskNames
+from task_manager.tasks.callback_tasks import FailureCallbackTask, SuccessCallbackTask
 
 from activetigger.datamodels import (
     EventsModel,
@@ -44,20 +49,17 @@ class TaskRegistry:
         # orchestrator callbacks
         self._observers: list[TaskEndObserver] = []
 
-        # sync celery utils
-        # reconciliation with the workers: a task whose callback never arrives
-        # (worker container restarted, redis flushed, callback abandoned) is
-        # dropped after staying finished or unaccounted for longer than the grace
+        # reconciliation is a BACKSTOP, the chord
+        # bodies guarantee callback delivery while any worker lives. It only
+        # fires for tasks orphaned by infra loss (worker container gone with
+        # the task, redis backend flushed) — nothing else will ever report them.
         self._reconcile_interval = 60
-        self._reconcile_grace = 120
-        # celery stores SUCCESS before the worker posts the callback (retried for
-        # minutes if the API is slow): a finished task must not be dropped before
-        # the whole delivery envelope has passed
-        self._reconcile_grace_success = 900
+        # the chord body retries delivery for ~1 min (exponential backoff +
+        # jitter); grace is comfortably above that so a slow-but-delivered
+        # callback is never dropped
+        self._reconcile_grace = 180
         self._last_reconcile = 0.0
-        self._task_lost_since: dict[str, float] = {}
-        # task ids whose callback is being executed by the API right now
-        self._callbacks_in_progress: set[str] = set()
+        self._orphaned_since: dict[str, float] = {}
 
     # ---------- public API ------------
 
@@ -76,8 +78,10 @@ class TaskRegistry:
         task_class = cast(ActiveTiggerTask, celery_app.tasks[task_name])
 
         task_id = uuid()
+        callback_task_id = uuid()
         computing_task = TaskComputing(
             id=task_id,
+            callback_id=callback_task_id,
             kind=task_name,
             user=inputs.user,
             project_slug=inputs.project_slug,
@@ -102,22 +106,30 @@ class TaskRegistry:
             )
 
         # queue overrides the task default (e.g. GPU for a wtpsplit preparation)
-        options = {"queue": queue} if queue else {}
+
         try:
-            # TODO: should we create a chord/chain to encapsulate success callback into task lifetime
-            task_class.s(inputs=inputs.model_dump(mode="json")).apply_async(
-                task_id=task_id, **options
+            main_task = (
+                task_class.s(inputs=inputs.model_dump(mode="json"))
+                .set(queue=queue or task_class.queue, task_id=task_id)
+                .on_error(FailureCallbackTask().s(task_name=task_name, main_task_id=task_id))
             )
+            callback_task = (
+                SuccessCallbackTask()
+                .s(task_name=task_name, main_task_id=task_id)
+                .set(task_id=callback_task_id)
+            )
+
+            chord(main_task)(callback_task)
+
         except Exception as e:
             print(e)
-            self.on_task_end(computing_task.id, computing_task.project_slug, "error")
+            self.on_task_end(computing_task.id, "error")
             raise
         return task_id
 
     def on_task_end(
         self,
         task_id: str,
-        project_slug: str | None,
         reason: TaskEndedReason,
         events: EventsModel | None = None,
         error_message: str | None = None,
@@ -126,7 +138,7 @@ class TaskRegistry:
         When task ends, this method must be called to delete the task representation from the orchestrator memory
         """
         with self._lock:
-            computing_task = self._pop_computing_task(task_id, project_slug)
+            computing_task = self._pop_computing_task(task_id)
         if computing_task is None:
             return
         print(f"terminating {computing_task}")
@@ -156,29 +168,23 @@ class TaskRegistry:
         return isinstance(task_class, AbortableTask)
 
     def stop_task(self, computing_task: TaskComputing):
-        try:
-            if TaskRegistry.is_task_abortable(computing_task.kind):
-                task = AbortableAsyncResult(computing_task.id, app=celery_app)
-                print(f"Aborting {computing_task.id} {type(task).__name__}")
-                # abort() is a fallback flag; revoke drops a task still in the queue
-                task.abort()
-                celery_app.control.revoke(computing_task.id)
-            else:
-                print(f"Revoke task {computing_task.id}")
-                celery_app.control.revoke(computing_task.id, terminate=True, signal="SIGKILL")
-        finally:
-            # we don't wait for task failure callback as it can never arrive in case of revoke or hard kill
-            self.on_task_end(computing_task.id, computing_task.project_slug, "stopped")
+        if TaskRegistry.is_task_abortable(computing_task.kind):
+            task = AbortableAsyncResult(computing_task.id, app=celery_app)
+            print(f"Aborting {computing_task.id} {type(task).__name__}")
+            # abort() is a fallback flag; revoke drops a task still in the queue
+            task.abort()
+            celery_app.control.revoke(computing_task.id)
+        else:
+            print(f"Revoke task {computing_task.id}")
+            celery_app.control.revoke(computing_task.id, terminate=True, signal="SIGKILL")
 
     # Stop one task by its id + project if appropriate
-    def stop_task_by_id_and_project(
-        self, task_id: str, project_slug: str | None = None, username: str = "system"
-    ):
+    def stop_task_by_id(self, task_id: str):
         computing_task = self.get_computing_task(task_id)
 
         if computing_task is None:
             # we don't raise here as it looks like the job has already been done
-            print(f"Could not find task {task_id} scope {project_slug} in Orchestrator")
+            print(f"Could not find task {task_id} in task_registry")
         else:
             self.stop_task(computing_task)
 
@@ -292,7 +298,7 @@ class TaskRegistry:
 
     # ---------------- internals ----------------
 
-    def _pop_computing_task(self, task_id: str, project_slug: str | None) -> TaskComputing | None:
+    def _pop_computing_task(self, task_id: str) -> TaskComputing | None:
         """Caller must hold the lock (or accept the small race and tolerate
         a None return). Idempotent: a stop and a late callback can race."""
         if task_id in self._computing_tasks:
@@ -326,75 +332,67 @@ class TaskRegistry:
     # ---------------- sync with celery ----------------
 
     def maybe_reconcile(self) -> None:
+        """Cheap periodic sweep; call from the update loop."""
         if time.time() - self._last_reconcile < self._reconcile_interval:
             return
         self._last_reconcile = time.time()
         self._reconcile_tasks()
 
-    def mark_callback_started(self, task_id: str):
-        with self._lock:
-            self._callbacks_in_progress.add(task_id)
-
-    def mark_callback_finished(self, task_id: str):
-        with self._lock:
-            self._callbacks_in_progress.discard(task_id)
-
-    def in_callback(self, task_id: str):
-        with self._lock:
-            return task_id in self._callbacks_in_progress
-
-    def mark_task_lost(self, task_id: str):
-        with self._lock:
-            return self._task_lost_since.setdefault(task_id, time.time())
-
-    def mark_task_found(self, task_id: str):
-        with self._lock:
-            return self._task_lost_since.pop(task_id, None)
-
     def _reconcile_tasks(self) -> None:
         """
-        Compare the processes in memory with the celery side. An entry whose
-        task is finished (SUCCESS/FAILURE/REVOKED, so its callback was lost) or
-        neither queued nor held by a worker for more than the grace period is
-        dropped and reported as an error (silently if it was stopped).
+        Backstop for tasks orphaned by infra loss. With chord-mediated
+        callbacks, a task leaves the registry when the API acknowledges its
+        success/failure callback. An entry can therefore only linger if:
+
+        - its chord died with the infrastructure (worker container holding the
+          main task or a callback body disappeared, redis flushed): the task
+          is neither queued nor held by any worker, or
+        - its celery state is terminal (SUCCESS/FAILURE/REVOKED) past the
+          grace period, meaning the whole retry envelope of the callback body
+          elapsed without delivery.
+
+        Both mean genuine loss: report loudly, not as routine cleanup.
         """
         if celery_app.conf.task_always_eager:
             return
         in_flight = celery_tasks_in_flight()
+        if in_flight is None:
+            # cannot verify anything: skip this round, retry next interval
+            return
         now = time.time()
+
         with self._lock:
-            tracked: dict[str, tuple[str | None, TaskNames]] = {}  # task_id -> (project_slug, kind)
-            for ct in self._computing_tasks.values():
-                tracked[ct.id] = (ct.project_slug, ct.kind)
+            tracked = {ct.id: (ct.project_slug, ct.kind) for ct in self._computing_tasks.values()}
+            # forget ids whose task left the registry meanwhile
+            for task_id in [t for t in self._orphaned_since if t not in tracked]:
+                del self._orphaned_since[task_id]
 
         for task_id, (slug, kind) in tracked.items():
-            # its result is being stored by a callback: not lost
-            if self.in_callback(task_id):
-                self.mark_task_found(task_id)
-                continue
             state = celery_task_state(task_id)
-            finished = state in ("SUCCESS", "FAILURE", "REVOKED")
-            missing = in_flight is not None and task_id not in in_flight
-            if not finished and not missing:
-                self.mark_task_found(task_id)
+            # a task still queued or held by a worker is not orphaned;
+            # a pending state likewise (not started or in a callback retry)
+            if task_id in in_flight or state in ("PENDING", "PROGRESS", "RETRY", "STARTED"):
+                self._orphaned_since.pop(task_id, None)
                 continue
 
-            since = self.mark_task_lost(task_id)
-            grace = self._reconcile_grace_success if state == "SUCCESS" else self._reconcile_grace
-            if now - since < grace:
+            # terminal (SUCCESS/FAILURE/REVOKED) or vanished: orphan candidate
+            since = self._orphaned_since.setdefault(task_id, now)
+            if now - since < self._reconcile_grace:
                 continue
 
-            self.mark_task_found(task_id)
-            reason = f"celery state {state}" + (", not held by any worker" if missing else "")
-            print(f"Dropping lost task {task_id} ({kind}, {slug}): {reason}")
+            del self._orphaned_since[task_id]
+            reason = (
+                f"celery state {state}, not held by any worker"
+                if state != "PENDING"
+                else "unknown to celery: task and result lost (redis flushed?)"
+            )
+            # infra loss is exceptional now: make it visible
+            print(
+                f"ORPHANED TASK — dropping {task_id} ({kind}, {slug}): {reason}. "
+                f"No callback can ever arrive; investigate the workers/redis."
+            )
             self.on_task_end(
                 task_id,
-                slug,
                 "lost",
-                error_message=f"Task {kind} {task_id} lost: no result received",
+                error_message=f"Task {kind} {task_id} lost ({reason})",
             )
-
-        # forget ids no longer tracked
-        with self._lock:
-            for task_id in [t for t in self._task_lost_since if t not in tracked]:
-                del self._task_lost_since[task_id]

@@ -14,7 +14,6 @@ from fastapi import HTTPException
 from fastapi.responses import FileResponse
 from task_manager.active_tigger_task import QueueName
 from task_manager.celery import celery_app
-from task_manager.stop_signal import stop_requested
 from task_manager.tasks.prepare_dataset_task import PrepareDatasetTask, PrepareDatasetTaskInputs
 
 from activetigger.config import config
@@ -230,7 +229,7 @@ class Toolbox:
         # a previous split of this session must not write its result under the new one
         previous = self._session_task_id(session_dir)
         if previous:
-            self.task_registry.stop_task_by_id_and_project(previous)
+            self.task_registry.stop_task_by_id(previous)
 
         # remove results of a previous run
         session_dir.joinpath("result.parquet").unlink(missing_ok=True)
@@ -264,12 +263,15 @@ class Toolbox:
         )
         if not owned:
             raise HTTPException(status_code=404, detail="Task not found")
-        self.task_registry.stop_task_by_id_and_project(task_id, None, username)
+        self.task_registry.stop_task_by_id(task_id)
 
     def status(self, username: str, session_id: str, task_id: str) -> PrepareStatusModel:
         """
         Status of a split task; when done, add the number of rows and a preview
         """
+
+        # TODO: use task_registry :
+
         session_dir = self._session_dir(username, session_id)
         path_result = session_dir.joinpath("result.parquet")
 
@@ -282,8 +284,7 @@ class Toolbox:
 
         result = AsyncResult(task_id, app=celery_app)
         state = result.state
-        # the stop key outlives the celery state (startup purge, expired result)
-        if state in (REVOKED, "ABORTED") or stop_requested(task_id):
+        if state in (REVOKED, "ABORTED"):
             return PrepareStatusModel(status="failed", error="Task cancelled")
         if state == FAILURE:
             error = str(result.result) if result.result is not None else "Task failed"

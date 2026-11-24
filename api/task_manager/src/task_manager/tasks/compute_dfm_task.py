@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 import pandas as pd
+from celery.exceptions import TaskRevokedError
 
 from task_manager.active_tigger_task import AbortableActiveTiggerTask, QueueName
 from task_manager.celery import celery_app
@@ -53,7 +54,7 @@ def compute_dfm_task(self: ComputeDfmTask, inputs: ComputeDfmTaskInputs) -> Comp
     try:
         # one-shot vectoriser: no progress, abort only before starting
         if self.is_aborted():
-            raise Exception("Process interrupted by user")
+            raise TaskRevokedError()
         dtm = compute_dfm(
             texts,
             tfidf=inputs.tfidf,

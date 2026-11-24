@@ -306,7 +306,7 @@ def stop_process(
         orchestrator = get_orchestrator()
         if unique_id is not None and kind is None:
             test_rights(ServerAction.MANAGE_SERVER, current_user.username)
-            orchestrator.task_registry.stop_task_by_id_and_project(unique_id, project_slug)
+            orchestrator.task_registry.stop_task_by_id(unique_id)
         if project_slug is not None:
             # rights already checked
             # define the processes to kill

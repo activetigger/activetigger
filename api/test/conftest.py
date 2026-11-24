@@ -5,12 +5,11 @@ from collections.abc import Generator
 import pytest
 from fastapi.testclient import TestClient
 from task_manager.celery import celery_app
-from task_manager.utils import (
+from task_manager.tasks import callback_tasks
+from task_manager.tasks.callback_tasks import (
     FailureCallbackPayload,
     SuccessCallbackPayload,
 )
-
-from task_manager import utils as task_utils
 
 # tasks run synchronously in the test process: no broker, no worker.
 # Must come before importing the app: building the orchestrator purges the
@@ -51,7 +50,7 @@ def _deliver_callback(url: str, payload: SuccessCallbackPayload | FailureCallbac
 @pytest.fixture(scope="session", autouse=True)
 def in_process_task_callbacks() -> Generator[None, None, None]:
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(task_utils, "_post_callback", _deliver_callback)
+        mp.setattr(callback_tasks, "_post_callback", _deliver_callback)
         yield
 
 

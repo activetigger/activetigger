@@ -1,12 +1,30 @@
 import json
 from typing import cast
 
+import redis
 from celery import uuid
 from celery.contrib.abortable import AbortableAsyncResult, AbortableTask
 from celery.result import AsyncResult
+from celery.utils.log import get_task_logger
 from task_manager.active_tigger_task import QueueName
 from task_manager.celery import celery_app
-from task_manager.stop_signal import redis_client, request_stop, stop_requested
+
+from task_manager import config
+
+logger = get_task_logger("stop_signal")
+
+_client: redis.Redis | None = None
+
+
+def redis_client() -> redis.Redis:
+    """
+    Shared client (lazy: created after the prefork fork in a worker child)
+    """
+    global _client
+    if _client is None:
+        _client = redis.Redis.from_url(config.redis_url, socket_timeout=5, socket_connect_timeout=5)
+    return _client
+
 
 # collections of utils methods to interact with celery task_manager
 
@@ -18,18 +36,8 @@ def new_task_id(task) -> tuple[str, bool]:
     return uuid(), isinstance(task, AbortableTask)
 
 
-def was_stopped(task_id: str) -> bool:
-    """
-    A failure triggered by a stop (e.g. an input pickle removed under a task
-    that had just started) is reported as a cancellation, not an error
-    """
-    return stop_requested(task_id)
-
-
 def _stop_celery_task(task_id: str, abortable: bool | None):
-    # the stop key is what is_aborted() reads in the worker; it survives
-    # progress updates, result expiry and API restarts
-    request_stop(task_id)
+
     if abortable:
         task = AbortableAsyncResult(task_id, app=celery_app)
         print(f"Aborting {task_id} {type(task).__name__}")

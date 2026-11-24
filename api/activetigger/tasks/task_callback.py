@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from task_manager.task_names import TaskNames
-from task_manager.utils import (
+from task_manager.tasks.callback_tasks import (
     FailureCallbackPayload,
     SuccessCallbackPayload,
     TaskFailureReportForCallback,
@@ -42,44 +42,39 @@ class TaskCallback(ABC):
     def on_complete(cls, success_payload: SuccessCallbackPayload) -> Any:
         """Callback called by the orchestrator once the task succeeds."""
         task_id = success_payload.task_id
-        project_slug = success_payload.project_slug
         task_results = success_payload.results
 
         print(f"Completion of {cls.task_name} task {task_id} in orchestrator {task_results}")
         orchestrator = get_orchestrator()
-        # the reconciliation must not take a task for lost while its result is stored
-        orchestrator.task_registry.mark_callback_started(task_id)
+
+        reason: TaskEndedReason = "finished"
+        error_message: str | None = None
+        events: EventsModel | None = None
+        # always drop the entry, a raising hook must not leave a stale process
         try:
+            computing_task = orchestrator.task_registry.get_computing_task(task_id)
             project_manager = (
-                cls.get_project_manager(project_slug)
-                if project_slug and TaskRegistry.task_scope(cls.task_name) == "project"
+                cls.get_project_manager(computing_task.project_slug)
+                if computing_task.project_slug
+                and TaskRegistry.task_scope(cls.task_name) == "project"
                 else None
             )
-            reason: TaskEndedReason = "finished"
-            error_message: str | None = None
-            events: EventsModel | None = None
-            # always drop the entry, a raising hook must not leave a stale process
-            try:
-                computing_task = orchestrator.task_registry.get_computing_task(task_id)
-                cls.on_complete_task_specific(
-                    task_id, task_results, project_manager, computing_task
-                )
-                events = (
-                    EventsModel(events=task_results["events"]) if "events" in task_results else None
-                )
+            cls.on_complete_task_specific(task_id, task_results, project_manager, computing_task)
+            events = (
+                EventsModel(events=task_results["events"]) if "events" in task_results else None
+            )
 
-            except Exception as ex:
-                reason = "error"
-                # surface the error to the user instead of a 500 the worker would retry
-                error_message = f"Error in Task callback {cls.task_name} ({task_id}): {ex}"
-                print(error_message)
+        except Exception as ex:
+            reason = "error"
+            # surface the error to the user instead of a 500 the worker would retry
 
-            finally:
-                orchestrator.task_registry.on_task_end(
-                    task_id, project_slug, reason, events, error_message=error_message
-                )
+            error_message = f"Error in Task callback {cls.task_name} ({task_id}): {ex}"
+            print(error_message)
+
         finally:
-            orchestrator.task_registry.mark_callback_finished(task_id)
+            orchestrator.task_registry.on_task_end(
+                task_id, reason, events, error_message=error_message
+            )
 
     @classmethod
     @abstractmethod
@@ -99,16 +94,23 @@ class TaskCallback(ABC):
         task_report = failure_payload.report
         print(f"Error on {cls.task_name} task {task_id} in orchestrator {task_report}")
         orchestrator = get_orchestrator()
-        orchestrator.task_registry.mark_callback_started(task_id)
 
-        project_slug = failure_payload.project_slug
+        # a stopped task is not an error
+        if task_report.exception_type == "TaskRevokedError":
+            orchestrator.task_registry.on_task_end(task_id, reason="stopped")
+            return
+
         try:
-            project_manager = cls.get_project_manager(project_slug)
+            computing_task = orchestrator.task_registry.get_computing_task(task_id)
+            project_manager = (
+                cls.get_project_manager(computing_task.project_slug)
+                if computing_task.project_slug
+                and TaskRegistry.task_scope(cls.task_name) == "project"
+                else None
+            )
             specific_message = cls.on_failure_task_specific(task_id, task_report, project_manager)
 
-            # TODO: we have two different place where we trigger error message for task here and in orchestrator._on_task_ended
-            # TODO: a stopped task is not an error (same as the in-process "cancelled" state)
-            # if "Process interrupted by user" in task_report.exception or was_stopped(task_id):
+            # TODO: how to surface error for orchestrator scope tasks which does not have a project manager ?
             if project_manager:
                 project_manager.status = "error"
                 if specific_message:
@@ -156,8 +158,7 @@ class TaskCallback(ABC):
                         f"Error for process {cls.task_name} : {task_report.exception}"
                     )
         finally:
-            orchestrator.task_registry.mark_callback_finished(task_id)
-            orchestrator.task_registry.on_task_end(task_id, project_slug, reason="error")
+            orchestrator.task_registry.on_task_end(task_id, reason="error")
 
     @classmethod
     @abstractmethod

@@ -3,7 +3,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 from task_manager.celery import celery_app
-from task_manager.utils import (
+from task_manager.tasks.callback_tasks import (
     FailureCallbackPayload,
     SuccessCallbackPayload,
 )

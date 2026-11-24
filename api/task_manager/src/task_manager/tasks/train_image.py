@@ -27,6 +27,7 @@ from activetigger.functions import (
 )
 from activetigger.functions_image import filter_readable_images
 from activetigger.monitoring import TaskTimer
+from celery.exceptions import TaskRevokedError
 from PIL import Image, ImageOps
 from torch.utils.data import Dataset as TorchDataset
 from transformers import (
@@ -101,7 +102,7 @@ class ImageLoggingCallback(TrainerCallback):
         if self.is_aborted():
             self.logger.info("Abort requested, stopping training.")
             control.should_training_stop = True
-            raise Exception("Process interrupted by user")
+            raise TaskRevokedError()
 
 
 def _open_image_rgb(path: str) -> Image.Image | None:
@@ -221,7 +222,7 @@ class TrainImage:
         steps and the GPU slot stays occupied.
         """
         if self.is_aborted():
-            raise Exception("Process interrupted by user")
+            raise TaskRevokedError()
 
     def __check_data(self, col_label: str, col_text: str) -> pd.DataFrame:
         """

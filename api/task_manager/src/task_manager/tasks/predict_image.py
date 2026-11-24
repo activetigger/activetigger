@@ -21,6 +21,7 @@ from activetigger.functions import (
     logits_to_probs,
     release_device_memory,
 )
+from celery.exceptions import TaskRevokedError
 from pandas import DataFrame
 from PIL import Image, ImageOps, UnidentifiedImageError
 from scipy.stats import entropy
@@ -266,7 +267,7 @@ class PredictImage:
 
     def __check_aborted(self):
         if self.is_aborted():
-            raise Exception("Process interrupted by user")
+            raise TaskRevokedError()
 
     def __transform_to_dataframe(
         self, prob_predictions: np.ndarray, id2label: dict[int, str]

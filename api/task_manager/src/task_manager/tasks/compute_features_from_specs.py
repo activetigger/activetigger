@@ -4,6 +4,7 @@ from typing import Any
 
 import pandas as pd
 import regex
+from celery.exceptions import TaskRevokedError
 from pandas import DataFrame, Series
 from pydantic import BaseModel
 
@@ -54,7 +55,7 @@ def compute_features_from_specs(
 
     def check_aborted() -> None:
         if is_aborted is not None and is_aborted():
-            raise Exception("Process interrupted by user")
+            raise TaskRevokedError()
 
     frames: list[DataFrame] = []
 

@@ -1,6 +1,7 @@
 import smtplib
 import ssl
 from email.message import EmailMessage
+from typing import Literal
 
 from activetigger.config import config
 from activetigger.datamodels import MessagesOutModel
@@ -123,7 +124,7 @@ class Messages:
 
     def get_messages(
         self,
-        kind: str,
+        kind: Literal["system", "project", "user"],
         from_user: str | None = None,
         for_user: str | None = None,
         for_project: str | None = None,
@@ -144,7 +145,11 @@ class Messages:
         raise InvalidInputError(f"Unknown message kind: {kind}")
 
     def add_message(
-        self, user_name: str, kind: str, content: str, property: dict | None = None
+        self,
+        user_name: str,
+        kind: Literal["system", "project", "user"],
+        content: str,
+        property: dict | None = None,
     ) -> None:
         """
         Add a message
